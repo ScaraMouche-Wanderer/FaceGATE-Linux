@@ -1,0 +1,23 @@
+# FaceGate-Linux Configuration File
+
+app_monitor:
+  poll_interval_seconds: 1.5
+  on_auth_failure: "kill" # Options: "kill", "keep_stopped"
+  auth_timeout_seconds: 60
+
+# A list of applications to protect.
+# Phase 1 will intercept these binaries when running process-scanning and will override their launcher desktop files.
+protected_apps:
+  - id: "kitty"
+    name: "Kitty Terminal"
+    executable: "kitty"
+    desktop_name: "kitty.desktop"
+  - id: "firefox"
+    name: "Firefox Browser"
+    executable: "firefox"
+    desktop_name: "firefox.desktop"
+
+auth:
+  # Temporary plaintext password for Phase 1.
+  # Phase 3 will introduce secure password storage.
+  placeholder_password: "admin"

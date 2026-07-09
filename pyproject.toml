@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "facegate"
+version = "0.1.0"
+description = "FaceGate-Linux: A lightweight locking skeleton tray daemon and monitor"
+authors = ["Senior Linux Desktop Engineer"]
+readme = "README.md"
+packages = [{include = "*", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.15"
+pyside6 = ">=6.0"
+psutil = ">=5.9"
+pyyaml = ">=6.0"
+
+[tool.poetry.scripts]
+facegate = "core.monitor_main:main"
+
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"
