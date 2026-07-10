@@ -605,7 +605,7 @@ def main():
 
     if args.set_master_password:
         from security.credential_store import set_master_password_cli
-        set_master_password_cli()
+        set__password_cli()
         sys.exit(0)
         
     elif args.settings:

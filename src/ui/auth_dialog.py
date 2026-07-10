@@ -534,6 +534,7 @@ class AuthDialog(QDialog):
         if self.camera_worker:
             try:
                 self.camera_worker.signals.frame_ready.disconnect(self.handle_frame)
+                self.camera_worker.signals.error.disconnect(self.handle_camera_error)
             except Exception:
                 pass
             self.camera_worker.stop()

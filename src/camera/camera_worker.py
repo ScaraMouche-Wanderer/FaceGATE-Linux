@@ -103,9 +103,7 @@ class CameraWorker:
 
     def stop(self):
         self.running = False
-        if self.thread:
-            self.thread.join(timeout=2.0)
-        logging.info("CameraWorker thread stopped.")
+        logging.info("CameraWorker thread stop signaled.")
 
     def _run(self):
         # Open video capture with V4L2, fallback if needed

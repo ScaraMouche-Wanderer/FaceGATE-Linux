@@ -444,6 +444,11 @@ class EnrollmentWizard(QDialog):
     def cleanup_camera(self):
         if self.camera_worker:
             try:
+                self.camera_worker.signals.frame_ready.disconnect(self.on_frame_received)
+                self.camera_worker.signals.error.disconnect(self.on_camera_error)
+            except Exception:
+                pass
+            try:
                 self.camera_worker.stop()
             except Exception:
                 pass
