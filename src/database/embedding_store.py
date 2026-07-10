@@ -19,22 +19,10 @@ def set_cached_key(key: bytes):
 
 def get_cached_key() -> bytes:
     """
-    Retrieves the cached key from memory. If not present in memory,
-    checks if it was passed via the environment variable FACEGATE_DECRYPT_KEY.
+    Retrieves the cached key from memory.
     """
     global _cached_key
-    if _cached_key:
-        return _cached_key
-        
-    env_key = os.environ.get("FACEGATE_DECRYPT_KEY")
-    if env_key:
-        try:
-            _cached_key = bytes.fromhex(env_key)
-            return _cached_key
-        except ValueError:
-            logging.warning("FACEGATE_DECRYPT_KEY environment variable was not a valid hex string.")
-            
-    return None
+    return _cached_key
 
 def read_envelope_file() -> dict:
     """

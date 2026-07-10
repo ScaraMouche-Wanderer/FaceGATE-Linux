@@ -147,15 +147,29 @@ class FaceGateApplication(QObject):
             import subprocess
             import os
             from database.embedding_store import get_cached_key
-            env = os.environ.copy()
             cached_key = get_cached_key()
+            
+            cmd = [facegate_bin, "--recognize", desktop_name]
+            pass_fds = []
+            r, w = -1, -1
             if cached_key:
-                env["FACEGATE_DECRYPT_KEY"] = cached_key.hex()
-            logging.info(f"Spawning recognition subprocess for backstop: {facegate_bin} --recognize {desktop_name}")
+                r, w = os.pipe()
+                os.set_inheritable(r, True)
+                cmd.extend(["--key-fd", str(r)])
+                pass_fds.append(r)
+                
+            logging.info(f"Spawning recognition subprocess for backstop: {facegate_bin} --recognize {desktop_name} (Pipe security enabled)")
             
             # Start the subprocess asynchronously so we can poll the PID and check if it is still alive!
             # If the target process is killed while we wait, we terminate the subprocess.
-            proc = subprocess.Popen([facegate_bin, "--recognize", desktop_name], env=env)
+            proc = subprocess.Popen(cmd, pass_fds=pass_fds)
+            
+            if r != -1:
+                os.close(r)
+                try:
+                    os.write(w, cached_key)
+                finally:
+                    os.close(w)
             
             # Watchdog timer to kill subprocess if target PID exits
             watch_timer = QTimer(self)
@@ -308,8 +322,18 @@ def main():
     parser.add_argument("--enroll", type=str, help="Enroll a face embedding for the specified username")
     parser.add_argument("--recognize", type=str, help="Run the face recognition subprocess dialog for target desktop")
     parser.add_argument("--set-master-password", action="store_true", help="Set or change the master password")
+    parser.add_argument("--key-fd", type=int, help="File descriptor to read the encryption key from")
     
     args, unknown = parser.parse_known_args()
+
+    if args.key_fd is not None:
+        try:
+            key_bytes = os.read(args.key_fd, 32)
+            os.close(args.key_fd)
+            from database.embedding_store import set_cached_key
+            set_cached_key(key_bytes)
+        except Exception as e:
+            logging.error(f"Failed to read key from fd {args.key_fd}: {e}")
 
     if args.set_master_password:
         from security.credential_store import set_master_password_cli

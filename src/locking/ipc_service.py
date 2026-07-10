@@ -26,18 +26,28 @@ class FaceGateService(QObject):
         facegate_bin = get_facegate_executable()
         logging.info(f"Spawning recognition subprocess: {facegate_bin} --recognize {app_identifier}")
         
-        env = os.environ.copy()
         cached_key = get_cached_key()
+        cmd = [facegate_bin, "--recognize", app_identifier]
+        pass_fds = []
+        r, w = -1, -1
         if cached_key:
-            env["FACEGATE_DECRYPT_KEY"] = cached_key.hex()
+            r, w = os.pipe()
+            os.set_inheritable(r, True)
+            cmd.extend(["--key-fd", str(r)])
+            pass_fds.append(r)
             
         try:
-            result = subprocess.run(
-                [facegate_bin, "--recognize", app_identifier],
-                env=env,
-                close_fds=True
-            )
-            exit_code = result.returncode
+            if cached_key:
+                proc = subprocess.Popen(cmd, pass_fds=pass_fds, close_fds=True)
+                os.close(r)
+                try:
+                    os.write(w, cached_key)
+                finally:
+                    os.close(w)
+                exit_code = proc.wait()
+            else:
+                proc = subprocess.Popen(cmd, close_fds=True)
+                exit_code = proc.wait()
             logging.info(f"Recognition subprocess exited with code {exit_code}")
             
             success = False
