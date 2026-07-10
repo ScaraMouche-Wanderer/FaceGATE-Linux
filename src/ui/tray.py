@@ -31,12 +31,10 @@ class FaceGateTray(QSystemTrayIcon):
         super().__init__(parent)
         self.main_app = main_app
         
+        from ui.theme import ACCENT_CYAN, TEXT_SECONDARY
         # Pre-render state icons
-        self.active_icon = create_circle_icon("#6366f1")    # Indigo
-        self.inactive_icon = create_circle_icon("#6b7280")  # Gray
-        
-        self.locked_icon = create_circle_icon("#ef4444")    # Red
-        self.unlocked_icon = create_circle_icon("#10b981")  # Green
+        self.active_icon = create_circle_icon(ACCENT_CYAN)
+        self.inactive_icon = create_circle_icon(TEXT_SECONDARY)
         
         self.setIcon(self.active_icon)
         self.setToolTip("FaceGate-Linux")
@@ -62,31 +60,36 @@ class FaceGateTray(QSystemTrayIcon):
         
         # Status header
         is_active = self.main_app.is_active()
-        status_text = "🟢 Active" if is_active else "⚪ Inactive"
+        status_text = "Active" if is_active else "Inactive"
         if self.main_app.disabled_until:
             remaining = int(self.main_app.get_remaining_disabled_seconds())
             if remaining > 0:
                 mins, secs = divmod(remaining, 60)
-                status_text = f"⚪ Inactive (Paused: {mins:02d}:{secs:02d})"
+                status_text = f"Inactive (Paused: {mins:02d}:{secs:02d})"
                 
         status_action = QAction(status_text, self.menu)
         status_action.setEnabled(False)
+        status_action.setIcon(self.active_icon if is_active else self.inactive_icon)
         self.menu.addAction(status_action)
         self.menu.addSeparator()
         
         # Protected apps rows
         protected_apps = self.main_app.get_protected_apps()
+        from ui.theme import resolve_app_icon, composite_tray_icon
         for app in protected_apps:
             app_id = app.get("id")
             app_name = app.get("name", app_id)
             desktop_name = app.get("desktop_name")
             
             is_authed = self.main_app.is_app_authorized(app_id)
-            lock_char = "🔓" if is_authed else "🔒"
-            display_text = f"{lock_char} {app_name}"
+            display_text = app_name
+            
+            # Resolve real icon and composite overlay badge
+            base_icon = resolve_app_icon(app.get("icon", ""))
+            composited_icon = composite_tray_icon(base_icon, is_locked=not is_authed)
             
             app_action = QAction(display_text, self.menu)
-            app_action.setIcon(self.unlocked_icon if is_authed else self.locked_icon)
+            app_action.setIcon(composited_icon)
             
             # Action triggers
             if not is_authed:

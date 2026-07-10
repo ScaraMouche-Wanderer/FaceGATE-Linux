@@ -5,7 +5,7 @@ import logging
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget,
     QWidget, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QComboBox, QSpinBox, QCheckBox, QMessageBox, QLineEdit
+    QComboBox, QSpinBox, QCheckBox, QMessageBox, QLineEdit, QTreeWidget, QTreeWidgetItem
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
@@ -31,105 +31,32 @@ class SettingsWindow(QDialog):
         self.resize(820, 540)
         self.setMinimumSize(750, 500)
         
-        # Modern Premium QSS Style
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #121214;
-                color: #e2e8f0;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
-            QLabel {
-                color: #e2e8f0;
-            }
-            QListWidget#sidebar {
-                background-color: #1a1a1e;
+        from ui.theme import get_theme_qss, ACCENT_CYAN, BORDER_NEUTRAL
+        # Set base theme styling
+        self.setStyleSheet(get_theme_qss() + f"""
+            QListWidget#sidebar {{
+                background-color: #0b0b0e;
                 border: none;
-                border-right: 1px solid #2d2d34;
+                border-right: 1px solid {BORDER_NEUTRAL};
                 padding-top: 10px;
-                color: #a0aec0;
-                font-size: 14px;
+                color: #94a3b8;
+                font-size: 13px;
                 font-weight: 500;
-            }
-            QListWidget#sidebar::item {
-                padding: 12px 20px;
+            }}
+            QListWidget#sidebar::item {{
+                padding: 10px 16px;
                 border-radius: 6px;
                 margin: 4px 8px;
-            }
-            QListWidget#sidebar::item:hover {
-                background-color: #2d2d34;
+            }}
+            QListWidget#sidebar::item:hover {{
+                background-color: #1a1a20;
                 color: #ffffff;
-            }
-            QListWidget#sidebar::item:selected {
-                background-color: #4f46e5;
+            }}
+            QListWidget#sidebar::item:selected {{
+                background-color: {ACCENT_CYAN};
                 color: #ffffff;
-            }
-            QTableWidget {
-                background-color: #1a1a1e;
-                border: 1px solid #2d2d34;
-                gridline-color: #2d2d34;
-                color: #e2e8f0;
-                border-radius: 8px;
-            }
-            QTableWidget::item {
-                padding: 6px;
-            }
-            QHeaderView::section {
-                background-color: #2d2d34;
-                color: #cbd5e0;
-                padding: 8px;
-                border: none;
-                font-weight: bold;
-            }
-            QComboBox, QSpinBox, QLineEdit {
-                background-color: #1a1a1e;
-                border: 1px solid #3a3a44;
-                border-radius: 6px;
-                padding: 6px 12px;
-                color: #ffffff;
-                font-size: 13px;
-            }
-            QComboBox:focus, QSpinBox:focus, QLineEdit:focus {
-                border: 1px solid #6366f1;
-            }
-            QCheckBox {
-                spacing: 8px;
-                color: #e2e8f0;
-                font-size: 13px;
-            }
-            QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
-                border-radius: 4px;
-                border: 1px solid #3a3a44;
-                background-color: #1a1a1e;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #4f46e5;
-                border: 1px solid #6366f1;
-            }
-            QPushButton {
-                background-color: #4f46e5;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: bold;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #4338ca;
-            }
-            QPushButton:pressed {
-                background-color: #3730a3;
-            }
-            QPushButton#cancelBtn {
-                background-color: #2d2d34;
-                color: #cbd5e0;
-            }
-            QPushButton#cancelBtn:hover {
-                background-color: #3a3a44;
-            }
-            QPushButton#removeBtn {
+            }}
+            QPushButton#removeBtn {{
                 background-color: transparent;
                 color: #ef4444;
                 border: 1px solid #ef4444;
@@ -137,11 +64,11 @@ class SettingsWindow(QDialog):
                 padding: 4px 8px;
                 font-size: 11px;
                 font-weight: bold;
-            }
-            QPushButton#removeBtn:hover {
+            }}
+            QPushButton#removeBtn:hover {{
                 background-color: #ef4444;
                 color: white;
-            }
+            }}
         """)
 
         main_layout = QHBoxLayout(self)
@@ -305,9 +232,11 @@ class SettingsWindow(QDialog):
         header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
         layout.addWidget(header)
 
-        # Master Password Config Card
+        from ui.theme import get_card_qss, SUCCESS_GREEN
+        # Master Password Config Card (Accent Border)
         card1 = QWidget()
-        card1.setStyleSheet("background-color: #1a1a1e; border: 1px solid #2d2d34; border-radius: 8px;")
+        card1.setObjectName("card")
+        card1.setStyleSheet(get_card_qss("accent"))
         c1_layout = QVBoxLayout(card1)
         c1_layout.setContentsMargins(16, 16, 16, 16)
         c1_layout.setSpacing(10)
@@ -326,7 +255,7 @@ class SettingsWindow(QDialog):
         self.change_pwd_btn.clicked.connect(self.trigger_password_change)
         
         self.enroll_btn = QPushButton("Enroll New Face (GUI)...")
-        self.enroll_btn.setStyleSheet("background-color: #10b981;")
+        self.enroll_btn.setStyleSheet(f"background-color: {SUCCESS_GREEN};")
         self.enroll_btn.clicked.connect(self.open_enrollment_wizard)
         
         h_btn_layout = QHBoxLayout()
@@ -337,9 +266,10 @@ class SettingsWindow(QDialog):
         
         layout.addWidget(card1)
 
-        # Primitives Specs Card
+        # Primitives Specs Card (Normal Border)
         card2 = QWidget()
-        card2.setStyleSheet("background-color: #1a1a1e; border: 1px solid #2d2d34; border-radius: 8px;")
+        card2.setObjectName("card")
+        card2.setStyleSheet(get_card_qss("normal"))
         c2_layout = QVBoxLayout(card2)
         c2_layout.setContentsMargins(16, 16, 16, 16)
         c2_layout.setSpacing(12)
@@ -385,69 +315,132 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
-        header = QLabel("Daemon Behavior")
+        header = QLabel("Daemon Behavior & Protection")
         header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
         layout.addWidget(header)
 
-        # Form layout
-        form = QWidget()
-        form.setStyleSheet("background-color: #1a1a1e; border: 1px solid #2d2d34; border-radius: 8px;")
-        form_layout = QVBoxLayout(form)
-        form_layout.setContentsMargins(20, 20, 20, 20)
-        form_layout.setSpacing(16)
+        from ui.theme import get_card_qss, ACCENT_CYAN
+        from PySide6.QtWidgets import QFormLayout
 
-        # 1. Auth failure action policy
-        h_layout1 = QHBoxLayout()
-        lbl1 = QLabel("On Auth Failure Policy:")
-        lbl1.setStyleSheet("font-size: 13px; color: #cbd5e0; border: none;")
+        # --- 1. Startup Group ---
+        startup_card = QWidget()
+        startup_card.setObjectName("card")
+        startup_card.setStyleSheet(get_card_qss("normal"))
+        startup_layout = QVBoxLayout(startup_card)
+        startup_layout.setContentsMargins(16, 16, 16, 16)
+        startup_layout.setSpacing(10)
+
+        startup_lbl = QLabel("Startup Options")
+        startup_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_CYAN};")
+        startup_layout.addWidget(startup_lbl)
+
+        self.autostart_check = QCheckBox("Launch FaceGate background daemon automatically at Login")
+        startup_layout.addWidget(self.autostart_check)
+
+        delay_layout = QHBoxLayout()
+        delay_lbl = QLabel("Daemon startup delay (seconds):")
+        delay_lbl.setStyleSheet("font-size: 13px; color: #cbd5e0;")
+        self.delay_spin = QSpinBox()
+        self.delay_spin.setRange(0, 60)
+        delay_layout.addWidget(delay_lbl)
+        delay_layout.addWidget(self.delay_spin)
+        delay_layout.addStretch()
+        startup_layout.addLayout(delay_layout)
+
+        layout.addWidget(startup_card)
+
+        # --- 2. Locking Policy Group ---
+        policy_card = QWidget()
+        policy_card.setObjectName("card")
+        policy_card.setStyleSheet(get_card_qss("normal"))
+        policy_layout = QVBoxLayout(policy_card)
+        policy_layout.setContentsMargins(16, 16, 16, 16)
+        policy_layout.setSpacing(10)
+
+        policy_lbl = QLabel("Locking & Timeout Policies")
+        policy_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_CYAN};")
+        policy_layout.addWidget(policy_lbl)
+
+        policy_form = QFormLayout()
+        policy_form.setSpacing(10)
+        policy_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+
         self.policy_combo = QComboBox()
         self.policy_combo.addItem("Kill Process (SIGKILL)", "kill")
         self.policy_combo.addItem("Keep Process Stopped (SIGSTOP)", "keep_stopped")
-        h_layout1.addWidget(lbl1)
-        h_layout1.addWidget(self.policy_combo)
-        form_layout.addLayout(h_layout1)
+        policy_form.addRow("On Auth Failure Policy:", self.policy_combo)
 
-        # 2. Recognition Dialog Timeout
-        h_layout2 = QHBoxLayout()
-        lbl2 = QLabel("GUI Timeout (seconds):")
-        lbl2.setStyleSheet("font-size: 13px; color: #cbd5e0; border: none;")
         self.timeout_spin = QSpinBox()
         self.timeout_spin.setRange(5, 300)
         self.timeout_spin.setSingleStep(5)
-        h_layout2.addWidget(lbl2)
-        h_layout2.addWidget(self.timeout_spin)
-        form_layout.addLayout(h_layout2)
+        policy_form.addRow("GUI Timeout (seconds):", self.timeout_spin)
 
-        # 3. Systemd Auto-launch Checkbox
-        h_layout3 = QHBoxLayout()
-        self.autostart_check = QCheckBox("Launch FaceGate background daemon automatically at Login")
-        self.autostart_check.setStyleSheet("border: none;")
-        h_layout3.addWidget(self.autostart_check)
-        form_layout.addLayout(h_layout3)
+        policy_layout.addLayout(policy_form)
+        layout.addWidget(policy_card)
 
-        # 4. Uninstall/Deletion Protection Checkbox
-        h_layout_prot = QHBoxLayout()
+        # --- 3. Protection Group (Danger Red Highlight) ---
+        prot_card = QWidget()
+        prot_card.setObjectName("card")
+        prot_card.setStyleSheet(get_card_qss("danger"))
+        prot_layout = QVBoxLayout(prot_card)
+        prot_layout.setContentsMargins(16, 16, 16, 16)
+        prot_layout.setSpacing(10)
+
+        prot_lbl = QLabel("System Protection & Emergency Settings")
+        prot_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #ef4444;")
+        prot_layout.addWidget(prot_lbl)
+
         self.protection_check = QCheckBox("App Deletion Protection (highly recommended)")
-        self.protection_check.setStyleSheet("border: none;")
         self.protection_check.clicked.connect(self.handle_protection_clicked)
-        h_layout_prot.addWidget(self.protection_check)
-        form_layout.addLayout(h_layout_prot)
+        prot_layout.addWidget(self.protection_check)
 
-        # 5. Emergency Kill Shortcut field
-        h_layout_hk = QHBoxLayout()
-        lbl_hk = QLabel("Emergency Kill Shortcut:")
-        lbl_hk.setStyleSheet("font-size: 13px; color: #cbd5e0; border: none;")
+        hk_layout = QHBoxLayout()
+        hk_lbl = QLabel("Emergency Kill Shortcut:")
+        hk_lbl.setStyleSheet("font-size: 13px; color: #cbd5e0;")
         self.hotkey_input = QLineEdit()
         self.hotkey_input.setPlaceholderText("<Control><Alt>k")
-        h_layout_hk.addWidget(lbl_hk)
-        h_layout_hk.addWidget(self.hotkey_input)
-        form_layout.addLayout(h_layout_hk)
-        
-        lbl_hk_desc = QLabel("GNOME format: e.g. <Control><Alt>k or <Shift><Control><Alt>e")
-        lbl_hk_desc.setStyleSheet("color: #a0aec0; font-size: 11px; border: none; margin-left: 20px; font-style: italic;")
-        form_layout.addWidget(lbl_hk_desc)
+        hk_layout.addWidget(hk_lbl)
+        hk_layout.addWidget(self.hotkey_input)
+        hk_layout.addStretch()
+        prot_layout.addLayout(hk_layout)
 
-        layout.addWidget(form)
+        hk_desc = QLabel("GNOME format: e.g. <Control><Alt>k or <Shift><Control><Alt>e")
+        hk_desc.setStyleSheet("color: #94a3b8; font-size: 11px; font-style: italic;")
+        prot_layout.addWidget(hk_desc)
+
+        layout.addWidget(prot_card)
+
+        # --- 4. Notifications & Idle Group ---
+        notif_card = QWidget()
+        notif_card.setObjectName("card")
+        notif_card.setStyleSheet(get_card_qss("normal"))
+        notif_layout = QVBoxLayout(notif_card)
+        notif_layout.setContentsMargins(16, 16, 16, 16)
+        notif_layout.setSpacing(10)
+
+        notif_lbl = QLabel("Notifications & Idle Locks")
+        notif_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_CYAN};")
+        notif_layout.addWidget(notif_lbl)
+
+        self.notify_check = QCheckBox("Show desktop notifications on application unlock/relock")
+        notif_layout.addWidget(self.notify_check)
+
+        self.idle_check = QCheckBox("Auto re-lock protected applications on system idle (GNOME Stub)")
+        notif_layout.addWidget(self.idle_check)
+
+        idle_time_layout = QHBoxLayout()
+        idle_time_lbl = QLabel("Idle timeout (minutes):")
+        idle_time_lbl.setStyleSheet("font-size: 13px; color: #cbd5e0;")
+        self.idle_spin = QSpinBox()
+        self.idle_spin.setRange(1, 60)
+        self.idle_spin.setEnabled(False)
+        self.idle_check.stateChanged.connect(lambda state: self.idle_spin.setEnabled(state == Qt.CheckState.Checked.value))
+        idle_time_layout.addWidget(idle_time_lbl)
+        idle_time_layout.addWidget(self.idle_spin)
+        idle_time_layout.addStretch()
+        notif_layout.addLayout(idle_time_layout)
+
+        layout.addWidget(notif_card)
         layout.addStretch()
 
         self.tab_stack.addWidget(page)
@@ -466,19 +459,39 @@ class SettingsWindow(QDialog):
         desc.setStyleSheet("color: #a0aec0; font-size: 13px;")
         layout.addWidget(desc)
 
-        # Logs Table
-        self.logs_table = QTableWidget()
-        self.logs_table.setColumnCount(5)
-        self.logs_table.setHorizontalHeaderLabels(["Timestamp", "Application", "Method", "Result", "Confidence"])
-        self.logs_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.logs_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.logs_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.logs_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.logs_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.logs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.logs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Filter Chips/Dropdown Layout
+        filter_layout = QHBoxLayout()
+        filter_lbl = QLabel("Filter status:")
+        filter_lbl.setStyleSheet("color: #94a3b8; font-size: 13px; font-weight: 500;")
+        
+        self.log_filter_combo = QComboBox()
+        self.log_filter_combo.addItems(["All Attempts", "Success", "Failed", "Timeout", "Bypass"])
+        self.log_filter_combo.currentIndexChanged.connect(self.populate_logs_table)
+        
+        filter_layout.addWidget(filter_lbl)
+        filter_layout.addWidget(self.log_filter_combo)
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
 
-        layout.addWidget(self.logs_table)
+        # Tree Widget for logs
+        self.logs_tree = QTreeWidget()
+        self.logs_tree.setColumnCount(5)
+        self.logs_tree.setHeaderLabels(["Time", "Application", "Method", "Result", "Confidence"])
+        self.logs_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.logs_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.logs_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.logs_tree.header().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.logs_tree.header().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.logs_tree.setSelectionMode(QTreeWidget.SelectionMode.NoSelection)
+        layout.addWidget(self.logs_tree)
+
+        # Empty state label
+        self.logs_empty_label = QLabel("No authentication activity yet")
+        self.logs_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logs_empty_label.setStyleSheet("color: #94a3b8; font-size: 14px; font-style: italic; padding: 40px;")
+        layout.addWidget(self.logs_empty_label)
+        self.logs_empty_label.hide()
+
         self.tab_stack.addWidget(page)
 
     def create_about_tab(self):
@@ -491,17 +504,19 @@ class SettingsWindow(QDialog):
         header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
         layout.addWidget(header)
 
+        from ui.theme import get_card_qss
         card = QWidget()
-        card.setStyleSheet("background-color: #1a1a1e; border: 1px solid #2d2d34; border-radius: 8px;")
+        card.setObjectName("card")
+        card.setStyleSheet(get_card_qss("normal"))
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(20, 20, 20, 20)
         card_layout.setSpacing(12)
 
         logo = QLabel("🔒 FaceGate-Linux")
-        logo.setStyleSheet("font-size: 24px; font-weight: bold; color: #6366f1; border: none;")
+        logo.setStyleSheet("font-size: 24px; font-weight: bold; color: #0ea5e9; border: none;")
         card_layout.addWidget(logo)
 
-        version = QLabel("Version: 0.1.0 (Phase 5 Build)")
+        version = QLabel("Version: 0.1.0 (Phase 8 Build)")
         version.setStyleSheet("color: #cbd5e0; font-size: 13px; border: none; font-weight: bold;")
         card_layout.addWidget(version)
 
@@ -546,7 +561,14 @@ class SettingsWindow(QDialog):
         hotkey = self.config.get("behavior.emergency_key", "<Control><Alt>k")
         self.hotkey_input.setText(hotkey)
 
-        # 5. Populate Logs Table
+        # 5. New behavior settings
+        self.notify_check.setChecked(self.config.get("behavior.notify_on_auth", True))
+        self.idle_check.setChecked(self.config.get("behavior.autolock_on_idle", False))
+        self.idle_spin.setValue(self.config.get("behavior.autolock_on_idle_minutes", 10))
+        self.idle_spin.setEnabled(self.idle_check.isChecked())
+        self.delay_spin.setValue(self.config.get("behavior.startup_delay_seconds", 0))
+
+        # 6. Populate Logs Table
         self.populate_logs_table()
 
         # Connect signals for restart indicator after initial populate
@@ -554,21 +576,17 @@ class SettingsWindow(QDialog):
         self.timeout_spin.valueChanged.connect(self.show_restart_banner)
         self.protection_check.stateChanged.connect(self.show_restart_banner)
         self.hotkey_input.textChanged.connect(self.show_restart_banner)
+        self.notify_check.stateChanged.connect(self.show_restart_banner)
+        self.idle_check.stateChanged.connect(self.show_restart_banner)
+        self.idle_spin.valueChanged.connect(self.show_restart_banner)
+        self.delay_spin.valueChanged.connect(self.show_restart_banner)
 
     def populate_apps_table(self):
         self.apps_table.setRowCount(len(self.current_apps))
         for row, app in enumerate(self.current_apps):
-            # Resolve Icon
-            icon_item = QTableWidgetItem(app.get("name", ""))
-            icon_source = app.get("icon", "")
-            icon = None
-            if icon_source:
-                if os.path.isabs(icon_source) and os.path.exists(icon_source):
-                    icon = QIcon(icon_source)
-                else:
-                    icon = QIcon.fromTheme(icon_source)
-            if not icon or icon.isNull():
-                icon = QIcon.fromTheme("application-x-executable")
+            # Resolve QIcon using shared utility
+            from ui.theme import resolve_app_icon
+            icon = resolve_app_icon(app.get("icon", ""))
                 
             icon_item.setIcon(icon)
             
@@ -585,29 +603,103 @@ class SettingsWindow(QDialog):
 
     def populate_logs_table(self):
         from database.audit_log import get_recent_logs
-        from PySide6.QtGui import QColor
-        logs = get_recent_logs(50)
-        self.logs_table.setRowCount(len(logs))
-        for row, log in enumerate(logs):
-            self.logs_table.setItem(row, 0, QTableWidgetItem(str(log["timestamp"])))
-            self.logs_table.setItem(row, 1, QTableWidgetItem(log["app_identifier"]))
-            self.logs_table.setItem(row, 2, QTableWidgetItem(log["method"].upper()))
-            
-            # Color code result with modern dark theme palette
-            result_item = QTableWidgetItem(log["result"].upper())
+        from ui.theme import create_status_icon, SUCCESS_GREEN, DANGER_RED, WARNING_AMBER
+        import datetime
+
+        # Clear tree
+        self.logs_tree.clear()
+
+        # Get filter
+        filter_text = self.log_filter_combo.currentText().lower()
+        
+        logs = get_recent_logs(100)
+        
+        filtered_logs = []
+        for log in logs:
             res_lower = log["result"].lower()
-            if res_lower == "success":
-                result_item.setForeground(QColor("#10b981"))  # Green
-            elif res_lower == "timeout":
-                result_item.setForeground(QColor("#3b82f6"))  # Blue
-            elif res_lower == "bypass":
-                result_item.setForeground(QColor("#fbbf24"))  # Amber/Orange
+            if filter_text == "all attempts":
+                filtered_logs.append(log)
+            elif filter_text == "success" and res_lower == "success":
+                filtered_logs.append(log)
+            elif filter_text == "failed" and res_lower == "fail":
+                filtered_logs.append(log)
+            elif filter_text == "timeout" and res_lower == "timeout":
+                filtered_logs.append(log)
+            elif filter_text == "bypass" and res_lower == "bypass":
+                filtered_logs.append(log)
+
+        filtered_logs = filtered_logs[:50]
+
+        if not filtered_logs:
+            self.logs_tree.hide()
+            self.logs_empty_label.show()
+            return
+        
+        self.logs_empty_label.hide()
+        self.logs_tree.show()
+
+        # Group by day
+        grouped = {}
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        yesterday_str = (datetime.date.today() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+
+        for log in filtered_logs:
+            ts_str = str(log["timestamp"])
+            parts = ts_str.split(" ")
+            date_part = parts[0]
+            time_part = parts[1] if len(parts) > 1 else ""
+
+            if date_part == today_str:
+                group_key = "Today"
+            elif date_part == yesterday_str:
+                group_key = "Yesterday"
             else:
-                result_item.setForeground(QColor("#ef4444"))  # Red
-            self.logs_table.setItem(row, 3, result_item)
+                group_key = date_part
+
+            if group_key not in grouped:
+                grouped[group_key] = []
+            grouped[group_key].append((time_part, log))
+
+        # Populate tree
+        for date_header, items in grouped.items():
+            header_item = QTreeWidgetItem([date_header])
+            header_item.setFirstColumnSpanned(True)
+            header_item.setFlags(header_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             
-            score_str = f"{log['confidence_score']:.4f}" if log["confidence_score"] is not None else "N/A"
-            self.logs_table.setItem(row, 4, QTableWidgetItem(score_str))
+            from PySide6.QtGui import QFont
+            font = header_item.font(0)
+            font.setBold(True)
+            header_item.setFont(0, font)
+            self.logs_tree.addTopLevelItem(header_item)
+
+            for time_part, log in items:
+                app_identifier = log["app_identifier"]
+                method = log["method"].upper()
+                res = log["result"].upper()
+                score_str = f"{log['confidence_score']:.4f}" if log["confidence_score"] is not None else "N/A"
+
+                child_item = QTreeWidgetItem([
+                    time_part,
+                    app_identifier,
+                    method,
+                    res,
+                    score_str
+                ])
+
+                res_lower = log["result"].lower()
+                if res_lower == "success":
+                    icon_color = SUCCESS_GREEN
+                elif res_lower == "timeout":
+                    icon_color = "#3b82f6"
+                elif res_lower == "bypass":
+                    icon_color = WARNING_AMBER
+                else:
+                    icon_color = DANGER_RED
+                child_item.setIcon(3, create_status_icon(icon_color))
+
+                header_item.addChild(child_item)
+
+        self.logs_tree.expandAll()
 
     def make_remove_callback(self, index):
         return lambda: self.remove_app_at(index)
@@ -727,6 +819,10 @@ class SettingsWindow(QDialog):
         self.config.set("behavior.uninstall_protection", self.protection_check.isChecked())
         self.config.set("app_monitor.on_auth_failure", self.policy_combo.itemData(self.policy_combo.currentIndex()))
         self.config.set("app_monitor.auth_timeout_seconds", self.timeout_spin.value())
+        self.config.set("behavior.notify_on_auth", self.notify_check.isChecked())
+        self.config.set("behavior.autolock_on_idle", self.idle_check.isChecked())
+        self.config.set("behavior.autolock_on_idle_minutes", self.idle_spin.value())
+        self.config.set("behavior.startup_delay_seconds", self.delay_spin.value())
         
         # 4. Save and configure Emergency Kill hotkey in GSettings
         new_hotkey = self.hotkey_input.text().strip()

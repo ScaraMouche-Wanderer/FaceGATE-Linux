@@ -31,4 +31,8 @@ security:
 
 behavior:
   launcher_recheck_interval_minutes: 10
+  notify_on_auth: true
+  autolock_on_idle: false
+  autolock_on_idle_minutes: 10
+  startup_delay_seconds: 0
 

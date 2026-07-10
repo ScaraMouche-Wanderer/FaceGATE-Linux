@@ -19,75 +19,8 @@ class AppPickerDialog(QDialog):
         self.setFixedSize(450, 500)
         self.setModal(True)
         
-        # Dark Premium QSS
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e24;
-                border: 1px solid #3a3a4a;
-                border-radius: 12px;
-            }
-            QLabel {
-                color: #e2e8f0;
-                font-family: 'Segoe UI', Arial, sans-serif;
-                font-size: 13px;
-            }
-            QLineEdit {
-                background-color: #2d2d3a;
-                border: 1px solid #4a4a5a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #ffffff;
-                font-size: 14px;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
-            QLineEdit:focus {
-                border: 1px solid #6366f1;
-            }
-            QListWidget {
-                background-color: #18181c;
-                border: 1px solid #2d2d3a;
-                border-radius: 8px;
-                color: #e2e8f0;
-                font-size: 13px;
-                font-family: 'Segoe UI', Arial, sans-serif;
-                padding: 5px;
-            }
-            QListWidget::item {
-                padding: 8px;
-                border-radius: 4px;
-            }
-            QListWidget::item:hover {
-                background-color: #2d2d3a;
-                color: #ffffff;
-            }
-            QListWidget::item:selected {
-                background-color: #4f46e5;
-                color: #ffffff;
-            }
-            QPushButton {
-                background-color: #4f46e5;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: bold;
-                font-size: 13px;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
-            QPushButton:hover {
-                background-color: #4338ca;
-            }
-            QPushButton:pressed {
-                background-color: #3730a3;
-            }
-            QPushButton#cancelBtn {
-                background-color: #374151;
-                color: #d1d5db;
-            }
-            QPushButton#cancelBtn:hover {
-                background-color: #4b5563;
-            }
-        """)
+        from ui.theme import get_theme_qss
+        self.setStyleSheet(get_theme_qss())
 
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 20, 20, 20)
@@ -133,22 +66,12 @@ class AppPickerDialog(QDialog):
 
     def populate_list(self, apps_list):
         self.list_widget.clear()
+        from ui.theme import resolve_app_icon
         for app in apps_list:
             item = QListWidgetItem(app["name"])
             
-            # Resolve QIcon from theme or path
-            icon = None
-            icon_source = app["icon"]
-            if icon_source:
-                if os.path.isabs(icon_source) and os.path.exists(icon_source):
-                    icon = QIcon(icon_source)
-                else:
-                    # QIcon.fromTheme automatically fallback to null if not found
-                    icon = QIcon.fromTheme(icon_source)
-                    
-            if not icon or icon.isNull():
-                # Generic app icon fallback
-                icon = QIcon.fromTheme("application-x-executable")
+            # Resolve QIcon using theme utility
+            icon = resolve_app_icon(app.get("icon", ""))
                 
             item.setIcon(icon)
             item.setData(Qt.ItemDataRole.UserRole, app)

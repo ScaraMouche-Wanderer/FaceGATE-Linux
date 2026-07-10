@@ -111,61 +111,18 @@ class AuthDialog(QDialog):
         else:
             self.setFixedSize(380, 220)
         
-        # Modern Premium Dark Styling
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e24;
-                border: 1px solid #3a3a4a;
-                border-radius: 12px;
-            }
-            QLabel {
-                color: #e2e8f0;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
-            QLineEdit {
-                background-color: #2d2d3a;
-                border: 1px solid #4a4a5a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #ffffff;
-                font-size: 14px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #6366f1;
-            }
-            QPushButton {
-                background-color: #4f46e5;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: bold;
-                font-size: 13px;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
-            QPushButton:hover {
-                background-color: #4338ca;
-            }
-            QPushButton:pressed {
-                background-color: #3730a3;
-            }
-            QPushButton#cancelBtn {
-                background-color: #374151;
-                color: #d1d5db;
-            }
-            QPushButton#cancelBtn:hover {
-                background-color: #4b5563;
-            }
+        from ui.theme import get_theme_qss
+        self.setStyleSheet(get_theme_qss() + """
             QPushButton#pwdFallbackBtn {
                 background-color: transparent;
-                color: #6366f1;
+                color: #0ea5e9;
                 border: none;
                 font-size: 13px;
                 font-weight: bold;
                 text-decoration: underline;
             }
             QPushButton#pwdFallbackBtn:hover {
-                color: #818cf8;
+                color: #38bdf8;
             }
         """)
 
@@ -237,6 +194,28 @@ class AuthDialog(QDialog):
             self.error_label.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: bold;")
             self.error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(self.error_label)
+
+            # Lockout progress bar (initially hidden)
+            from PySide6.QtWidgets import QProgressBar
+            self.lockout_progress = QProgressBar()
+            self.lockout_progress.setTextVisible(False)
+            self.lockout_progress.setFixedHeight(6)
+            
+            from ui.theme import DANGER_RED, BORDER_NEUTRAL
+            self.lockout_progress.setStyleSheet(f"""
+                QProgressBar {{
+                    border: 1px solid {BORDER_NEUTRAL};
+                    border-radius: 3px;
+                    background-color: #1a1a20;
+                    height: 6px;
+                }}
+                QProgressBar::chunk {{
+                    background-color: {DANGER_RED};
+                    border-radius: 2px;
+                }}
+            """)
+            self.lockout_progress.hide()
+            layout.addWidget(self.lockout_progress)
 
             # Buttons
             btn_layout = QHBoxLayout()
@@ -425,15 +404,16 @@ class AuthDialog(QDialog):
             self.password_input.selectAll()
             
             # Temporary error styling
-            self.password_input.setStyleSheet("""
-                QLineEdit {
-                    background-color: #2d2d3a;
-                    border: 1px solid #ef4444;
+            from ui.theme import DANGER_RED
+            self.password_input.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color: #1a1a20;
+                    border: 1px solid {DANGER_RED};
                     border-radius: 6px;
                     padding: 8px 12px;
                     color: #ffffff;
-                    font-size: 14px;
-                }
+                    font-size: 13px;
+                }}
             """)
             
             if AuthDialog.failed_attempts_count >= 3:
@@ -458,19 +438,29 @@ class AuthDialog(QDialog):
         self.unlock_btn.setEnabled(False)
         self.error_label.setText(f"Too many failed attempts. Locked out for {seconds}s.")
         self.lockout_seconds_remaining = seconds
-        self.lockout_timer.start(1000)
+        
+        # Configure progress bar
+        self.lockout_progress.setRange(0, seconds * 10)
+        self.lockout_progress.setValue(seconds * 10)
+        self.lockout_progress.show()
+        
+        self.lockout_timer.start(100) # 100ms smooth updates
 
     def update_lockout_countdown(self):
-        self.lockout_seconds_remaining -= 1
-        if self.lockout_seconds_remaining <= 0:
+        val = self.lockout_progress.value() - 1
+        self.lockout_progress.setValue(val)
+        
+        secs_remaining = int(val / 10)
+        
+        if val <= 0:
             self.lockout_timer.stop()
             self.password_input.setEnabled(True)
             self.unlock_btn.setEnabled(True)
             self.error_label.setText("")
+            self.lockout_progress.hide()
             self.password_input.setStyleSheet("") # Restore default stylesheet
-            self.password_input.setFocus()
         else:
-            self.error_label.setText(f"Too many failed attempts. Locked out for {self.lockout_seconds_remaining}s.")
+            self.error_label.setText(f"Too many failed attempts. Locked out for {secs_remaining + 1}s.")
 
     def reset_input_style(self):
         if self.mode != "face":

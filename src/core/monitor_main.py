@@ -88,15 +88,25 @@ class FaceGateApplication(QObject):
 
     def authorize_app(self, app_identifier: str):
         app_id = self.get_app_id_from_desktop(app_identifier)
+        was_authorized = self.authorized_apps.get(app_id, False)
         self.authorized_apps[app_id] = True
         self.auth_timestamps[app_id] = time.time()
         logging.info(f"State updated: Application '{app_id}' is UNLOCKED.")
+        from PySide6.QtWidgets import QSystemTrayIcon
+        if not was_authorized and self.config.get("behavior.notify_on_auth", True) and self.tray:
+            app_name = self.get_app_name(app_id)
+            self.tray.showMessage("Application Unlocked", f"Access to '{app_name}' has been authorized.", QSystemTrayIcon.MessageIcon.Information, 3000)
 
     def relock_app(self, app_id: str):
+        was_authorized = self.authorized_apps.get(app_id, False)
         self.authorized_apps[app_id] = False
         logging.info(f"State updated: Application '{app_id}' is LOCKED.")
         # Force monitor to recheck active PIDs for this app if it is running
         self.monitor.clear_seen_pids()
+        from PySide6.QtWidgets import QSystemTrayIcon
+        if was_authorized and self.config.get("behavior.notify_on_auth", True) and self.tray:
+            app_name = self.get_app_name(app_id)
+            self.tray.showMessage("Application Locked", f"Access to '{app_name}' has been re-locked.", QSystemTrayIcon.MessageIcon.Information, 3000)
 
     @Slot()
     def relock_all(self):
@@ -592,6 +602,13 @@ def main():
         
     elif args.monitor:
         # Daemon monitor mode
+        config = get_config()
+        startup_delay = int(config.get("behavior.startup_delay_seconds", 0))
+        if startup_delay > 0:
+            logging.info(f"Daemon: Delaying startup by {startup_delay} seconds...")
+            import time
+            time.sleep(startup_delay)
+            
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
         
@@ -599,7 +616,6 @@ def main():
         from database.embedding_store import get_or_prompt_key
         get_or_prompt_key()
         
-        config = get_config()
         fg_app = FaceGateApplication(config)
 
         # Setup graceful signal handlers

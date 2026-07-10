@@ -37,62 +37,9 @@ class EnrollmentWizard(QDialog):
         self.setFixedSize(500, 520)
         self.setModal(True)
 
-        # Custom Premium QSS style sheets matching FaceGate theme
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #121214;
-                color: #e2e8f0;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
-            QLabel {
-                color: #e2e8f0;
-            }
-            QLineEdit {
-                background-color: #1a1a1e;
-                border: 1px solid #3a3a44;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #ffffff;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #6366f1;
-            }
-            QProgressBar {
-                border: 1px solid #2d2d34;
-                border-radius: 6px;
-                background-color: #1a1a1e;
-                text-align: center;
-                color: #ffffff;
-                font-weight: bold;
-            }
-            QProgressBar::chunk {
-                background-color: #4f46e5;
-                border-radius: 5px;
-            }
-            QPushButton {
-                background-color: #4f46e5;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-weight: bold;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #4338ca;
-            }
-            QPushButton:pressed {
-                background-color: #3730a3;
-            }
-            QPushButton#cancelBtn {
-                background-color: #2d2d34;
-                color: #cbd5e0;
-            }
-            QPushButton#cancelBtn:hover {
-                background-color: #3a3a44;
-            }
-        """)
+        # Apply global theme stylesheet
+        from ui.theme import get_theme_qss
+        self.setStyleSheet(get_theme_qss())
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
