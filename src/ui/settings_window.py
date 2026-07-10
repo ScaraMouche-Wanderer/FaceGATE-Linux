@@ -227,6 +227,43 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(right_container)
         self.sidebar.setCurrentRow(0)
 
+    def wrap_in_scroll_area(self, widget):
+        from PySide6.QtWidgets import QScrollArea, QFrame
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: transparent;
+                width: 8px;
+                margin: 0px 4px 0px 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #c7d2fe;
+                border-radius: 4px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #818cf8;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                border: none;
+                background: none;
+            }
+            QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
+                border: none;
+                background: none;
+            }
+        """)
+        scroll.setWidget(widget)
+        return scroll
+
     def switch_tab(self, index):
         self.tab_stack.setCurrentIndex(index)
         if index == 3:
@@ -383,7 +420,7 @@ class SettingsWindow(QDialog):
         layout.addWidget(card2)
         layout.addStretch()
 
-        self.tab_stack.addWidget(page)
+        self.tab_stack.addWidget(self.wrap_in_scroll_area(page))
 
     def open_enrollment_wizard(self):
         from ui.enrollment_wizard import EnrollmentWizard
@@ -550,7 +587,7 @@ class SettingsWindow(QDialog):
         layout.addWidget(notif_card)
         layout.addStretch()
 
-        self.tab_stack.addWidget(page)
+        self.tab_stack.addWidget(self.wrap_in_scroll_area(page))
 
     def create_logs_tab(self):
         page = QWidget()
