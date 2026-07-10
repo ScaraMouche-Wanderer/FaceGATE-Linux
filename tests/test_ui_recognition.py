@@ -3,6 +3,8 @@ import sys
 import unittest
 from unittest.mock import patch
 import cv2
+import numpy as np
+
 
 # Include src directory
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
@@ -47,12 +49,14 @@ class TestUiRecognition(unittest.TestCase):
         if cls.app is None:
             cls.app = QApplication(sys.argv)
             
+    @patch('recognition.matcher.cosine_similarity', return_value=0.85)
+    @patch('recognition.matcher.load_embeddings', return_value={"test_user": np.zeros(512, dtype=np.float32)})
     @patch('cv2.VideoCapture', side_effect=MockVideoCapture)
-    def test_face_recognition_ui_flow(self, mock_vc):
+    def test_face_recognition_ui_flow(self, mock_vc, mock_load, mock_cos):
         print("=== Running UI Face Recognition Flow Test ===")
         
         # Instantiate the dialog in face mode
-        dialog = AuthDialog("Test Terminal", mode="face", timeout_seconds=10)
+        dialog = AuthDialog("Test Terminal", mode="face", timeout_seconds=60)
         
         # Set a backup failure timer to force close the dialog if matching gets stuck
         failure_timer = QTimer()

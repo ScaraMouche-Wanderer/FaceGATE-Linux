@@ -1,5 +1,4 @@
 import os
-import sys
 import shutil
 import subprocess
 import logging
@@ -9,7 +8,7 @@ from PySide6.QtWidgets import (
     QComboBox, QSpinBox, QCheckBox, QMessageBox, QLineEdit
 )
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon, QFont
+from PySide6.QtGui import QIcon
 from utils.config_loader import get_config
 from utils.systemd_manager import is_enabled, enable, disable
 from ui.app_picker_dialog import AppPickerDialog
@@ -270,7 +269,17 @@ class SettingsWindow(QDialog):
 
         self.change_pwd_btn = QPushButton("Change Master Password...")
         self.change_pwd_btn.clicked.connect(self.trigger_password_change)
-        c1_layout.addWidget(self.change_pwd_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        
+        self.enroll_btn = QPushButton("Enroll New Face (GUI)...")
+        self.enroll_btn.setStyleSheet("background-color: #10b981;")
+        self.enroll_btn.clicked.connect(self.open_enrollment_wizard)
+        
+        h_btn_layout = QHBoxLayout()
+        h_btn_layout.addWidget(self.change_pwd_btn)
+        h_btn_layout.addWidget(self.enroll_btn)
+        h_btn_layout.addStretch()
+        c1_layout.addLayout(h_btn_layout)
+        
         layout.addWidget(card1)
 
         # Primitives Specs Card
@@ -309,6 +318,11 @@ class SettingsWindow(QDialog):
         layout.addStretch()
 
         self.tab_stack.addWidget(page)
+
+    def open_enrollment_wizard(self):
+        from ui.enrollment_wizard import EnrollmentWizard
+        dialog = EnrollmentWizard(self)
+        dialog.exec()
 
     def create_behavior_tab(self):
         page = QWidget()

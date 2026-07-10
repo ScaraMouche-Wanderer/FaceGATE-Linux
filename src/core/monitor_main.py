@@ -5,9 +5,9 @@ import logging
 import signal
 import time
 import subprocess
-from typing import Dict
 
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon
+
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QDialog
 from PySide6.QtCore import QObject, Slot, QTimer, QMetaObject, Qt
 
 from utils.logging_setup import setup_logging
@@ -140,23 +140,48 @@ class FaceGateApplication(QObject):
                 logging.warning(f"Process PID {pid} died before auth was shown.")
                 return
 
-            # Resolve facegate path dynamically
+            from database.embedding_store import get_cached_key
+            cached_key = get_cached_key()
+            
+            if not cached_key:
+                logging.info("Daemon is locked (backstop). Displaying GUI password prompt directly in daemon.")
+                app_name = self.get_app_name(desktop_name)
+                dialog = AuthDialog(app_name, mode="password")
+                res = dialog.exec()
+                success = (res == AuthDialog.DialogCode.Accepted)
+                
+                from database.audit_log import log_auth_attempt
+                log_auth_attempt(desktop_name, "password", "success" if success else "fail", None)
+                
+                if success:
+                    self.authorize_app(desktop_name)
+                    try:
+                        p = psutil.Process(pid)
+                        p.resume()
+                        logging.info(f"AppMonitor: Resumed process '{desktop_name}' (PID: {pid}) after successful authentication.")
+                    except Exception as ex:
+                        logging.error(f"Failed to resume process: {ex}")
+                else:
+                    try:
+                        p = psutil.Process(pid)
+                        p.kill()
+                        logging.info(f"AppMonitor: Killed process '{desktop_name}' (PID: {pid}) due to authentication failure.")
+                    except Exception as ex:
+                        logging.error(f"Failed to kill process: {ex}")
+                return
+
             from locking.launcher_sub import get_facegate_executable
             facegate_bin = get_facegate_executable()
             
             import subprocess
             import os
-            from database.embedding_store import get_cached_key
-            cached_key = get_cached_key()
             
             cmd = [facegate_bin, "--recognize", desktop_name]
             pass_fds = []
-            r, w = -1, -1
-            if cached_key:
-                r, w = os.pipe()
-                os.set_inheritable(r, True)
-                cmd.extend(["--key-fd", str(r)])
-                pass_fds.append(r)
+            r, w = os.pipe()
+            os.set_inheritable(r, True)
+            cmd.extend(["--key-fd", str(r)])
+            pass_fds.append(r)
                 
             logging.info(f"Spawning recognition subprocess for backstop: {facegate_bin} --recognize {desktop_name} (Pipe security enabled)")
             
@@ -164,12 +189,11 @@ class FaceGateApplication(QObject):
             # If the target process is killed while we wait, we terminate the subprocess.
             proc = subprocess.Popen(cmd, pass_fds=pass_fds, stdout=subprocess.PIPE, text=True)
             
-            if r != -1:
-                os.close(r)
-                try:
-                    os.write(w, cached_key)
-                finally:
-                    os.close(w)
+            os.close(r)
+            try:
+                os.write(w, cached_key)
+            finally:
+                os.close(w)
             
             # Watchdog timer to kill subprocess if target PID exits
             watch_timer = QTimer(self)
@@ -389,6 +413,7 @@ def main():
     parser.add_argument("--set-master-password", action="store_true", help="Set or change the master password")
     parser.add_argument("--key-fd", type=int, help="File descriptor to read the encryption key from")
     parser.add_argument("--emergency-kill", action="store_true", help="Send emergency kill signal to running daemon via D-Bus")
+    parser.add_argument("--settings", action="store_true", help="Launch the Settings GUI window")
     
     args, unknown = parser.parse_known_args()
 
@@ -420,6 +445,13 @@ def main():
     if args.set_master_password:
         from security.credential_store import set_master_password_cli
         set_master_password_cli()
+        sys.exit(0)
+        
+    elif args.settings:
+        from ui.settings_window import SettingsWindow
+        app = QApplication(sys.argv)
+        dialog = SettingsWindow()
+        dialog.exec()
         sys.exit(0)
         
     elif args.enroll:
@@ -484,6 +516,10 @@ def main():
         # Daemon monitor mode
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
+        
+        # Auto-unlock daemon on startup
+        from database.embedding_store import get_or_prompt_key
+        get_or_prompt_key()
         
         config = get_config()
         fg_app = FaceGateApplication(config)

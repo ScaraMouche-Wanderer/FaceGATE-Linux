@@ -8,12 +8,7 @@ from recognition.detector import Detector
 from database.embedding_store import save_embedding
 from camera.camera_worker import detect_camera_device
 
-def is_blurry(gray_frame: np.ndarray, threshold: float = 50.0) -> bool:
-    """
-    Check if a grayscale frame is blurry using the variance of Laplacian.
-    """
-    variance = cv2.Laplacian(gray_frame, cv2.CV_64F).var()
-    return variance < threshold
+from recognition.blur_checker import is_blurry
 
 def enroll_user(name: str):
     """
@@ -23,7 +18,10 @@ def enroll_user(name: str):
     """
     print(f"\n=== Enrolling user '{name}' ===")
     print("Loading face detector model...")
-    detector = Detector()
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    models_dir = os.path.abspath(os.path.join(current_dir, "..", "..", "models"))
+    detector = Detector(root_dir=models_dir)
     
     device_index = detect_camera_device()
     print(f"Opening camera device at index {device_index}...")

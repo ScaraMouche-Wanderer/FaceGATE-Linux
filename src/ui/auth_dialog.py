@@ -2,9 +2,63 @@ import logging
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QApplication
 )
-from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtCore import Qt, QTimer, Slot, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
 from security.credential_store import verify_password
+
+class DetectorLoader(QThread):
+    loaded = Signal(object)
+    error = Signal(str)
+    
+    def run(self):
+        try:
+            import os
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            models_dir = os.path.abspath(os.path.join(current_dir, "..", "..", "models"))
+            
+            from recognition.detector import Detector
+            detector = Detector(root_dir=models_dir)
+            self.loaded.emit(detector)
+        except Exception as e:
+            self.error.emit(str(e))
+
+import threading
+import time
+
+class FaceDetectorWorker(QThread):
+    detected = Signal(list, object)  # Emits (faces, frame)
+    
+    def __init__(self, detector):
+        super().__init__()
+        self.detector = detector
+        self.frame_to_process = None
+        self.lock = threading.Lock()
+        self.running = True
+        
+    def submit_frame(self, frame):
+        with self.lock:
+            self.frame_to_process = frame
+            
+    def run(self):
+        while self.running:
+            frame = None
+            with self.lock:
+                if self.frame_to_process is not None:
+                    frame = self.frame_to_process
+                    self.frame_to_process = None
+                    
+            if frame is not None:
+                try:
+                    faces = self.detector.detect_faces(frame)
+                    self.detected.emit(faces, frame)
+                except Exception as e:
+                    logging.error(f"Error in background face detection: {e}")
+            else:
+                time.sleep(0.01)
+                
+    def stop(self):
+        self.running = False
+        self.wait()
 
 def convert_cv_to_pixmap(frame: "np.ndarray", width: int = 360, height: int = 270) -> QPixmap:
     """
@@ -16,7 +70,7 @@ def convert_cv_to_pixmap(frame: "np.ndarray", width: int = 360, height: int = 27
     h, w, ch = rgb_image.shape
     bytes_per_line = ch * w
     q_img = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-    return QPixmap.fromImage(q_img)
+    return QPixmap.fromImage(q_img.copy())
 
 class AuthDialog(QDialog):
     def __init__(self, app_name: str, mode: str = "password", timeout_seconds: int = 0, parent=None):
@@ -202,41 +256,60 @@ class AuthDialog(QDialog):
             self.timeout_timer = QTimer(self)
             self.timeout_timer.setSingleShot(True)
             self.timeout_timer.timeout.connect(self.handle_timeout)
-            self.timeout_timer.start(self.timeout_seconds * 1000)
 
     def start_camera_and_models(self):
+        self.status_label.setText("Initializing face recognition detector...")
+        self.loader = DetectorLoader(self)
+        self.loader.loaded.connect(self.on_detector_loaded)
+        self.loader.error.connect(self.on_detector_load_error)
+        self.loader.start()
+
+    def on_detector_loaded(self, detector):
         try:
-            self.status_label.setText("Initializing face recognition detector...")
-            QApplication.processEvents()
-
-            # Dynamic import of heavy libraries
-            from recognition.detector import Detector
-            from camera.camera_worker import CameraWorker
-
-            self.detector = Detector()
-            self.camera_worker = CameraWorker()
+            self.detector = detector
             
+            # Start background face detection worker
+            self.detector_worker = FaceDetectorWorker(self.detector)
+            self.detector_worker.detected.connect(self.handle_detection_result)
+            self.detector_worker.start()
+            
+            from camera.camera_worker import CameraWorker
+            self.camera_worker = CameraWorker()
             self.camera_worker.signals.frame_ready.connect(self.handle_frame)
             self.camera_worker.signals.error.connect(self.handle_camera_error)
-            
             self.status_label.setText("Accessing video capture device...")
+            
+            # Start timeout timer now that models are loaded and camera starts
+            if hasattr(self, "timeout_timer") and self.timeout_seconds > 0:
+                self.timeout_timer.start(self.timeout_seconds * 1000)
+                
             self.camera_worker.start()
         except Exception as e:
-            logging.error(f"Error starting face recognition: {e}")
+            logging.error(f"Error starting camera: {e}")
             self.handle_camera_error(str(e))
+
+    def on_detector_load_error(self, err_msg):
+        logging.error(f"Error starting face recognition: {err_msg}")
+        self.handle_camera_error(err_msg)
 
     @Slot(object)
     def handle_frame(self, frame: "np.ndarray"):
-        import cv2
         if self.detector is None:
             return
             
         self.status_label.setText("Position your face in the camera view...")
         
-        # 1. Detect faces in BGR frame
-        faces = self.detector.detect_faces(frame)
+        # 1. Update camera preview in GUI immediately (buttery-smooth 30 FPS)
+        pixmap = convert_cv_to_pixmap(frame, 360, 270)
+        self.camera_label.setPixmap(pixmap)
         
-        # 2. Draw overlays on BGR copy
+        # 2. Submit frame to background face detection thread
+        if hasattr(self, "detector_worker") and self.detector_worker:
+            self.detector_worker.submit_frame(frame)
+
+    @Slot(list, object)
+    def handle_detection_result(self, faces, frame):
+        import cv2
         display_frame = frame.copy()
         matched_user = None
         matched_score = 0.0
@@ -263,14 +336,13 @@ class AuthDialog(QDialog):
             cv2.rectangle(display_frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
             cv2.putText(display_frame, text, (bbox[0], bbox[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-        # 3. Update preview QLabel
+        # Update preview with overlays
         pixmap = convert_cv_to_pixmap(display_frame, 360, 270)
         self.camera_label.setPixmap(pixmap)
 
-        # 4. Handle matching threshold
+        # Handle matching threshold
         if matched_user:
             self.success_count += 1
-            # Require 3 consecutive frames of matching to authenticate securely
             if self.success_count >= 3:
                 logging.info(f"Subprocess Auth: Matched enrolled user '{matched_user}' (Similarity: {matched_score:.4f})")
                 self.authenticated = True
@@ -321,8 +393,16 @@ class AuthDialog(QDialog):
 
     def cleanup_camera(self):
         if self.camera_worker:
+            try:
+                self.camera_worker.signals.frame_ready.disconnect(self.handle_frame)
+            except Exception:
+                pass
             self.camera_worker.stop()
             self.camera_worker = None
+            
+        if hasattr(self, "detector_worker") and self.detector_worker:
+            self.detector_worker.stop()
+            self.detector_worker = None
 
     def reject(self):
         self.cleanup_camera()

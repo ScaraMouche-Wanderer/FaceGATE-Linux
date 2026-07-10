@@ -23,29 +23,39 @@ class FaceGateService(QObject):
         from database.embedding_store import get_cached_key
         from locking.launcher_sub import get_facegate_executable
         
+        cached_key = get_cached_key()
+        if not cached_key:
+            logging.info("Daemon is locked. Displaying GUI password prompt directly in daemon.")
+            app_name = self.main_app.get_app_name(app_identifier) if self.main_app else app_identifier
+            dialog = AuthDialog(app_name, mode="password")
+            res = dialog.exec()
+            success = (res == AuthDialog.DialogCode.Accepted)
+            
+            from database.audit_log import log_auth_attempt
+            log_auth_attempt(app_identifier, "password", "success" if success else "fail", None)
+            
+            if success and self.main_app:
+                self.main_app.authorize_app(app_identifier)
+            return success
+
+        # Daemon is unlocked. Run face recognition!
         facegate_bin = get_facegate_executable()
         logging.info(f"Spawning recognition subprocess: {facegate_bin} --recognize {app_identifier}")
         
-        cached_key = get_cached_key()
         cmd = [facegate_bin, "--recognize", app_identifier]
         pass_fds = []
-        r, w = -1, -1
-        if cached_key:
-            r, w = os.pipe()
-            os.set_inheritable(r, True)
-            cmd.extend(["--key-fd", str(r)])
-            pass_fds.append(r)
+        r, w = os.pipe()
+        os.set_inheritable(r, True)
+        cmd.extend(["--key-fd", str(r)])
+        pass_fds.append(r)
             
         try:
-            if cached_key:
-                proc = subprocess.Popen(cmd, pass_fds=pass_fds, stdout=subprocess.PIPE, text=True, close_fds=True)
-                os.close(r)
-                try:
-                    os.write(w, cached_key)
-                finally:
-                    os.close(w)
-            else:
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, close_fds=True)
+            proc = subprocess.Popen(cmd, pass_fds=pass_fds, stdout=subprocess.PIPE, text=True, close_fds=True)
+            os.close(r)
+            try:
+                os.write(w, cached_key)
+            finally:
+                os.close(w)
 
             # Wait for subprocess to finish while keeping event loop alive
             from PySide6.QtWidgets import QApplication
