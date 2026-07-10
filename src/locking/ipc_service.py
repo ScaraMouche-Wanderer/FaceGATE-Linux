@@ -32,7 +32,7 @@ class FaceGateService(QObject):
             success = (res == AuthDialog.DialogCode.Accepted)
             
             from database.audit_log import log_auth_attempt
-            log_auth_attempt(app_identifier, "password", "success" if success else "fail", None)
+            log_auth_attempt(app_identifier, "password", "success" if success else "fail", None, getattr(dialog, "matched_user", None) if success else None)
             
             if success and self.main_app:
                 self.main_app.authorize_app(app_identifier)
@@ -68,8 +68,9 @@ class FaceGateService(QObject):
             exit_code = proc.returncode
             logging.info(f"Recognition subprocess exited with code {exit_code}")
             
-            # Parse similarity score if present
+            # Parse similarity score and user if present
             score = None
+            matched_user = None
             if stdout_data:
                 for line in stdout_data.splitlines():
                     if line.startswith("FACEGATE_SCORE:"):
@@ -77,15 +78,19 @@ class FaceGateService(QObject):
                             score = float(line.split(":")[1])
                         except ValueError:
                             pass
+                    elif line.startswith("FACEGATE_USER:"):
+                        matched_user = line.split(":")[1]
 
             success = False
             method = "face"
             result = "fail"
             confidence = score
+            username = None
 
             if exit_code == 0:
                 success = True
                 result = "success"
+                username = matched_user
             elif exit_code == 2:
                 result = "timeout"
             elif exit_code in (3, 4, 10, 11, 12):
@@ -98,12 +103,13 @@ class FaceGateService(QObject):
                 method = "password"
                 result = "success" if success else "fail"
                 confidence = None
+                username = getattr(dialog, "matched_user", None) if success else None
             else:
                 result = "fail"
 
             # Write to SQLite audit log
             from database.audit_log import log_auth_attempt
-            log_auth_attempt(app_identifier, method, result, confidence)
+            log_auth_attempt(app_identifier, method, result, confidence, username)
                 
             if success and self.main_app:
                 self.main_app.authorize_app(app_identifier)
@@ -118,7 +124,7 @@ class FaceGateService(QObject):
             
             # Log fallback outcome
             from database.audit_log import log_auth_attempt
-            log_auth_attempt(app_identifier, "password", "success" if success else "fail", None)
+            log_auth_attempt(app_identifier, "password", "success" if success else "fail", None, getattr(dialog, "matched_user", None) if success else None)
             
             if success and self.main_app:
                 self.main_app.authorize_app(app_identifier)

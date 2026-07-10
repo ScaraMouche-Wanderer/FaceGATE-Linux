@@ -151,7 +151,7 @@ class FaceGateApplication(QObject):
         success = (result == QDialog.DialogCode.Accepted)
         
         from database.audit_log import log_auth_attempt
-        log_auth_attempt(reason, "face" if not dialog.fallback_to_password else "password", "success" if success else "fail", getattr(dialog, "final_score", None))
+        log_auth_attempt(reason, "face" if not dialog.fallback_to_password else "password", "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
         
         return success
 
@@ -205,7 +205,7 @@ class FaceGateApplication(QObject):
                 success = (res == AuthDialog.DialogCode.Accepted)
                 
                 from database.audit_log import log_auth_attempt
-                log_auth_attempt(desktop_name, "password", "success" if success else "fail", None)
+                log_auth_attempt(desktop_name, "password", "success" if success else "fail", None, getattr(dialog, "matched_user", None) if success else None)
                 
                 if success:
                     self.authorize_app(desktop_name)
@@ -276,8 +276,9 @@ class FaceGateApplication(QObject):
             
             logging.info(f"Backstop recognition subprocess exited with code {exit_code}")
             
-            # Parse similarity score if present
+            # Parse similarity score and user if present
             score = None
+            matched_user = None
             if stdout_data:
                 for line in stdout_data.splitlines():
                     if line.startswith("FACEGATE_SCORE:"):
@@ -285,15 +286,19 @@ class FaceGateApplication(QObject):
                             score = float(line.split(":")[1])
                         except ValueError:
                             pass
+                    elif line.startswith("FACEGATE_USER:"):
+                        matched_user = line.split(":")[1]
 
             success = False
             method = "face"
             result = "fail"
             confidence = score
+            username = None
 
             if exit_code == 0:
                 success = True
                 result = "success"
+                username = matched_user
             elif exit_code == 2:
                 result = "timeout"
             elif exit_code in (3, 4):
@@ -322,12 +327,13 @@ class FaceGateApplication(QObject):
                     method = "password"
                     result = "success" if success else "fail"
                     confidence = None
+                    username = getattr(dialog, "matched_user", None) if success else None
             else:
                 result = "fail"
 
             # Write to SQLite audit log
             from database.audit_log import log_auth_attempt
-            log_auth_attempt(desktop_name, method, result, confidence)
+            log_auth_attempt(desktop_name, method, result, confidence, username)
             
             if success:
                 # Resume process
@@ -524,7 +530,7 @@ def main():
             dialog = AuthDialog("Settings Access", mode="face", timeout_seconds=timeout_sec)
             result = dialog.exec()
             success = (result == QDialog.DialogCode.Accepted)
-            log_auth_attempt("Settings Access", "face" if not dialog.fallback_to_password else "password", "success" if success else "fail", getattr(dialog, "final_score", None))
+            log_auth_attempt("Settings Access", "face" if not dialog.fallback_to_password else "password", "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
             if not success:
                 logging.info("Settings Access: Verification failed. Exiting.")
                 sys.exit(1)
@@ -564,7 +570,9 @@ def main():
         if result == QDialog.DialogCode.Accepted:
             if hasattr(dialog, "final_score") and dialog.final_score is not None:
                 print(f"FACEGATE_SCORE:{dialog.final_score}")
-                sys.stdout.flush()
+            if hasattr(dialog, "matched_user") and dialog.matched_user is not None:
+                print(f"FACEGATE_USER:{dialog.matched_user}")
+            sys.stdout.flush()
             sys.exit(0)
         else:
             if dialog.fallback_to_password:

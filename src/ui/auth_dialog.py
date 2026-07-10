@@ -111,19 +111,19 @@ class AuthDialog(QDialog):
         else:
             self.setFixedSize(380, 220)
         
-        from ui.theme import get_theme_qss
-        self.setStyleSheet(get_theme_qss() + """
-            QPushButton#pwdFallbackBtn {
+        from ui.theme import get_theme_qss, ACCENT_PURPLE, TEXT_SECONDARY
+        self.setStyleSheet(get_theme_qss() + f"""
+            QPushButton#pwdFallbackBtn {{
                 background-color: transparent;
-                color: #0ea5e9;
+                color: {ACCENT_PURPLE};
                 border: none;
                 font-size: 13px;
                 font-weight: bold;
                 text-decoration: underline;
-            }
-            QPushButton#pwdFallbackBtn:hover {
-                color: #38bdf8;
-            }
+            }}
+            QPushButton#pwdFallbackBtn:hover {{
+                color: #6d28d9;
+            }}
         """)
 
         layout = QVBoxLayout()
@@ -138,7 +138,7 @@ class AuthDialog(QDialog):
             layout.addWidget(header_label)
 
             self.status_label = QLabel("Loading face recognition models...")
-            self.status_label.setStyleSheet("font-size: 13px; color: #a0aec0;")
+            self.status_label.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
             self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(self.status_label)
 
@@ -178,7 +178,7 @@ class AuthDialog(QDialog):
             layout.addWidget(header_label)
 
             sub_label = QLabel("Enter password to unlock application:")
-            sub_label.setStyleSheet("font-size: 13px; color: #a0aec0;")
+            sub_label.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
             sub_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(sub_label)
 
@@ -345,6 +345,7 @@ class AuthDialog(QDialog):
                 logging.info(f"Subprocess Auth: Matched enrolled user '{matched_user}' (Similarity: {matched_score:.4f})")
                 self.authenticated = True
                 self.final_score = matched_score
+                self.matched_user = matched_user
                 self.accept()
         else:
             self.success_count = 0
@@ -364,21 +365,23 @@ class AuthDialog(QDialog):
                 margin = float(config.get("recognition.ambiguity_margin", 0.03))
                 
                 if max_score >= (threshold - margin):
+                    from ui.theme import WARNING_AMBER
                     self.status_label.setText("Almost — try better lighting or move closer")
-                    self.status_label.setStyleSheet("color: #fbbf24; font-size: 13px; font-weight: bold;")
+                    self.status_label.setStyleSheet(f"color: {WARNING_AMBER}; font-size: 13px; font-weight: bold;")
                     self.close_match_attempts += 1
                     if self.close_match_attempts >= 2:
                         self.pwd_fallback_btn.setVisible(True)
                 else:
                     self.status_label.setText("Position your face in the camera view...")
-                    self.status_label.setStyleSheet("font-size: 13px; color: #a0aec0;")
+                    self.status_label.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
 
     @Slot(str)
     def handle_camera_error(self, err_msg: str):
         self.camera_error = True
         self.camera_error_msg = err_msg
         self.cleanup_camera()
-        self.status_label.setStyleSheet("color: #ef4444; font-size: 13px; font-weight: bold;")
+        from ui.theme import DANGER_RED
+        self.status_label.setStyleSheet(f"color: {DANGER_RED}; font-size: 13px; font-weight: bold;")
         self.status_label.setText(f"❌ Camera Error: {err_msg}")
         self.pwd_fallback_btn.setVisible(True)
 
@@ -398,20 +401,22 @@ class AuthDialog(QDialog):
             AuthDialog.failed_attempts_count = 0
             AuthDialog.lockout_until = 0.0
             self.authenticated = True
+            import getpass
+            self.matched_user = getpass.getuser()
             self.accept()
         else:
             AuthDialog.failed_attempts_count += 1
             self.password_input.selectAll()
             
             # Temporary error styling
-            from ui.theme import DANGER_RED
+            from ui.theme import DANGER_RED, TEXT_PRIMARY
             self.password_input.setStyleSheet(f"""
                 QLineEdit {{
-                    background-color: #1a1a20;
+                    background-color: #fef2f2;
                     border: 1px solid {DANGER_RED};
                     border-radius: 6px;
                     padding: 8px 12px;
-                    color: #ffffff;
+                    color: {TEXT_PRIMARY};
                     font-size: 13px;
                 }}
             """)

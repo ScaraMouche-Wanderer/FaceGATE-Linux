@@ -5,7 +5,7 @@ import logging
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget,
     QWidget, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QComboBox, QSpinBox, QCheckBox, QMessageBox, QLineEdit, QTreeWidget, QTreeWidgetItem
+    QComboBox, QCheckBox, QMessageBox, QLineEdit, QTreeWidget, QTreeWidgetItem
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
@@ -31,15 +31,15 @@ class SettingsWindow(QDialog):
         self.resize(820, 540)
         self.setMinimumSize(750, 500)
         
-        from ui.theme import get_theme_qss, ACCENT_CYAN, BORDER_NEUTRAL
+        from ui.theme import get_theme_qss, ACCENT_PURPLE, BORDER_NEUTRAL, TEXT_PRIMARY, BG_NEUTRAL, AnimatedSpinBox
         # Set base theme styling
         self.setStyleSheet(get_theme_qss() + f"""
             QListWidget#sidebar {{
-                background-color: #0b0b0e;
+                background-color: #f1f5f9;
                 border: none;
                 border-right: 1px solid {BORDER_NEUTRAL};
                 padding-top: 10px;
-                color: #94a3b8;
+                color: #475569;
                 font-size: 13px;
                 font-weight: 500;
             }}
@@ -47,13 +47,14 @@ class SettingsWindow(QDialog):
                 padding: 10px 16px;
                 border-radius: 6px;
                 margin: 4px 8px;
+                color: #475569;
             }}
             QListWidget#sidebar::item:hover {{
-                background-color: #1a1a20;
-                color: #ffffff;
+                background-color: #e2e8f0;
+                color: {TEXT_PRIMARY};
             }}
             QListWidget#sidebar::item:selected {{
-                background-color: {ACCENT_CYAN};
+                background-color: {ACCENT_PURPLE};
                 color: #ffffff;
             }}
             QPushButton#removeBtn {{
@@ -195,12 +196,13 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
+        from ui.theme import TEXT_PRIMARY, TEXT_SECONDARY
         header = QLabel("Locked Applications")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
+        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
         layout.addWidget(header)
 
         desc = QLabel("Manage applications that trigger face recognition authentication on launch.")
-        desc.setStyleSheet("color: #a0aec0; font-size: 13px;")
+        desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px;")
         layout.addWidget(desc)
 
         # Table
@@ -228,11 +230,11 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(20)
 
+        from ui.theme import get_card_qss, SUCCESS_GREEN, TEXT_PRIMARY, TEXT_SECONDARY
         header = QLabel("Authentication & Primitives")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
+        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
         layout.addWidget(header)
 
-        from ui.theme import get_card_qss, SUCCESS_GREEN
         # Master Password Config Card (Accent Border)
         card1 = QWidget()
         card1.setObjectName("card")
@@ -242,12 +244,12 @@ class SettingsWindow(QDialog):
         c1_layout.setSpacing(10)
 
         lbl1 = QLabel("Master Password")
-        lbl1.setStyleSheet("font-size: 15px; font-weight: bold; color: #ffffff; border: none;")
+        lbl1.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY}; border: none;")
         c1_layout.addWidget(lbl1)
 
         lbl2 = QLabel("Configures the local master password that secures your face database envelope. "
                       "Updating the password will re-encrypt all credentials at rest under a new random KDF salt.")
-        lbl2.setStyleSheet("color: #a0aec0; font-size: 13px; border: none;")
+        lbl2.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
         lbl2.setWordWrap(True)
         c1_layout.addWidget(lbl2)
 
@@ -266,6 +268,28 @@ class SettingsWindow(QDialog):
         
         layout.addWidget(card1)
 
+        # Enrolled Face Profiles Card
+        card_enrolled = QWidget()
+        card_enrolled.setObjectName("card")
+        card_enrolled.setStyleSheet(get_card_qss("normal"))
+        ce_layout = QVBoxLayout(card_enrolled)
+        ce_layout.setContentsMargins(16, 16, 16, 16)
+        ce_layout.setSpacing(10)
+
+        ce_lbl = QLabel("Enrolled Face Profiles")
+        ce_lbl.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY}; border: none;")
+        ce_layout.addWidget(ce_lbl)
+
+        self.enrolled_users_desc = QLabel("The following users have enrolled faces and are authorized to unlock applications:")
+        self.enrolled_users_desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
+        ce_layout.addWidget(self.enrolled_users_desc)
+
+        self.enrolled_users_list = QLabel("")
+        self.enrolled_users_list.setStyleSheet("color: #7c3aed; font-size: 14px; font-weight: bold; border: none;")
+        ce_layout.addWidget(self.enrolled_users_list)
+        
+        layout.addWidget(card_enrolled)
+
         # Primitives Specs Card (Normal Border)
         card2 = QWidget()
         card2.setObjectName("card")
@@ -275,16 +299,16 @@ class SettingsWindow(QDialog):
         c2_layout.setSpacing(12)
 
         lbl3 = QLabel("Active Security Profiles")
-        lbl3.setStyleSheet("font-size: 15px; font-weight: bold; color: #ffffff; border: none;")
+        lbl3.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY}; border: none;")
         c2_layout.addWidget(lbl3)
 
         # Read-only attributes layout
         self.kdf_label = QLabel("KDF: PBKDF2-HMAC-SHA256 (600,000 iterations)")
-        self.kdf_label.setStyleSheet("color: #cbd5e0; font-size: 13px; border: none;")
+        self.kdf_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
         c2_layout.addWidget(self.kdf_label)
 
         self.cipher_label = QLabel("Cipher: AES-256-GCM (Authenticated Encrypt-then-MAC)")
-        self.cipher_label.setStyleSheet("color: #cbd5e0; font-size: 13px; border: none;")
+        self.cipher_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
         c2_layout.addWidget(self.cipher_label)
 
         # Load values dynamically from config
@@ -292,11 +316,11 @@ class SettingsWindow(QDialog):
         margin = self.config.get("recognition.ambiguity_margin", "0.03")
 
         self.thresh_label = QLabel(f"Similarity Threshold: {thresh} (Required matching score)")
-        self.thresh_label.setStyleSheet("color: #cbd5e0; font-size: 13px; border: none;")
+        self.thresh_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
         c2_layout.addWidget(self.thresh_label)
 
         self.margin_label = QLabel(f"Ambiguity Margin: {margin} (Required margin between top candidates)")
-        self.margin_label.setStyleSheet("color: #cbd5e0; font-size: 13px; border: none;")
+        self.margin_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
         c2_layout.addWidget(self.margin_label)
 
         layout.addWidget(card2)
@@ -315,11 +339,11 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
+        from ui.theme import get_card_qss, ACCENT_PURPLE, TEXT_PRIMARY, TEXT_SECONDARY, AnimatedSpinBox
         header = QLabel("Daemon Behavior & Protection")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
+        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
         layout.addWidget(header)
 
-        from ui.theme import get_card_qss, ACCENT_CYAN
         from PySide6.QtWidgets import QFormLayout
 
         # --- 1. Startup Group ---
@@ -331,7 +355,7 @@ class SettingsWindow(QDialog):
         startup_layout.setSpacing(10)
 
         startup_lbl = QLabel("Startup Options")
-        startup_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_CYAN};")
+        startup_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_PURPLE};")
         startup_layout.addWidget(startup_lbl)
 
         self.autostart_check = QCheckBox("Launch FaceGate background daemon automatically at Login")
@@ -339,8 +363,8 @@ class SettingsWindow(QDialog):
 
         delay_layout = QHBoxLayout()
         delay_lbl = QLabel("Daemon startup delay (seconds):")
-        delay_lbl.setStyleSheet("font-size: 13px; color: #cbd5e0;")
-        self.delay_spin = QSpinBox()
+        delay_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
+        self.delay_spin = AnimatedSpinBox()
         self.delay_spin.setRange(0, 60)
         delay_layout.addWidget(delay_lbl)
         delay_layout.addWidget(self.delay_spin)
@@ -358,7 +382,7 @@ class SettingsWindow(QDialog):
         policy_layout.setSpacing(10)
 
         policy_lbl = QLabel("Locking & Timeout Policies")
-        policy_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_CYAN};")
+        policy_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_PURPLE};")
         policy_layout.addWidget(policy_lbl)
 
         policy_form = QFormLayout()
@@ -370,7 +394,7 @@ class SettingsWindow(QDialog):
         self.policy_combo.addItem("Keep Process Stopped (SIGSTOP)", "keep_stopped")
         policy_form.addRow("On Auth Failure Policy:", self.policy_combo)
 
-        self.timeout_spin = QSpinBox()
+        self.timeout_spin = AnimatedSpinBox()
         self.timeout_spin.setRange(5, 300)
         self.timeout_spin.setSingleStep(5)
         policy_form.addRow("GUI Timeout (seconds):", self.timeout_spin)
@@ -396,7 +420,7 @@ class SettingsWindow(QDialog):
 
         hk_layout = QHBoxLayout()
         hk_lbl = QLabel("Emergency Kill Shortcut:")
-        hk_lbl.setStyleSheet("font-size: 13px; color: #cbd5e0;")
+        hk_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
         self.hotkey_input = QLineEdit()
         self.hotkey_input.setPlaceholderText("<Control><Alt>k")
         hk_layout.addWidget(hk_lbl)
@@ -405,7 +429,7 @@ class SettingsWindow(QDialog):
         prot_layout.addLayout(hk_layout)
 
         hk_desc = QLabel("GNOME format: e.g. <Control><Alt>k or <Shift><Control><Alt>e")
-        hk_desc.setStyleSheet("color: #94a3b8; font-size: 11px; font-style: italic;")
+        hk_desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-style: italic;")
         prot_layout.addWidget(hk_desc)
 
         layout.addWidget(prot_card)
@@ -419,7 +443,7 @@ class SettingsWindow(QDialog):
         notif_layout.setSpacing(10)
 
         notif_lbl = QLabel("Notifications & Idle Locks")
-        notif_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_CYAN};")
+        notif_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_PURPLE};")
         notif_layout.addWidget(notif_lbl)
 
         self.notify_check = QCheckBox("Show desktop notifications on application unlock/relock")
@@ -430,8 +454,8 @@ class SettingsWindow(QDialog):
 
         idle_time_layout = QHBoxLayout()
         idle_time_lbl = QLabel("Idle timeout (minutes):")
-        idle_time_lbl.setStyleSheet("font-size: 13px; color: #cbd5e0;")
-        self.idle_spin = QSpinBox()
+        idle_time_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
+        self.idle_spin = AnimatedSpinBox()
         self.idle_spin.setRange(1, 60)
         self.idle_spin.setEnabled(False)
         self.idle_check.stateChanged.connect(lambda state: self.idle_spin.setEnabled(state == Qt.CheckState.Checked.value))
@@ -451,18 +475,19 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
+        from ui.theme import TEXT_PRIMARY, TEXT_SECONDARY
         header = QLabel("Security Audit Logs")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
+        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
         layout.addWidget(header)
 
         desc = QLabel("View recent application authorization attempts and outcomes.")
-        desc.setStyleSheet("color: #a0aec0; font-size: 13px;")
+        desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px;")
         layout.addWidget(desc)
 
         # Filter Chips/Dropdown Layout
         filter_layout = QHBoxLayout()
         filter_lbl = QLabel("Filter status:")
-        filter_lbl.setStyleSheet("color: #94a3b8; font-size: 13px; font-weight: 500;")
+        filter_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 500;")
         
         self.log_filter_combo = QComboBox()
         self.log_filter_combo.addItems(["All Attempts", "Success", "Failed", "Timeout", "Bypass"])
@@ -475,20 +500,21 @@ class SettingsWindow(QDialog):
 
         # Tree Widget for logs
         self.logs_tree = QTreeWidget()
-        self.logs_tree.setColumnCount(5)
-        self.logs_tree.setHeaderLabels(["Time", "Application", "Method", "Result", "Confidence"])
+        self.logs_tree.setColumnCount(6)
+        self.logs_tree.setHeaderLabels(["Time", "Application", "Method", "User", "Result", "Confidence"])
         self.logs_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.logs_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.logs_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.logs_tree.header().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.logs_tree.header().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.logs_tree.header().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.logs_tree.setSelectionMode(QTreeWidget.SelectionMode.NoSelection)
         layout.addWidget(self.logs_tree)
 
         # Empty state label
         self.logs_empty_label = QLabel("No authentication activity yet")
         self.logs_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.logs_empty_label.setStyleSheet("color: #94a3b8; font-size: 14px; font-style: italic; padding: 40px;")
+        self.logs_empty_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 14px; font-style: italic; padding: 40px;")
         layout.addWidget(self.logs_empty_label)
         self.logs_empty_label.hide()
 
@@ -500,11 +526,11 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
+        from ui.theme import TEXT_PRIMARY, TEXT_SECONDARY, get_card_qss
         header = QLabel("About FaceGate-Linux")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
+        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
         layout.addWidget(header)
 
-        from ui.theme import get_card_qss
         card = QWidget()
         card.setObjectName("card")
         card.setStyleSheet(get_card_qss("normal"))
@@ -513,24 +539,24 @@ class SettingsWindow(QDialog):
         card_layout.setSpacing(12)
 
         logo = QLabel("🔒 FaceGate-Linux")
-        logo.setStyleSheet("font-size: 24px; font-weight: bold; color: #0ea5e9; border: none;")
+        logo.setStyleSheet("font-size: 24px; font-weight: bold; color: #7c3aed; border: none;")
         card_layout.addWidget(logo)
 
         version = QLabel("Version: 0.1.0 (Phase 8 Build)")
-        version.setStyleSheet("color: #cbd5e0; font-size: 13px; border: none; font-weight: bold;")
+        version.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none; font-weight: bold;")
         card_layout.addWidget(version)
 
         desc = QLabel("FaceGate-Linux is a lightweight security wrapper daemon that locks system application launches "
                       "using face recognition. It combines process scanning, SIGSTOP interception, D-Bus session controls, "
                       "and authenticated AES-256-GCM data storage.")
-        desc.setStyleSheet("color: #a0aec0; font-size: 13px; border: none; line-height: 1.4;")
+        desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none; line-height: 1.4;")
         desc.setWordWrap(True)
         card_layout.addWidget(desc)
 
         card_layout.addSpacing(10)
         
         info = QLabel("Written by Senior Linux Desktop Engineer.")
-        info.setStyleSheet("color: #cbd5e0; font-size: 12px; border: none; font-style: italic;")
+        info.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; border: none; font-style: italic;")
         card_layout.addWidget(info)
 
         layout.addWidget(card)
@@ -568,7 +594,20 @@ class SettingsWindow(QDialog):
         self.idle_spin.setEnabled(self.idle_check.isChecked())
         self.delay_spin.setValue(self.config.get("behavior.startup_delay_seconds", 0))
 
-        # 6. Populate Logs Table
+        # 6. Load enrolled users list dynamically
+        from database.embedding_store import load_embeddings
+        try:
+            enrolled = load_embeddings()
+            usernames = list(enrolled.keys())
+        except Exception:
+            usernames = []
+        if usernames:
+            self.enrolled_users_list.setText(", ".join(usernames))
+        else:
+            self.enrolled_users_list.setText("No enrolled faces (setup required)")
+            self.enrolled_users_list.setStyleSheet("color: #ef4444; font-size: 13px; font-style: italic; border: none;")
+
+        # 7. Populate Logs Table
         self.populate_logs_table()
 
         # Connect signals for restart indicator after initial populate
@@ -676,6 +715,7 @@ class SettingsWindow(QDialog):
             for time_part, log in items:
                 app_identifier = log["app_identifier"]
                 method = log["method"].upper()
+                username = log.get("username") or "N/A"
                 res = log["result"].upper()
                 score_str = f"{log['confidence_score']:.4f}" if log["confidence_score"] is not None else "N/A"
 
@@ -683,6 +723,7 @@ class SettingsWindow(QDialog):
                     time_part,
                     app_identifier,
                     method,
+                    username,
                     res,
                     score_str
                 ])
@@ -696,7 +737,7 @@ class SettingsWindow(QDialog):
                     icon_color = WARNING_AMBER
                 else:
                     icon_color = DANGER_RED
-                child_item.setIcon(3, create_status_icon(icon_color))
+                child_item.setIcon(4, create_status_icon(icon_color))
 
                 header_item.addChild(child_item)
 

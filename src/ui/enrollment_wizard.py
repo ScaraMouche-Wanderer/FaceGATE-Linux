@@ -66,12 +66,13 @@ class EnrollmentWizard(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
+        from ui.theme import TEXT_PRIMARY, TEXT_SECONDARY
         header = QLabel("Enrolled User Setup")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
+        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
         layout.addWidget(header)
 
         desc = QLabel("Welcome to the guided FaceGate user enrollment. Enter the username you want to associate with your facial profile.")
-        desc.setStyleSheet("color: #a0aec0; font-size: 13px; line-height: 1.4;")
+        desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; line-height: 1.4;")
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
@@ -92,8 +93,9 @@ class EnrollmentWizard(QDialog):
         pwd_layout.setContentsMargins(0, 0, 0, 0)
         pwd_layout.setSpacing(6)
         
+        from ui.theme import WARNING_AMBER
         pwd_lbl = QLabel("Enter Master Password to Unlock Database:")
-        pwd_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #fbbf24;")
+        pwd_lbl.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {WARNING_AMBER};")
         self.pwd_input = QLineEdit()
         self.pwd_input.setEchoMode(QLineEdit.EchoMode.Password)
         pwd_layout.addWidget(pwd_lbl)
@@ -128,13 +130,14 @@ class EnrollmentWizard(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
+        from ui.theme import TEXT_PRIMARY, WARNING_AMBER
         self.guided_lbl = QLabel("Face Guided Capture")
-        self.guided_lbl.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
+        self.guided_lbl.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {TEXT_PRIMARY};")
         layout.addWidget(self.guided_lbl)
 
         # Instructions
         self.instruction_lbl = QLabel("Starting camera...")
-        self.instruction_lbl.setStyleSheet("color: #fbbf24; font-size: 14px; font-weight: bold;")
+        self.instruction_lbl.setStyleSheet(f"color: {WARNING_AMBER}; font-size: 14px; font-weight: bold;")
         self.instruction_lbl.setWordWrap(True)
         self.instruction_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.instruction_lbl)
@@ -175,8 +178,9 @@ class EnrollmentWizard(QDialog):
         header.setStyleSheet("font-size: 20px; font-weight: bold; color: #10b981;")
         layout.addWidget(header)
 
+        from ui.theme import TEXT_SECONDARY
         self.success_msg_lbl = QLabel()
-        self.success_msg_lbl.setStyleSheet("color: #cbd5e0; font-size: 13px; line-height: 1.4;")
+        self.success_msg_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; line-height: 1.4;")
         self.success_msg_lbl.setWordWrap(True)
         layout.addWidget(self.success_msg_lbl)
 

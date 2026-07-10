@@ -31,9 +31,9 @@ class FaceGateTray(QSystemTrayIcon):
         super().__init__(parent)
         self.main_app = main_app
         
-        from ui.theme import ACCENT_CYAN, TEXT_SECONDARY
+        from ui.theme import ACCENT_PURPLE, TEXT_SECONDARY
         # Pre-render state icons
-        self.active_icon = create_circle_icon(ACCENT_CYAN)
+        self.active_icon = create_circle_icon(ACCENT_PURPLE)
         self.inactive_icon = create_circle_icon(TEXT_SECONDARY)
         
         self.setIcon(self.active_icon)

@@ -7,6 +7,7 @@ DB_PATH = os.path.expanduser("~/.config/facegate/audit.db")
 def init_audit_db():
     """
     Initializes the SQLite database schema if not present.
+    Performs safe migration to add 'username' column if missing.
     """
     try:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -21,21 +22,27 @@ def init_audit_db():
                     confidence_score REAL
                 )
             """)
+            # Check for column existence and perform alter table migration
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(audit_log)")
+            columns = [info[1] for info in cursor.fetchall()]
+            if "username" not in columns:
+                conn.execute("ALTER TABLE audit_log ADD COLUMN username TEXT")
             conn.commit()
     except Exception as e:
         logging.error(f"Failed to initialize audit database: {e}")
 
-def log_auth_attempt(app_identifier: str, method: str, result: str, confidence_score: float = None):
+def log_auth_attempt(app_identifier: str, method: str, result: str, confidence_score: float = None, username: str = None):
     """
     Logs an authentication attempt and prunes rows beyond the 1000 limit.
-    Confidence score is nullable and stored as REAL.
+    Confidence score and username are nullable.
     """
     try:
         init_audit_db()
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO audit_log (app_identifier, method, result, confidence_score) VALUES (?, ?, ?, ?)",
-                (app_identifier, method, result, confidence_score)
+                "INSERT INTO audit_log (app_identifier, method, result, confidence_score, username) VALUES (?, ?, ?, ?, ?)",
+                (app_identifier, method, result, confidence_score, username)
             )
             # Prune to keep only the latest 1000 entries
             conn.execute("""
@@ -45,7 +52,7 @@ def log_auth_attempt(app_identifier: str, method: str, result: str, confidence_s
                 )
             """)
             conn.commit()
-            logging.info(f"Audit Log: {result.upper()} auth for '{app_identifier}' via {method}.")
+            logging.info(f"Audit Log: {result.upper()} auth for '{app_identifier}' via {method} (User: {username or 'unknown'}).")
     except Exception as e:
         logging.error(f"Error writing to audit log: {e}")
 
@@ -58,7 +65,7 @@ def get_recent_logs(limit: int = 50) -> list:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT timestamp, app_identifier, method, result, confidence_score FROM audit_log ORDER BY id DESC LIMIT ?",
+                "SELECT timestamp, app_identifier, method, result, confidence_score, username FROM audit_log ORDER BY id DESC LIMIT ?",
                 (limit,)
             )
             rows = cursor.fetchall()
@@ -68,7 +75,8 @@ def get_recent_logs(limit: int = 50) -> list:
                     "app_identifier": row[1],
                     "method": row[2],
                     "result": row[3],
-                    "confidence_score": row[4]
+                    "confidence_score": row[4],
+                    "username": row[5]
                 }
                 for row in rows
             ]
