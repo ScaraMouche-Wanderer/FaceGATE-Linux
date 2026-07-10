@@ -48,6 +48,33 @@ class FaceGateApplication(QObject):
         self.monitor = AppMonitor(self, poll_interval=poll_interval)
         self.monitor.signals.request_auth.connect(self.handle_monitor_auth)
 
+        # D-Bus sleep & lock monitors for preventing trespassing
+        from PySide6.QtDBus import QDBusConnection
+        
+        # Connect to systemd-logind PrepareForSleep signal on system bus
+        system_bus = QDBusConnection.systemBus()
+        if system_bus.isConnected():
+            system_bus.connect(
+                "org.freedesktop.login1",
+                "/org/freedesktop/login1",
+                "org.freedesktop.login1.Manager",
+                "PrepareForSleep",
+                self, "handle_prepare_for_sleep"
+            )
+            logging.info("Connected to systemd PrepareForSleep D-Bus signal.")
+            
+        # Connect to GNOME Screensaver ActiveChanged signal on session bus
+        session_bus = QDBusConnection.sessionBus()
+        if session_bus.isConnected():
+            session_bus.connect(
+                "org.gnome.ScreenSaver",
+                "/org/gnome/ScreenSaver",
+                "org.gnome.ScreenSaver",
+                "ActiveChanged",
+                self, "handle_screensaver_active_changed"
+            )
+            logging.info("Connected to GNOME ScreenSaver ActiveChanged D-Bus signal.")
+
         # Register D-Bus Service
         self.dbus_service = FaceGateService(self)
         if not register_dbus_service(self.dbus_service):
@@ -112,6 +139,20 @@ class FaceGateApplication(QObject):
     def relock_all(self):
         for app in self.get_protected_apps():
             self.relock_app(app["id"])
+
+    @Slot(bool)
+    def handle_prepare_for_sleep(self, starting_sleep: bool):
+        if starting_sleep:
+            if self.config.get("behavior.lock_on_sleep_or_lock", True):
+                logging.info("System preparing for sleep/suspend. Relocking all applications to prevent trespassing.")
+                self.relock_all()
+
+    @Slot(bool)
+    def handle_screensaver_active_changed(self, active: bool):
+        if active:
+            if self.config.get("behavior.lock_on_sleep_or_lock", True):
+                logging.info("Screensaver/Lock screen activated. Relocking all applications to prevent trespassing.")
+                self.relock_all()
 
     def recheck_launcher_shadowing(self):
         from locking.launcher_sub import check_and_fix_substitutions
@@ -477,6 +518,7 @@ def main():
     parser.add_argument("--set-master-password", action="store_true", help="Set or change the master password")
     parser.add_argument("--key-fd", type=int, help="File descriptor to read the encryption key from")
     parser.add_argument("--emergency-kill", action="store_true", help="Send emergency kill signal to running daemon via D-Bus")
+    parser.add_argument("--lock-all", action="store_true", help="Send lockdown signal to running daemon via D-Bus")
     parser.add_argument("--settings", action="store_true", help="Launch the Settings GUI window")
     
     args, unknown = parser.parse_known_args()
@@ -506,6 +548,22 @@ def main():
             logging.error("Failed to connect to Session D-Bus.")
             sys.exit(1)
 
+    if args.lock_all:
+        from PySide6.QtDBus import QDBusInterface, QDBusConnection
+        bus = QDBusConnection.sessionBus()
+        if bus.isConnected():
+            interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
+            if interface.isValid():
+                interface.call("RelockAll")
+                logging.info("Panic lockdown command sent to FaceGate daemon.")
+                sys.exit(0)
+            else:
+                logging.error("FaceGate daemon D-Bus interface is not active.")
+                sys.exit(1)
+        else:
+            logging.error("Failed to connect to Session D-Bus.")
+            sys.exit(1)
+
     if args.set_master_password:
         from security.credential_store import set_master_password_cli
         set_master_password_cli()
@@ -524,8 +582,8 @@ def main():
         except Exception:
             enrolled = {}
             
-        if enrolled:
-            config = get_config()
+        config = get_config()
+        if enrolled and config.get("security.lock_settings_window", True):
             timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
             dialog = AuthDialog("Settings Access", mode="face", timeout_seconds=timeout_sec)
             result = dialog.exec()

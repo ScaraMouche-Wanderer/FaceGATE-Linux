@@ -109,5 +109,47 @@ class TestUiRecognition(unittest.TestCase):
         self.assertEqual(dialog.apps_table.item(0, 0).text(), "Kitty Terminal")
         self.assertEqual(dialog.apps_table.item(0, 1).text(), "kitty")
 
+    @patch('core.monitor_main.register_dbus_service', return_value=True)
+    def test_face_gate_application_sleep_relock(self, mock_dbus):
+        print("=== Running Application Sleep/Lock Relocking Test ===")
+        from core.monitor_main import FaceGateApplication
+        from utils.config_loader import Config
+        
+        mock_config = Config()
+        mock_config.settings = {
+            "protected_apps": [
+                {"id": "kitty", "name": "Kitty Terminal", "executable": "kitty", "desktop_name": "kitty.desktop", "icon": "kitty"}
+            ],
+            "app_monitor": {
+                "on_auth_failure": "kill",
+                "auth_timeout_seconds": 60
+            },
+            "behavior": {
+                "uninstall_protection": True,
+                "emergency_key": "<Control><Alt>k",
+                "panic_key": "<Control><Alt>l",
+                "notify_on_auth": True,
+                "autolock_on_idle": False,
+                "autolock_on_idle_minutes": 10,
+                "startup_delay_seconds": 0,
+                "lock_on_sleep_or_lock": True
+            }
+        }
+        
+        app = FaceGateApplication(config=mock_config)
+        app.authorize_app("kitty.desktop")
+        self.assertTrue(app.authorized_apps.get("kitty", False))
+        
+        # Trigger sleep signal handler
+        app.handle_prepare_for_sleep(True)
+        self.assertFalse(app.authorized_apps.get("kitty", False))
+        
+        # Re-authorize and trigger screensaver signal handler
+        app.authorize_app("kitty.desktop")
+        self.assertTrue(app.authorized_apps.get("kitty", False))
+        
+        app.handle_screensaver_active_changed(True)
+        self.assertFalse(app.authorized_apps.get("kitty", False))
+
 if __name__ == "__main__":
     unittest.main()

@@ -141,6 +141,11 @@ class FaceGateService(QObject):
         if self.main_app:
             self.main_app.quit_app(bypass_protection=True)
 
+    def relock_all_internal(self):
+        logging.info("RelockAll command received via D-Bus.")
+        if self.main_app:
+            self.main_app.relock_all()
+
 @ClassInfo({"D-Bus Interface": "org.facegate.FaceGate"})
 class FaceGateAdaptor(QDBusAbstractAdaptor):
     def __init__(self, parent: FaceGateService):
@@ -154,6 +159,10 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
     @Slot()
     def EmergencyKill(self):
         self.service.emergency_kill_internal()
+
+    @Slot()
+    def RelockAll(self):
+        self.service.relock_all_internal()
 
 def register_dbus_service(service_obj) -> bool:
     bus = QDBusConnection.sessionBus()

@@ -490,9 +490,24 @@ class SettingsWindow(QDialog):
         prot_layout.addLayout(hk_layout)
 
         hk_desc = QLabel("Press this keyboard combination to immediately stop FaceGate and restore all apps in case of camera failure. Format: e.g. <Control><Alt>k")
-        hk_desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-style: italic;")
+        hk_desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-style: italic; margin-bottom: 5px;")
         hk_desc.setWordWrap(True)
         prot_layout.addWidget(hk_desc)
+
+        panic_hk_layout = QHBoxLayout()
+        panic_hk_lbl = QLabel("Panic Lockdown Shortcut:")
+        panic_hk_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
+        self.panic_hotkey_input = QLineEdit()
+        self.panic_hotkey_input.setPlaceholderText("<Control><Alt>l")
+        panic_hk_layout.addWidget(panic_hk_lbl)
+        panic_hk_layout.addWidget(self.panic_hotkey_input)
+        panic_hk_layout.addStretch()
+        prot_layout.addLayout(panic_hk_layout)
+
+        panic_hk_desc = QLabel("Press this keyboard combination to immediately lock all running protected applications to prevent trespassing. Format: e.g. <Control><Alt>l")
+        panic_hk_desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-style: italic;")
+        panic_hk_desc.setWordWrap(True)
+        prot_layout.addWidget(panic_hk_desc)
 
         layout.addWidget(prot_card)
 
@@ -525,6 +540,12 @@ class SettingsWindow(QDialog):
         idle_time_layout.addWidget(self.idle_spin)
         idle_time_layout.addStretch()
         notif_layout.addLayout(idle_time_layout)
+
+        self.sleep_lock_check = QCheckBox("Automatically lock all open applications when the system sleeps or locks (Recommended)")
+        notif_layout.addWidget(self.sleep_lock_check)
+
+        self.lock_settings_check = QCheckBox("Require face/password verification to open settings window (Recommended)")
+        notif_layout.addWidget(self.lock_settings_check)
 
         layout.addWidget(notif_card)
         layout.addStretch()
@@ -649,12 +670,18 @@ class SettingsWindow(QDialog):
         hotkey = self.config.get("behavior.emergency_key", "<Control><Alt>k")
         self.hotkey_input.setText(hotkey)
 
+        # 4b. Panic Lockdown Hotkey
+        panic_hotkey = self.config.get("behavior.panic_key", "<Control><Alt>l")
+        self.panic_hotkey_input.setText(panic_hotkey)
+
         # 5. New behavior settings
         self.notify_check.setChecked(self.config.get("behavior.notify_on_auth", True))
         self.idle_check.setChecked(self.config.get("behavior.autolock_on_idle", False))
         self.idle_spin.setValue(self.config.get("behavior.autolock_on_idle_minutes", 10))
         self.idle_spin.setEnabled(self.idle_check.isChecked())
         self.delay_spin.setValue(self.config.get("behavior.startup_delay_seconds", 0))
+        self.sleep_lock_check.setChecked(self.config.get("behavior.lock_on_sleep_or_lock", True))
+        self.lock_settings_check.setChecked(self.config.get("security.lock_settings_window", True))
 
         # 6. Load enrolled users list dynamically
         from database.embedding_store import load_embeddings
@@ -680,10 +707,13 @@ class SettingsWindow(QDialog):
         self.timeout_spin.valueChanged.connect(self.show_restart_banner)
         self.protection_check.stateChanged.connect(self.show_restart_banner)
         self.hotkey_input.textChanged.connect(self.show_restart_banner)
+        self.panic_hotkey_input.textChanged.connect(self.show_restart_banner)
         self.notify_check.stateChanged.connect(self.show_restart_banner)
         self.idle_check.stateChanged.connect(self.show_restart_banner)
         self.idle_spin.valueChanged.connect(self.show_restart_banner)
         self.delay_spin.valueChanged.connect(self.show_restart_banner)
+        self.sleep_lock_check.stateChanged.connect(self.show_restart_banner)
+        self.lock_settings_check.stateChanged.connect(self.show_restart_banner)
 
     def populate_apps_table(self):
         self.apps_table.setRowCount(len(self.current_apps))
@@ -930,6 +960,8 @@ class SettingsWindow(QDialog):
         self.config.set("behavior.autolock_on_idle", self.idle_check.isChecked())
         self.config.set("behavior.autolock_on_idle_minutes", self.idle_spin.value())
         self.config.set("behavior.startup_delay_seconds", self.delay_spin.value())
+        self.config.set("behavior.lock_on_sleep_or_lock", self.sleep_lock_check.isChecked())
+        self.config.set("security.lock_settings_window", self.lock_settings_check.isChecked())
         
         # 4. Save and configure Emergency Kill hotkey in GSettings
         new_hotkey = self.hotkey_input.text().strip()
@@ -941,6 +973,17 @@ class SettingsWindow(QDialog):
             else:
                 unregister_gnome_hotkey()
             self.config.set("behavior.emergency_key", new_hotkey)
+
+        # 4b. Save and configure Panic Lockdown hotkey in GSettings
+        new_panic = self.panic_hotkey_input.text().strip()
+        old_panic = self.config.get("behavior.panic_key", "<Control><Alt>l")
+        if new_panic != old_panic:
+            from utils.hotkey_manager import register_lock_hotkey, unregister_lock_hotkey
+            if new_panic:
+                register_lock_hotkey(new_panic)
+            else:
+                unregister_lock_hotkey()
+            self.config.set("behavior.panic_key", new_panic)
         
         # Save updated protected apps
         self.config.set("protected_apps", self.current_apps)
