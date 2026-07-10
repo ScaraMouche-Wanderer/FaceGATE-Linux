@@ -21,3 +21,8 @@ auth:
   # Temporary plaintext password for Phase 1.
   # Phase 3 will introduce secure password storage.
   placeholder_password: "admin"
+
+recognition:
+  similarity_threshold: 0.65
+  ambiguity_margin: 0.03
+

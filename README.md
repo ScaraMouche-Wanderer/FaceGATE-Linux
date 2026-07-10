@@ -37,3 +37,39 @@ Desktop launcher shadowing works by overriding `.desktop` files in the user-leve
 - **No Face Recognition**: The authentication gate is a temporary, plaintext password-only dialog (`admin` by default). Liveness detection and model inference are implemented in biometric releases.
 - **No Encrypted Credential Storage**: Password verification is a plaintext-in-memory-only placeholder. PBKDF2-tuned validation and AES-256-GCM encrypted-at-rest key rings are deferred to security updates.
 - **No systemd Packaging**: Automatic daemon startup is not handled in this release.
+
+---
+
+## Face Recognition & Subprocess Architecture
+
+Face recognition introduces real face recognition using **InsightFace** (`buffalo_l` model) and **ONNX Runtime**.
+
+### 1. Short-Lived Subprocess Model
+To maintain a low idle memory footprint, the main resident daemon process (`facegate --monitor`) does not import any computer vision or machine learning libraries (such as `cv2`, `numpy`, `insightface`, or `onnxruntime`). 
+
+Instead, when an authentication challenge is triggered, the daemon spawns a short-lived subprocess (`facegate --recognize <desktop_name>`). This subprocess:
+1. Loads the `buffalo_l` face recognition models (average load time: **0.8057 seconds**).
+2. Spawns a dedicated camera thread running at **30 FPS** and `640x480` resolution.
+3. Captures, detects, and validates faces against enrolled user templates.
+4. Exits with a predefined exit code contract.
+
+### 2. Exit Code Contract
+The `--recognize` subprocess communicates authentication results to the parent daemon using exit codes:
+- `0`: **Authenticated**: Face matched successfully.
+- `1`: **Rejected**: Face matching finished, but similarity was below threshold or ambiguous.
+- `2`: **Timeout**: Authentication timed out before a face could be matched.
+- `3`: **Camera/Model Error**: Failed to open the camera device or initialize models.
+- `4`: **Password Fallback**: User chose to authenticate using a password instead.
+
+If the subprocess exits with `3` (error) or `4` (password fallback), the parent daemon falls back to showing the password dialog in-process, ensuring the user is never locked out.
+
+### 3. Wayland Camera Permissions
+Under standard Arch Linux GNOME Wayland desktop environments, native desktop applications are not prompted for camera permissions. Unsandboxed applications can directly access `/dev/video*` devices, provided the running user is a member of the Unix `video` group.
+
+### 4. CLI Enrollment
+To enroll a face template:
+```bash
+poetry run facegate --enroll <username>
+```
+This utility captures sharp, non-blurry frames, extracts the embeddings, averages them to create a template, and immediately discards all raw images from memory.
+

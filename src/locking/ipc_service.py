@@ -18,23 +18,52 @@ class FaceGateService(QObject):
             logging.info("FaceGate is inactive/disabled. Auto-authorizing.")
             return True
 
-        # Lookup user-friendly name from main application
-        app_name = app_identifier
-        if self.main_app:
-            app_name = self.main_app.get_app_name(app_identifier)
-            
-        # Create and execute the dialog modally
-        dialog = AuthDialog(app_name)
-        result = dialog.exec()
+        import subprocess
+        import os
+        from database.embedding_store import get_cached_key
+        from locking.launcher_sub import get_facegate_executable
         
-        success = (result == AuthDialog.DialogCode.Accepted)
-        logging.info(f"Authentication result for '{app_identifier}': {success}")
+        facegate_bin = get_facegate_executable()
+        logging.info(f"Spawning recognition subprocess: {facegate_bin} --recognize {app_identifier}")
         
-        # Notify the main app to update process states if necessary
-        if success and self.main_app:
-            self.main_app.authorize_app(app_identifier)
+        env = os.environ.copy()
+        cached_key = get_cached_key()
+        if cached_key:
+            env["FACEGATE_DECRYPT_KEY"] = cached_key.hex()
             
-        return success
+        try:
+            result = subprocess.run(
+                [facegate_bin, "--recognize", app_identifier],
+                env=env,
+                close_fds=True
+            )
+            exit_code = result.returncode
+            logging.info(f"Recognition subprocess exited with code {exit_code}")
+            
+            success = False
+            if exit_code == 0:
+                success = True
+            elif exit_code in (3, 4):
+                # Fallback to password dialog in daemon process
+                logging.info(f"Subprocess returned {exit_code}. Displaying password fallback dialog in daemon.")
+                app_name = self.main_app.get_app_name(app_identifier) if self.main_app else app_identifier
+                dialog = AuthDialog(app_name, mode="password")
+                res = dialog.exec()
+                success = (res == AuthDialog.DialogCode.Accepted)
+                
+            if success and self.main_app:
+                self.main_app.authorize_app(app_identifier)
+                
+            return success
+        except Exception as e:
+            logging.error(f"Failed to spawn recognition subprocess: {e}. Falling back to password dialog.")
+            app_name = self.main_app.get_app_name(app_identifier) if self.main_app else app_identifier
+            dialog = AuthDialog(app_name, mode="password")
+            res = dialog.exec()
+            success = (res == AuthDialog.DialogCode.Accepted)
+            if success and self.main_app:
+                self.main_app.authorize_app(app_identifier)
+            return success
 
 @ClassInfo({"D-Bus Interface": "org.facegate.FaceGate"})
 class FaceGateAdaptor(QDBusAbstractAdaptor):

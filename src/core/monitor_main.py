@@ -135,39 +135,82 @@ class FaceGateApplication(QObject):
         logging.info(f"Handling AppMonitor suspension for '{desktop_name}' (PID: {pid})")
         
         try:
-            # Check if process is already gone before showing UI
             import psutil
             if not psutil.pid_exists(pid):
-                logging.warning(f"Process PID {pid} died before dialog was shown.")
+                logging.warning(f"Process PID {pid} died before auth was shown.")
                 return
 
-            app_id = self.get_app_id_from_desktop(desktop_name)
-            app_name = self.get_app_name(desktop_name)
-            timeout_sec = self.config.get("app_monitor.auth_timeout_seconds", 60)
+            # Resolve facegate path dynamically
+            from locking.launcher_sub import get_facegate_executable
+            facegate_bin = get_facegate_executable()
             
-            dialog = AuthDialog(app_name, timeout_seconds=timeout_sec)
+            import subprocess
+            import os
+            from database.embedding_store import get_cached_key
+            env = os.environ.copy()
+            cached_key = get_cached_key()
+            if cached_key:
+                env["FACEGATE_DECRYPT_KEY"] = cached_key.hex()
+            logging.info(f"Spawning recognition subprocess for backstop: {facegate_bin} --recognize {desktop_name}")
             
-            # Setup a dynamic watch timer to auto-dismiss dialog if suspended process is terminated externally
+            # Start the subprocess asynchronously so we can poll the PID and check if it is still alive!
+            # If the target process is killed while we wait, we terminate the subprocess.
+            proc = subprocess.Popen([facegate_bin, "--recognize", desktop_name], env=env)
+            
+            # Watchdog timer to kill subprocess if target PID exits
             watch_timer = QTimer(self)
             def check_process_alive():
+                # Check if target process was terminated
                 if not psutil.pid_exists(pid):
-                    logging.info(f"Process PID {pid} was terminated. Closing dialog.")
-                    dialog.reject()
+                    logging.info(f"Target process PID {pid} died externally. Terminating recognition subprocess.")
+                    proc.terminate()
+                    watch_timer.stop()
+                # Check if subprocess finished
+                elif proc.poll() is not None:
                     watch_timer.stop()
             
             watch_timer.timeout.connect(check_process_alive)
-            watch_timer.start(100)  # Check every 100ms
+            watch_timer.start(100) # Check every 100ms
             
-            result = dialog.exec()
+            # Wait for subprocess to finish
+            exit_code = proc.wait()
             watch_timer.stop()
             
-            success = (result == AuthDialog.DialogCode.Accepted)
-            logging.info(f"Authentication result for '{desktop_name}': {success}")
+            logging.info(f"Backstop recognition subprocess exited with code {exit_code}")
+            
+            success = False
+            if exit_code == 0:
+                success = True
+            elif exit_code in (3, 4):
+                # Fallback to daemon password dialog
+                logging.info(f"Backstop subprocess returned exit code {exit_code}. Displaying password fallback.")
+                app_name = self.get_app_name(desktop_name)
+                timeout_sec = self.config.get("app_monitor.auth_timeout_seconds", 60)
+                
+                # Check if process is still alive before showing password dialog
+                if psutil.pid_exists(pid):
+                    dialog = AuthDialog(app_name, mode="password", timeout_seconds=timeout_sec)
+                    
+                    # Watchdog timer for password dialog
+                    pwd_watch_timer = QTimer(self)
+                    def check_pwd_process_alive():
+                        if not psutil.pid_exists(pid):
+                            logging.info(f"Target process PID {pid} died. Closing password dialog.")
+                            dialog.reject()
+                            pwd_watch_timer.stop()
+                    pwd_watch_timer.timeout.connect(check_pwd_process_alive)
+                    pwd_watch_timer.start(100)
+                    
+                    res = dialog.exec()
+                    pwd_watch_timer.stop()
+                    success = (res == QDialog.DialogCode.Accepted)
             
             if success:
                 # Resume process
                 os.kill(pid, signal.SIGCONT)
                 logging.info(f"Resumed process (PID: {pid}) after successful authentication.")
+                app_id = self.get_app_id_from_desktop(desktop_name)
+                self.authorize_app(app_id)
             else:
                 policy = self.config.get("app_monitor.on_auth_failure", "kill")
                 if policy == "kill":
@@ -178,6 +221,7 @@ class FaceGateApplication(QObject):
                         pass
                 else:
                     logging.info(f"Process (PID: {pid}) remains suspended according to policy '{policy}'.")
+                    
         except Exception as e:
             logging.error(f"Error managing process lifecycle: {e}")
 
@@ -261,10 +305,58 @@ def main():
     parser = argparse.ArgumentParser(description="FaceGate-Linux lock system")
     parser.add_argument("--monitor", action="store_true", help="Start the main lock daemon and tray icon")
     parser.add_argument("--auth-launch", type=str, help="Authenticate launcher request for target desktop")
+    parser.add_argument("--enroll", type=str, help="Enroll a face embedding for the specified username")
+    parser.add_argument("--recognize", type=str, help="Run the face recognition subprocess dialog for target desktop")
+    parser.add_argument("--set-master-password", action="store_true", help="Set or change the master password")
     
     args, unknown = parser.parse_known_args()
 
-    if args.auth_launch:
+    if args.set_master_password:
+        from security.credential_store import set_master_password_cli
+        set_master_password_cli()
+        sys.exit(0)
+        
+    elif args.enroll:
+        # CLI Enrollment mode
+        from recognition.cli_enroll import enroll_user
+        enroll_user(args.enroll)
+        sys.exit(0)
+        
+    elif args.recognize:
+        # Recognition subprocess mode (GUI)
+        from PySide6.QtWidgets import QDialog
+        app = QApplication(sys.argv)
+        app.setQuitOnLastWindowClosed(False)
+        
+        desktop_name = args.recognize
+        config = get_config()
+        
+        # Determine app name
+        app_name = desktop_name
+        for p_app in config.get("protected_apps", []):
+            if p_app.get("desktop_name") == desktop_name or p_app.get("id") == desktop_name:
+                app_name = p_app.get("name", desktop_name)
+                break
+                
+        timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
+        
+        # Run dialog in face-preview mode
+        dialog = AuthDialog(app_name, mode="face", timeout_seconds=timeout_sec)
+        result = dialog.exec()
+        
+        if result == QDialog.DialogCode.Accepted:
+            sys.exit(0)
+        else:
+            if dialog.fallback_to_password:
+                sys.exit(4)
+            elif dialog.camera_error:
+                sys.exit(3)
+            elif dialog.timed_out:
+                sys.exit(2)
+            else:
+                sys.exit(1)
+
+    elif args.auth_launch:
         # Client launch mode
         # Extract remaining arguments after '--'
         try:
