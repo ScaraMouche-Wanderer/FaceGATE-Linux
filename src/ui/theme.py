@@ -4,11 +4,11 @@ from PySide6.QtCore import Qt, QRect, QVariantAnimation, QEasingCurve, QAbstract
 from PySide6.QtWidgets import QSpinBox
 
 # Purple & White light palette
-BG_NEUTRAL = "#f8fafc"
-CARD_NEUTRAL = "#ffffff"
-BORDER_NEUTRAL = "#e2e8f0"
+BG_NEUTRAL = "#f5f3ff"
+CARD_NEUTRAL = "#faf9fc"
+BORDER_NEUTRAL = "#e9e7f1"
 TEXT_PRIMARY = "#1e1b4b"
-TEXT_SECONDARY = "#64748b"
+TEXT_SECONDARY = "#5c5770"
 
 # Accents
 ACCENT_PURPLE = "#7c3aed"

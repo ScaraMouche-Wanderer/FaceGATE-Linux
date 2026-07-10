@@ -35,11 +35,11 @@ class SettingsWindow(QDialog):
         # Set base theme styling
         self.setStyleSheet(get_theme_qss() + f"""
             QListWidget#sidebar {{
-                background-color: #f1f5f9;
+                background-color: #ede9fe;
                 border: none;
                 border-right: 1px solid {BORDER_NEUTRAL};
                 padding-top: 10px;
-                color: #475569;
+                color: #4c4664;
                 font-size: 13px;
                 font-weight: 500;
             }}
@@ -47,10 +47,10 @@ class SettingsWindow(QDialog):
                 padding: 10px 16px;
                 border-radius: 6px;
                 margin: 4px 8px;
-                color: #475569;
+                color: #4c4664;
             }}
             QListWidget#sidebar::item:hover {{
-                background-color: #e2e8f0;
+                background-color: #e5dbff;
                 color: {TEXT_PRIMARY};
             }}
             QListWidget#sidebar::item:selected {{
@@ -354,15 +354,15 @@ class SettingsWindow(QDialog):
         startup_layout.setContentsMargins(16, 16, 16, 16)
         startup_layout.setSpacing(10)
 
-        startup_lbl = QLabel("Startup Options")
+        startup_lbl = QLabel("Startup Settings")
         startup_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_PURPLE};")
         startup_layout.addWidget(startup_lbl)
 
-        self.autostart_check = QCheckBox("Launch FaceGate background daemon automatically at Login")
+        self.autostart_check = QCheckBox("Start FaceGate automatically when you log in")
         startup_layout.addWidget(self.autostart_check)
 
         delay_layout = QHBoxLayout()
-        delay_lbl = QLabel("Daemon startup delay (seconds):")
+        delay_lbl = QLabel("Delay before starting on boot (seconds):")
         delay_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
         self.delay_spin = AnimatedSpinBox()
         self.delay_spin.setRange(0, 60)
@@ -381,7 +381,7 @@ class SettingsWindow(QDialog):
         policy_layout.setContentsMargins(16, 16, 16, 16)
         policy_layout.setSpacing(10)
 
-        policy_lbl = QLabel("Locking & Timeout Policies")
+        policy_lbl = QLabel("Security & Scanning Policies")
         policy_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_PURPLE};")
         policy_layout.addWidget(policy_lbl)
 
@@ -390,14 +390,14 @@ class SettingsWindow(QDialog):
         policy_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self.policy_combo = QComboBox()
-        self.policy_combo.addItem("Kill Process (SIGKILL)", "kill")
-        self.policy_combo.addItem("Keep Process Stopped (SIGSTOP)", "keep_stopped")
-        policy_form.addRow("On Auth Failure Policy:", self.policy_combo)
+        self.policy_combo.addItem("Close and exit the locked application immediately (Recommended)", "kill")
+        self.policy_combo.addItem("Freeze the application in the background", "keep_stopped")
+        policy_form.addRow("If authentication is cancelled or fails:", self.policy_combo)
 
         self.timeout_spin = AnimatedSpinBox()
         self.timeout_spin.setRange(5, 300)
         self.timeout_spin.setSingleStep(5)
-        policy_form.addRow("GUI Timeout (seconds):", self.timeout_spin)
+        policy_form.addRow("Close face scan screen after (seconds):", self.timeout_spin)
 
         policy_layout.addLayout(policy_form)
         layout.addWidget(policy_card)
@@ -410,16 +410,20 @@ class SettingsWindow(QDialog):
         prot_layout.setContentsMargins(16, 16, 16, 16)
         prot_layout.setSpacing(10)
 
-        prot_lbl = QLabel("System Protection & Emergency Settings")
+        prot_lbl = QLabel("Self-Protection & Emergency Override")
         prot_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #ef4444;")
         prot_layout.addWidget(prot_lbl)
 
-        self.protection_check = QCheckBox("App Deletion Protection (highly recommended)")
+        self.protection_check = QCheckBox("Enable anti-uninstall protection (Recommended)")
         self.protection_check.clicked.connect(self.handle_protection_clicked)
         prot_layout.addWidget(self.protection_check)
+        
+        prot_desc = QLabel("Prevents unauthorized users from deleting FaceGate settings or bypassing protection.")
+        prot_desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; margin-left: 20px; border: none; background: transparent;")
+        prot_layout.addWidget(prot_desc)
 
         hk_layout = QHBoxLayout()
-        hk_lbl = QLabel("Emergency Kill Shortcut:")
+        hk_lbl = QLabel("Emergency Shutdown Shortcut:")
         hk_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
         self.hotkey_input = QLineEdit()
         self.hotkey_input.setPlaceholderText("<Control><Alt>k")
@@ -428,8 +432,9 @@ class SettingsWindow(QDialog):
         hk_layout.addStretch()
         prot_layout.addLayout(hk_layout)
 
-        hk_desc = QLabel("GNOME format: e.g. <Control><Alt>k or <Shift><Control><Alt>e")
+        hk_desc = QLabel("Press this keyboard combination to immediately stop FaceGate and restore all apps in case of camera failure. Format: e.g. <Control><Alt>k")
         hk_desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-style: italic;")
+        hk_desc.setWordWrap(True)
         prot_layout.addWidget(hk_desc)
 
         layout.addWidget(prot_card)
@@ -442,18 +447,18 @@ class SettingsWindow(QDialog):
         notif_layout.setContentsMargins(16, 16, 16, 16)
         notif_layout.setSpacing(10)
 
-        notif_lbl = QLabel("Notifications & Idle Locks")
+        notif_lbl = QLabel("Notifications & Auto-Locking")
         notif_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_PURPLE};")
         notif_layout.addWidget(notif_lbl)
 
-        self.notify_check = QCheckBox("Show desktop notifications on application unlock/relock")
+        self.notify_check = QCheckBox("Show desktop notification banners on successful unlocks")
         notif_layout.addWidget(self.notify_check)
 
-        self.idle_check = QCheckBox("Auto re-lock protected applications on system idle (GNOME Stub)")
+        self.idle_check = QCheckBox("Automatically lock open applications when system becomes idle")
         notif_layout.addWidget(self.idle_check)
 
         idle_time_layout = QHBoxLayout()
-        idle_time_lbl = QLabel("Idle timeout (minutes):")
+        idle_time_lbl = QLabel("System idle time before locking (minutes):")
         idle_time_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
         self.idle_spin = AnimatedSpinBox()
         self.idle_spin.setRange(1, 60)
