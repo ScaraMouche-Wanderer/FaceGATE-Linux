@@ -244,6 +244,20 @@ class FaceGateApplication(QObject):
         self.dbus_service.request_auth_internal(desktop_name)
 
     @Slot()
+    def open_settings(self):
+        """Opens the Settings Window."""
+        from ui.settings_window import SettingsWindow
+        if not hasattr(self, "_settings_window") or self._settings_window is None:
+            self._settings_window = SettingsWindow(self.config, parent=None)
+            self._settings_window.finished.connect(self.cleanup_settings_window)
+        self._settings_window.show()
+        self._settings_window.raise_()
+        self._settings_window.activateWindow()
+
+    def cleanup_settings_window(self, result):
+        self._settings_window = None
+
+    @Slot()
     def quit_app(self):
         logging.info("Quit requested. Performing restoration...")
         
@@ -315,6 +329,14 @@ def run_auth_launch(desktop_name: str, exec_args: list):
 def main():
     setup_logging()
     logging.info("Starting FaceGate-Linux application wrapper.")
+
+    # Fallback env variables for graphical execution compatibility (e.g. under systemd user manager)
+    if "DISPLAY" not in os.environ:
+        os.environ["DISPLAY"] = ":0"
+        logging.info("DISPLAY environment variable not found. Defaulting to :0 for systemd compatibility.")
+    if "XAUTHORITY" not in os.environ:
+        os.environ["XAUTHORITY"] = os.path.expanduser("~/.Xauthority")
+        logging.info("XAUTHORITY environment variable not found. Defaulting to ~/.Xauthority for systemd compatibility.")
 
     parser = argparse.ArgumentParser(description="FaceGate-Linux lock system")
     parser.add_argument("--monitor", action="store_true", help="Start the main lock daemon and tray icon")

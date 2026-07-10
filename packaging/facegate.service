@@ -1,0 +1,10 @@
+[Unit]
+Description=FaceGate-Linux background lock daemon
+
+[Service]
+ExecStart=%h/.local/bin/facegate --monitor
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

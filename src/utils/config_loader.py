@@ -51,6 +51,29 @@ class Config:
                 return default
         return val
 
+    def set(self, key, value):
+        parts = key.split('.')
+        val = self.settings
+        for part in parts[:-1]:
+            if part not in val or not isinstance(val[part], dict):
+                val[part] = {}
+            val = val[part]
+        val[parts[-1]] = value
+
+    def save(self):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        default_config_path = os.path.abspath(
+            os.path.join(current_dir, "..", "..", "config", "default.yaml")
+        )
+        try:
+            with open(default_config_path, 'w') as f:
+                yaml.safe_dump(self.settings, f, default_flow_style=False, sort_keys=False)
+            logging.info(f"Configuration saved successfully to {default_config_path}")
+            return True
+        except Exception as e:
+            logging.error(f"Error saving config to {default_config_path}: {e}")
+            return False
+
 # Global config instance
 _config_instance = None
 

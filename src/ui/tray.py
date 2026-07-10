@@ -127,6 +127,13 @@ class FaceGateTray(QSystemTrayIcon):
             
         self.menu.addSeparator()
         
+        # Settings
+        settings_action = QAction("Settings...", self.menu)
+        settings_action.triggered.connect(self.main_app.open_settings)
+        self.menu.addAction(settings_action)
+        
+        self.menu.addSeparator()
+        
         # Quit
         quit_action = QAction("Quit FaceGate", self.menu)
         quit_action.triggered.connect(self.main_app.quit_app)
