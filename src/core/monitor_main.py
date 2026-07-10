@@ -118,7 +118,38 @@ class FaceGateApplication(QObject):
             self.tray.update_tray_state()
         logging.info("FaceGate monitor is now ACTIVE.")
 
+    def verify_admin_face(self, reason: str) -> bool:
+        """
+        Authenticates using face recognition.
+        If there are no enrolled faces (first setup), returns True immediately.
+        """
+        from database.embedding_store import load_embeddings
+        try:
+            enrolled = load_embeddings()
+        except Exception:
+            enrolled = {}
+            
+        if not enrolled:
+            logging.info("Admin verification: No enrolled faces found. Bypassing check.")
+            return True
+            
+        from ui.auth_dialog import AuthDialog
+        timeout_sec = self.config.get("app_monitor.auth_timeout_seconds", 60)
+        dialog = AuthDialog(reason, mode="face", timeout_seconds=timeout_sec)
+        result = dialog.exec()
+        
+        success = (result == QDialog.DialogCode.Accepted)
+        
+        from database.audit_log import log_auth_attempt
+        log_auth_attempt(reason, "face" if not dialog.fallback_to_password else "password", "success" if success else "fail", getattr(dialog, "final_score", None))
+        
+        return success
+
     def disable_for(self, minutes: int):
+        if not self.verify_admin_face("Disable FaceGate"):
+            logging.warning("Disable FaceGate: Verification failed.")
+            return
+            
         self.disabled_until = time.time() + (minutes * 60)
         self.active = False
         self.disabled_timer.start(minutes * 60 * 1000)
@@ -314,7 +345,11 @@ class FaceGateApplication(QObject):
 
     @Slot()
     def open_settings(self):
-        """Opens the Settings Window."""
+        """Opens the Settings Window after face verification."""
+        if not self.verify_admin_face("Settings Access"):
+            logging.warning("Settings Access: Verification failed.")
+            return
+            
         from ui.settings_window import SettingsWindow
         if not hasattr(self, "_settings_window") or self._settings_window is None:
             self._settings_window = SettingsWindow(self.config, parent=None)
@@ -462,7 +497,29 @@ def main():
         
     elif args.settings:
         from ui.settings_window import SettingsWindow
+        from ui.auth_dialog import AuthDialog
+        from database.embedding_store import load_embeddings
+        from database.audit_log import log_auth_attempt
+        
         app = QApplication(sys.argv)
+        
+        # Verify admin face if any embeddings exist
+        try:
+            enrolled = load_embeddings()
+        except Exception:
+            enrolled = {}
+            
+        if enrolled:
+            config = get_config()
+            timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
+            dialog = AuthDialog("Settings Access", mode="face", timeout_seconds=timeout_sec)
+            result = dialog.exec()
+            success = (result == QDialog.DialogCode.Accepted)
+            log_auth_attempt("Settings Access", "face" if not dialog.fallback_to_password else "password", "success" if success else "fail", getattr(dialog, "final_score", None))
+            if not success:
+                logging.info("Settings Access: Verification failed. Exiting.")
+                sys.exit(1)
+                
         dialog = SettingsWindow()
         dialog.exec()
         sys.exit(0)
