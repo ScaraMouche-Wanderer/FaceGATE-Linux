@@ -44,11 +44,11 @@ def log_auth_attempt(app_identifier: str, method: str, result: str, confidence_s
                 "INSERT INTO audit_log (app_identifier, method, result, confidence_score, username) VALUES (?, ?, ?, ?, ?)",
                 (app_identifier, method, result, confidence_score, username)
             )
-            # Prune to keep only the latest 1000 entries
+            # Prune to keep only the latest 200 entries
             conn.execute("""
                 DELETE FROM audit_log 
                 WHERE id NOT IN (
-                    SELECT id FROM audit_log ORDER BY id DESC LIMIT 1000
+                    SELECT id FROM audit_log ORDER BY id DESC LIMIT 200
                 )
             """)
             conn.commit()
