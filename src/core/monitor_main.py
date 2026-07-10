@@ -46,7 +46,7 @@ class FaceGateApplication(QObject):
         # Setup AppMonitor
         poll_interval = float(self.config.get("app_monitor.poll_interval_seconds", 1.5))
         self.monitor = AppMonitor(self, poll_interval=poll_interval)
-        self.monitor.signals.request_auth.connect(self.handle_monitor_auth)
+        self.monitor.signals.request_auth.connect(self.handle_monitor_auth, Qt.ConnectionType.QueuedConnection)
 
         # D-Bus sleep & lock monitors for preventing trespassing
         from PySide6.QtDBus import QDBusConnection
@@ -605,7 +605,7 @@ def main():
 
     if args.set_master_password:
         from security.credential_store import set_master_password_cli
-        set__password_cli()
+        set_master_password_cli()
         sys.exit(0)
         
     elif args.settings:
