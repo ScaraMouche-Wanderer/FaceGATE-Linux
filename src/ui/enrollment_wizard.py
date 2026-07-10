@@ -37,7 +37,7 @@ class EnrollmentWizard(QDialog):
         self.setModal(True)
 
         # Determine screen-based size
-        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtGui import QGuiApplication, QColor
         screen = QGuiApplication.primaryScreen()
         if screen:
             screen_size = screen.size()
@@ -45,18 +45,58 @@ class EnrollmentWizard(QDialog):
             height = int(screen_size.height() * 0.55)
             width = max(500, min(width, 700))
             height = max(520, min(height, 750))
-            self.resize(width, height)
-            self.setMinimumSize(480, 500)
+            self.resize(width + 20, height + 20)
+            self.setMinimumSize(480 + 20, 500 + 20)
         else:
-            self.resize(500, 520)
-            self.setMinimumSize(480, 500)
+            self.resize(520, 540)
+            self.setMinimumSize(500, 520)
 
         # Apply global theme stylesheet
-        from ui.theme import get_theme_qss
+        from ui.theme import get_theme_qss, BG_NEUTRAL, BORDER_NEUTRAL, CustomTitleBar
         self.setStyleSheet(get_theme_qss())
-
-        layout = QVBoxLayout(self)
+        
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        # Outer layout
+        window_layout = QVBoxLayout(self)
+        window_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Container
+        self.main_container = QWidget()
+        self.main_container.setObjectName("mainContainer")
+        self.main_container.setStyleSheet(f"""
+            QWidget#mainContainer {{
+                background-color: {BG_NEUTRAL};
+                border: 1px solid {BORDER_NEUTRAL};
+                border-radius: 12px;
+            }}
+        """)
+        
+        # Shadow
+        from PySide6.QtWidgets import QGraphicsDropShadowEffect
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(15)
+        self.shadow.setColor(QColor(0, 0, 0, 80))
+        self.shadow.setOffset(0, 4)
+        self.main_container.setGraphicsEffect(self.shadow)
+        
+        window_layout.addWidget(self.main_container)
+        
+        # Inner layout
+        container_layout = QVBoxLayout(self.main_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        
+        # Custom Title Bar (wizards don't resize or minimize)
+        self.title_bar = CustomTitleBar(self, title="FaceGate Enrollment Wizard", allow_maximize=False, allow_minimize=False)
+        container_layout.addWidget(self.title_bar)
+        
+        # Content layout widget
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
         layout.setContentsMargins(20, 20, 20, 20)
+        container_layout.addWidget(content_widget)
         
         self.stack = QStackedWidget()
         layout.addWidget(self.stack)

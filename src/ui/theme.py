@@ -267,3 +267,120 @@ class AnimatedSpinBox(QSpinBox):
         self.anim.setEasingCurve(QEasingCurve.Type.OutQuad)
         self.anim.valueChanged.connect(lambda val: self.setValue(int(val)))
         self.anim.start()
+
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtCore import QPoint
+
+class CustomTitleBar(QWidget):
+    def __init__(self, parent, title="", allow_maximize=True, allow_minimize=True):
+        super().__init__(parent)
+        self.parent = parent
+        self.allow_maximize = allow_maximize
+        self.allow_minimize = allow_minimize
+        self.setFixedHeight(45)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(8)
+        
+        # 1. Window Title (Left side)
+        self.title_lbl = QLabel(title)
+        self.title_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {TEXT_PRIMARY}; font-family: {FONT_FAMILY};")
+        layout.addWidget(self.title_lbl)
+        
+        layout.addStretch()
+        
+        # 2. macOS Style Traffic Light Buttons (Right side)
+        # Yellow (Minimize)
+        self.min_btn = QPushButton()
+        self.min_btn.setFixedSize(12, 12)
+        self.min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.min_btn.setToolTip("Minimize")
+        if self.allow_minimize:
+            self.min_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #ffbd2e;
+                    border-radius: 6px;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #ffb114;
+                }
+            """)
+            self.min_btn.clicked.connect(self.parent.showMinimized)
+        else:
+            self.min_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e2e8f0;
+                    border-radius: 6px;
+                    border: none;
+                }
+            """)
+            self.min_btn.setEnabled(False)
+        
+        # Green (Maximize)
+        self.max_btn = QPushButton()
+        self.max_btn.setFixedSize(12, 12)
+        self.max_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.max_btn.setToolTip("Maximize")
+        if self.allow_maximize:
+            self.max_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #27c93f;
+                    border-radius: 6px;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #1ec030;
+                }
+            """)
+            self.max_btn.clicked.connect(self.toggle_maximize)
+        else:
+            self.max_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e2e8f0;
+                    border-radius: 6px;
+                    border: none;
+                }
+            """)
+            self.max_btn.setEnabled(False)
+            
+        # Red (Close)
+        self.close_btn = QPushButton()
+        self.close_btn.setFixedSize(12, 12)
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.setToolTip("Close")
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff5f56;
+                border-radius: 6px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #ff4c40;
+            }
+        """)
+        self.close_btn.clicked.connect(self.parent.close)
+            
+        layout.addWidget(self.min_btn)
+        layout.addWidget(self.max_btn)
+        layout.addWidget(self.close_btn)
+        
+        # Dragging support
+        self.drag_position = QPoint()
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_position = event.globalPosition().toPoint() - self.parent.frameGeometry().topLeft()
+            event.accept()
+            
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            self.parent.move(event.globalPosition().toPoint() - self.drag_position)
+            event.accept()
+            
+    def toggle_maximize(self):
+        if self.parent.isMaximized():
+            self.parent.showNormal()
+        else:
+            self.parent.showMaximized()

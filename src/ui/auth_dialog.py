@@ -1,6 +1,6 @@
 import logging
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QApplication
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QApplication, QWidget
 )
 from PySide6.QtCore import Qt, QTimer, Slot, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
@@ -102,31 +102,31 @@ class AuthDialog(QDialog):
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint | 
             Qt.WindowType.Dialog | 
-            Qt.WindowType.WindowTitleHint |
-            Qt.WindowType.CustomizeWindowHint
+            Qt.WindowType.FramelessWindowHint
         )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
         
         # Determine screen-based size
-        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtGui import QGuiApplication, QColor
         screen = QGuiApplication.primaryScreen()
         if screen:
             screen_size = screen.size()
             if self.mode == "face":
                 width = max(420, min(int(screen_size.width() * 0.35), 600))
                 height = max(480, min(int(screen_size.height() * 0.55), 700))
-                self.setFixedSize(width, height)
+                self.setFixedSize(width + 20, height + 20)
             else:
                 width = max(380, min(int(screen_size.width() * 0.3), 500))
                 height = max(220, min(int(screen_size.height() * 0.35), 300))
-                self.setFixedSize(width, height)
+                self.setFixedSize(width + 20, height + 20)
         else:
             if self.mode == "face":
-                self.setFixedSize(420, 480)
+                self.setFixedSize(440, 500)
             else:
-                self.setFixedSize(380, 220)
+                self.setFixedSize(400, 240)
         
-        from ui.theme import get_theme_qss, ACCENT_PURPLE, TEXT_SECONDARY
+        from ui.theme import get_theme_qss, ACCENT_PURPLE, TEXT_SECONDARY, BG_NEUTRAL, BORDER_NEUTRAL, CustomTitleBar
         self.setStyleSheet(get_theme_qss() + f"""
             QPushButton#pwdFallbackBtn {{
                 background-color: transparent;
@@ -141,9 +141,46 @@ class AuthDialog(QDialog):
             }}
         """)
 
-        layout = QVBoxLayout()
+        # Outer layout
+        window_layout = QVBoxLayout(self)
+        window_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Container
+        self.main_container = QWidget()
+        self.main_container.setObjectName("mainContainer")
+        self.main_container.setStyleSheet(f"""
+            QWidget#mainContainer {{
+                background-color: {BG_NEUTRAL};
+                border: 1px solid {BORDER_NEUTRAL};
+                border-radius: 12px;
+            }}
+        """)
+        
+        # Shadow
+        from PySide6.QtWidgets import QGraphicsDropShadowEffect
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(15)
+        self.shadow.setColor(QColor(0, 0, 0, 80))
+        self.shadow.setOffset(0, 4)
+        self.main_container.setGraphicsEffect(self.shadow)
+        
+        window_layout.addWidget(self.main_container)
+        
+        # Inner layout
+        container_layout = QVBoxLayout(self.main_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        
+        # Custom Title Bar
+        self.title_bar = CustomTitleBar(self, title="FaceGate Authentication", allow_maximize=False, allow_minimize=False)
+        container_layout.addWidget(self.title_bar)
+        
+        # Content layout widget
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
+        container_layout.addWidget(content_widget)
 
         if self.mode == "face":
             # Header Info
@@ -263,7 +300,7 @@ class AuthDialog(QDialog):
                     # Delay layout layout pass slightly to ensure buttons exist and can be disabled
                     QTimer.singleShot(50, lambda: self.start_lockout(remaining))
 
-        self.setLayout(layout)
+
 
         # Setup timeout timer if specified
         if self.timeout_seconds > 0:

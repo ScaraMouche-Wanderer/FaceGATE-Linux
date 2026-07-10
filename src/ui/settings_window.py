@@ -29,7 +29,7 @@ class SettingsWindow(QDialog):
     def init_ui(self):
         self.setWindowTitle("FaceGate Settings")
         # Sizing based on content & screen resolution
-        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtGui import QGuiApplication, QColor
         screen = QGuiApplication.primaryScreen()
         if screen:
             screen_size = screen.size()
@@ -37,18 +37,22 @@ class SettingsWindow(QDialog):
             height = int(screen_size.height() * 0.6)
             width = max(800, min(width, 1200))
             height = max(560, min(height, 800))
-            self.resize(width, height)
-            self.setMinimumSize(780, 520)
+            self.resize(width + 20, height + 20)
+            self.setMinimumSize(780 + 20, 520 + 20)
         else:
-            self.resize(820, 560)
-            self.setMinimumSize(780, 520)
+            self.resize(840, 580)
+            self.setMinimumSize(800, 540)
+            
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        from ui.theme import get_theme_qss, ACCENT_PURPLE, BORDER_NEUTRAL, TEXT_PRIMARY, BG_NEUTRAL, AnimatedSpinBox
+        from ui.theme import get_theme_qss, ACCENT_PURPLE, BORDER_NEUTRAL, TEXT_PRIMARY, BG_NEUTRAL, AnimatedSpinBox, CustomTitleBar
         # Set base theme styling
         self.setStyleSheet(get_theme_qss() + f"""
             QListWidget#sidebar {{
                 background-color: #ede9fe;
                 border: none;
+                border-bottom-left-radius: 12px;
                 border-right: 1px solid {BORDER_NEUTRAL};
                 padding-top: 10px;
                 color: #4c4664;
@@ -84,9 +88,45 @@ class SettingsWindow(QDialog):
             }}
         """)
 
-        main_layout = QHBoxLayout(self)
+        # Outer layout
+        window_layout = QVBoxLayout(self)
+        window_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Main container with rounded corners and border
+        self.main_container = QWidget()
+        self.main_container.setObjectName("mainContainer")
+        self.main_container.setStyleSheet(f"""
+            QWidget#mainContainer {{
+                background-color: {BG_NEUTRAL};
+                border: 1px solid {BORDER_NEUTRAL};
+                border-radius: 12px;
+            }}
+        """)
+        
+        # Drop shadow
+        from PySide6.QtWidgets import QGraphicsDropShadowEffect
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(15)
+        self.shadow.setColor(QColor(0, 0, 0, 80))
+        self.shadow.setOffset(0, 4)
+        self.main_container.setGraphicsEffect(self.shadow)
+        
+        window_layout.addWidget(self.main_container)
+        
+        # Inner layout
+        container_layout = QVBoxLayout(self.main_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        
+        # Custom Title Bar
+        self.title_bar = CustomTitleBar(self, title="FaceGate Settings", allow_maximize=True, allow_minimize=True)
+        container_layout.addWidget(self.title_bar)
+        
+        # Horizontal content layout
+        main_layout = QHBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+        container_layout.addLayout(main_layout)
 
         # 1. Left Sidebar Navigation
         self.sidebar = QListWidget()
