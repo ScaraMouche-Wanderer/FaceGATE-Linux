@@ -30,6 +30,7 @@ class AuthDialog(QDialog):
         self.camera_error = False
         self.timed_out = False
         self.success_count = 0
+        self.final_score = None
         
         self.detector = None
         self.camera_worker = None
@@ -273,6 +274,7 @@ class AuthDialog(QDialog):
             if self.success_count >= 3:
                 logging.info(f"Subprocess Auth: Matched enrolled user '{matched_user}' (Similarity: {matched_score:.4f})")
                 self.authenticated = True
+                self.final_score = matched_score
                 self.accept()
         else:
             self.success_count = 0

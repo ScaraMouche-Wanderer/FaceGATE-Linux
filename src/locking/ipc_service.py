@@ -38,21 +38,46 @@ class FaceGateService(QObject):
             
         try:
             if cached_key:
-                proc = subprocess.Popen(cmd, pass_fds=pass_fds, close_fds=True)
+                proc = subprocess.Popen(cmd, pass_fds=pass_fds, stdout=subprocess.PIPE, text=True, close_fds=True)
                 os.close(r)
                 try:
                     os.write(w, cached_key)
                 finally:
                     os.close(w)
-                exit_code = proc.wait()
             else:
-                proc = subprocess.Popen(cmd, close_fds=True)
-                exit_code = proc.wait()
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, close_fds=True)
+
+            # Wait for subprocess to finish while keeping event loop alive
+            from PySide6.QtWidgets import QApplication
+            import time
+            while proc.poll() is None:
+                QApplication.processEvents()
+                time.sleep(0.05)
+
+            stdout_data, _ = proc.communicate()
+            exit_code = proc.returncode
             logging.info(f"Recognition subprocess exited with code {exit_code}")
             
+            # Parse similarity score if present
+            score = None
+            if stdout_data:
+                for line in stdout_data.splitlines():
+                    if line.startswith("FACEGATE_SCORE:"):
+                        try:
+                            score = float(line.split(":")[1])
+                        except ValueError:
+                            pass
+
             success = False
+            method = "face"
+            result = "fail"
+            confidence = score
+
             if exit_code == 0:
                 success = True
+                result = "success"
+            elif exit_code == 2:
+                result = "timeout"
             elif exit_code in (3, 4):
                 # Fallback to password dialog in daemon process
                 logging.info(f"Subprocess returned {exit_code}. Displaying password fallback dialog in daemon.")
@@ -60,6 +85,15 @@ class FaceGateService(QObject):
                 dialog = AuthDialog(app_name, mode="password")
                 res = dialog.exec()
                 success = (res == AuthDialog.DialogCode.Accepted)
+                method = "password"
+                result = "success" if success else "fail"
+                confidence = None
+            else:
+                result = "fail"
+
+            # Write to SQLite audit log
+            from database.audit_log import log_auth_attempt
+            log_auth_attempt(app_identifier, method, result, confidence)
                 
             if success and self.main_app:
                 self.main_app.authorize_app(app_identifier)
@@ -71,9 +105,19 @@ class FaceGateService(QObject):
             dialog = AuthDialog(app_name, mode="password")
             res = dialog.exec()
             success = (res == AuthDialog.DialogCode.Accepted)
+            
+            # Log fallback outcome
+            from database.audit_log import log_auth_attempt
+            log_auth_attempt(app_identifier, "password", "success" if success else "fail", None)
+            
             if success and self.main_app:
                 self.main_app.authorize_app(app_identifier)
             return success
+
+    def emergency_kill_internal(self):
+        logging.info("Emergency kill command received via D-Bus.")
+        if self.main_app:
+            self.main_app.quit_app(bypass_protection=True)
 
 @ClassInfo({"D-Bus Interface": "org.facegate.FaceGate"})
 class FaceGateAdaptor(QDBusAbstractAdaptor):
@@ -84,6 +128,10 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
     @Slot(str, result=bool)
     def RequestAuth(self, app_identifier: str) -> bool:
         return self.service.request_auth_internal(app_identifier)
+
+    @Slot()
+    def EmergencyKill(self):
+        self.service.emergency_kill_internal()
 
 def register_dbus_service(service_obj) -> bool:
     bus = QDBusConnection.sessionBus()

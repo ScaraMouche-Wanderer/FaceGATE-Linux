@@ -6,7 +6,7 @@ import logging
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget,
     QWidget, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QComboBox, QSpinBox, QCheckBox, QMessageBox
+    QComboBox, QSpinBox, QCheckBox, QMessageBox, QLineEdit
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QFont
@@ -29,8 +29,8 @@ class SettingsWindow(QDialog):
 
     def init_ui(self):
         self.setWindowTitle("FaceGate Settings")
-        self.resize(780, 520)
-        self.setMinimumSize(700, 480)
+        self.resize(820, 540)
+        self.setMinimumSize(750, 500)
         
         # Modern Premium QSS Style
         self.setStyleSheet("""
@@ -81,7 +81,7 @@ class SettingsWindow(QDialog):
                 border: none;
                 font-weight: bold;
             }
-            QComboBox, QSpinBox {
+            QComboBox, QSpinBox, QLineEdit {
                 background-color: #1a1a1e;
                 border: 1px solid #3a3a44;
                 border-radius: 6px;
@@ -89,7 +89,7 @@ class SettingsWindow(QDialog):
                 color: #ffffff;
                 font-size: 13px;
             }
-            QComboBox:focus, QSpinBox:focus {
+            QComboBox:focus, QSpinBox:focus, QLineEdit:focus {
                 border: 1px solid #6366f1;
             }
             QCheckBox {
@@ -155,10 +155,10 @@ class SettingsWindow(QDialog):
         self.sidebar.setFixedWidth(190)
         self.sidebar.setIconSize(QSize(18, 18))
         
-        # Load sidebar icons (using system themes where appropriate)
         self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("system-lock-screen"), "Locked Apps"))
         self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("dialog-password"), "Authentication"))
         self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("preferences-system"), "Behavior"))
+        self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("document-properties"), "Audit Logs"))
         self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("help-about"), "About"))
         
         self.sidebar.currentRowChanged.connect(self.switch_tab)
@@ -176,6 +176,7 @@ class SettingsWindow(QDialog):
         self.create_locked_apps_tab()
         self.create_authentication_tab()
         self.create_behavior_tab()
+        self.create_logs_tab()
         self.create_about_tab()
 
         right_layout.addWidget(self.tab_stack)
@@ -355,9 +356,60 @@ class SettingsWindow(QDialog):
         h_layout3.addWidget(self.autostart_check)
         form_layout.addLayout(h_layout3)
 
+        # 4. Uninstall/Deletion Protection Checkbox
+        h_layout_prot = QHBoxLayout()
+        self.protection_check = QCheckBox("App Deletion Protection (highly recommended)")
+        self.protection_check.setStyleSheet("border: none;")
+        self.protection_check.clicked.connect(self.handle_protection_clicked)
+        h_layout_prot.addWidget(self.protection_check)
+        form_layout.addLayout(h_layout_prot)
+
+        # 5. Emergency Kill Shortcut field
+        h_layout_hk = QHBoxLayout()
+        lbl_hk = QLabel("Emergency Kill Shortcut:")
+        lbl_hk.setStyleSheet("font-size: 13px; color: #cbd5e0; border: none;")
+        self.hotkey_input = QLineEdit()
+        self.hotkey_input.setPlaceholderText("<Control><Alt>k")
+        h_layout_hk.addWidget(lbl_hk)
+        h_layout_hk.addWidget(self.hotkey_input)
+        form_layout.addLayout(h_layout_hk)
+        
+        lbl_hk_desc = QLabel("GNOME format: e.g. <Control><Alt>k or <Shift><Control><Alt>e")
+        lbl_hk_desc.setStyleSheet("color: #a0aec0; font-size: 11px; border: none; margin-left: 20px; font-style: italic;")
+        form_layout.addWidget(lbl_hk_desc)
+
         layout.addWidget(form)
         layout.addStretch()
 
+        self.tab_stack.addWidget(page)
+
+    def create_logs_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        header = QLabel("Security Audit Logs")
+        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
+        layout.addWidget(header)
+
+        desc = QLabel("View recent application authorization attempts and outcomes.")
+        desc.setStyleSheet("color: #a0aec0; font-size: 13px;")
+        layout.addWidget(desc)
+
+        # Logs Table
+        self.logs_table = QTableWidget()
+        self.logs_table.setColumnCount(5)
+        self.logs_table.setHorizontalHeaderLabels(["Timestamp", "Application", "Method", "Result", "Confidence"])
+        self.logs_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.logs_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.logs_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.logs_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.logs_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.logs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.logs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+        layout.addWidget(self.logs_table)
         self.tab_stack.addWidget(page)
 
     def create_about_tab(self):
@@ -380,7 +432,7 @@ class SettingsWindow(QDialog):
         logo.setStyleSheet("font-size: 24px; font-weight: bold; color: #6366f1; border: none;")
         card_layout.addWidget(logo)
 
-        version = QLabel("Version: 0.1.0 (Phase 4 Build)")
+        version = QLabel("Version: 0.1.0 (Phase 5 Build)")
         version.setStyleSheet("color: #cbd5e0; font-size: 13px; border: none; font-weight: bold;")
         card_layout.addWidget(version)
 
@@ -417,8 +469,16 @@ class SettingsWindow(QDialog):
         timeout = self.config.get("app_monitor.auth_timeout_seconds", 60)
         self.timeout_spin.setValue(timeout)
         
-        # 3. Systemd Login check
+        # 3. Autostart & Protection
         self.autostart_check.setChecked(is_enabled())
+        self.protection_check.setChecked(self.config.get("behavior.uninstall_protection", True))
+        
+        # 4. Emergency Kill Hotkey
+        hotkey = self.config.get("behavior.emergency_key", "<Control><Alt>k")
+        self.hotkey_input.setText(hotkey)
+
+        # 5. Populate Logs Table
+        self.populate_logs_table()
 
     def populate_apps_table(self):
         self.apps_table.setRowCount(len(self.current_apps))
@@ -442,12 +502,33 @@ class SettingsWindow(QDialog):
             # Action Remove Button
             remove_btn = QPushButton("Remove")
             remove_btn.setObjectName("removeBtn")
-            # Connect using closure to capture row index correctly
             remove_btn.clicked.connect(self.make_remove_callback(row))
             
             self.apps_table.setItem(row, 0, icon_item)
             self.apps_table.setItem(row, 1, id_item)
             self.apps_table.setCellWidget(row, 2, remove_btn)
+
+    def populate_logs_table(self):
+        from database.audit_log import get_recent_logs
+        logs = get_recent_logs(50)
+        self.logs_table.setRowCount(len(logs))
+        for row, log in enumerate(logs):
+            self.logs_table.setItem(row, 0, QTableWidgetItem(str(log["timestamp"])))
+            self.logs_table.setItem(row, 1, QTableWidgetItem(log["app_identifier"]))
+            self.logs_table.setItem(row, 2, QTableWidgetItem(log["method"].upper()))
+            
+            # Color code result
+            result_item = QTableWidgetItem(log["result"].upper())
+            if log["result"] == "success":
+                result_item.setForeground(Qt.GlobalColor.green)
+            elif log["result"] == "timeout":
+                result_item.setForeground(Qt.GlobalColor.yellow)
+            else:
+                result_item.setForeground(Qt.GlobalColor.red)
+            self.logs_table.setItem(row, 3, result_item)
+            
+            score_str = f"{log['confidence_score']:.4f}" if log["confidence_score"] is not None else "N/A"
+            self.logs_table.setItem(row, 4, QTableWidgetItem(score_str))
 
     def make_remove_callback(self, index):
         return lambda: self.remove_app_at(index)
@@ -466,7 +547,6 @@ class SettingsWindow(QDialog):
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.selected_app:
             app_data = dialog.selected_app
             
-            # Form the structure default.yaml expects
             new_app = {
                 "id": app_data["executable"],
                 "name": app_data["name"],
@@ -474,11 +554,9 @@ class SettingsWindow(QDialog):
                 "desktop_name": app_data["desktop_name"]
             }
             
-            # Keep the icon path/name if present, so we can display it next time
             if app_data.get("icon"):
                 new_app["icon"] = app_data["icon"]
                 
-            # Avoid duplicate registrations
             if any(a["id"] == new_app["id"] for a in self.current_apps):
                 QMessageBox.warning(self, "Duplicate Application", 
                                     f"The application '{new_app['name']}' is already protected.")
@@ -488,9 +566,20 @@ class SettingsWindow(QDialog):
             self.populate_apps_table()
             logging.info(f"Staged app protection addition: '{new_app['id']}'")
 
+    def handle_protection_clicked(self, checked):
+        # Disabling protection requires master password auth
+        if not checked:
+            logging.info("Request to disable App Deletion Protection. Requiring master password.")
+            from ui.auth_dialog import AuthDialog
+            dialog = AuthDialog("Disable Deletion Protection", mode="password", parent=self)
+            res = dialog.exec()
+            if res != QDialog.DialogCode.Accepted:
+                self.protection_check.setChecked(True)
+                QMessageBox.warning(self, "Verification Failed", "Incorrect password. App Deletion Protection remains active.")
+            else:
+                logging.info("App Deletion Protection successfully disabled.")
+
     def trigger_password_change(self):
-        # Spawns credential_store CLI wrapper in terminal
-        # Find terminal emulator
         terminals = ["kitty", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"]
         term_bin = None
         for term in terminals:
@@ -503,19 +592,16 @@ class SettingsWindow(QDialog):
                                  "Could not find a terminal emulator (kitty, gnome-terminal, xterm, etc.) to run the password setup CLI.")
             return
 
-        # Resolve facegate path dynamically
         from locking.launcher_sub import get_facegate_executable
         facegate_exe = get_facegate_executable()
         
-        # Build command depending on terminal emulator parameters
         try:
             if term_bin in ("gnome-terminal", "konsole", "xfce4-terminal"):
                 subprocess.Popen([term_bin, "--", facegate_exe, "--set-master-password"])
             elif term_bin == "kitty":
                 subprocess.Popen([term_bin, facegate_exe, "--set-master-password"])
-            else: # xterm fallback
+            else:
                 subprocess.Popen([term_bin, "-e", f"{facegate_exe} --set-master-password"])
-                
             logging.info(f"Spawned password setup in terminal: {term_bin}")
         except Exception as e:
             QMessageBox.critical(self, "Terminal Launch Failed", f"Failed to open terminal setup: {e}")
@@ -541,7 +627,6 @@ class SettingsWindow(QDialog):
         removed_apps = [app for app_id, app in initial_set.items() if app_id not in current_set]
         for app in removed_apps:
             try:
-                # Call restore substitution for single app only
                 restore_substitution([app])
                 logging.info(f"Restored launcher for removed application: '{app['id']}'")
             except Exception as e:
@@ -558,8 +643,20 @@ class SettingsWindow(QDialog):
 
         # 3. Save behavior options to config default.yaml
         self.config.set("behavior.launch_at_login", should_autostart)
+        self.config.set("behavior.uninstall_protection", self.protection_check.isChecked())
         self.config.set("app_monitor.on_auth_failure", self.policy_combo.itemData(self.policy_combo.currentIndex()))
         self.config.set("app_monitor.auth_timeout_seconds", self.timeout_spin.value())
+        
+        # 4. Save and configure Emergency Kill hotkey in GSettings
+        new_hotkey = self.hotkey_input.text().strip()
+        old_hotkey = self.config.get("behavior.emergency_key", "<Control><Alt>k")
+        if new_hotkey != old_hotkey:
+            from utils.hotkey_manager import register_gnome_hotkey, unregister_gnome_hotkey
+            if new_hotkey:
+                register_gnome_hotkey(new_hotkey)
+            else:
+                unregister_gnome_hotkey()
+            self.config.set("behavior.emergency_key", new_hotkey)
         
         # Save updated protected apps
         self.config.set("protected_apps", self.current_apps)

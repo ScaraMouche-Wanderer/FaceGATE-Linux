@@ -162,7 +162,7 @@ class FaceGateApplication(QObject):
             
             # Start the subprocess asynchronously so we can poll the PID and check if it is still alive!
             # If the target process is killed while we wait, we terminate the subprocess.
-            proc = subprocess.Popen(cmd, pass_fds=pass_fds)
+            proc = subprocess.Popen(cmd, pass_fds=pass_fds, stdout=subprocess.PIPE, text=True)
             
             if r != -1:
                 os.close(r)
@@ -186,15 +186,38 @@ class FaceGateApplication(QObject):
             watch_timer.timeout.connect(check_process_alive)
             watch_timer.start(100) # Check every 100ms
             
-            # Wait for subprocess to finish
-            exit_code = proc.wait()
+            # Wait for subprocess while keeping Qt event loop alive
+            while proc.poll() is None:
+                QApplication.processEvents()
+                import time
+                time.sleep(0.05)
+
+            stdout_data, _ = proc.communicate()
+            exit_code = proc.returncode
             watch_timer.stop()
             
             logging.info(f"Backstop recognition subprocess exited with code {exit_code}")
             
+            # Parse similarity score if present
+            score = None
+            if stdout_data:
+                for line in stdout_data.splitlines():
+                    if line.startswith("FACEGATE_SCORE:"):
+                        try:
+                            score = float(line.split(":")[1])
+                        except ValueError:
+                            pass
+
             success = False
+            method = "face"
+            result = "fail"
+            confidence = score
+
             if exit_code == 0:
                 success = True
+                result = "success"
+            elif exit_code == 2:
+                result = "timeout"
             elif exit_code in (3, 4):
                 # Fallback to daemon password dialog
                 logging.info(f"Backstop subprocess returned exit code {exit_code}. Displaying password fallback.")
@@ -218,6 +241,15 @@ class FaceGateApplication(QObject):
                     res = dialog.exec()
                     pwd_watch_timer.stop()
                     success = (res == QDialog.DialogCode.Accepted)
+                    method = "password"
+                    result = "success" if success else "fail"
+                    confidence = None
+            else:
+                result = "fail"
+
+            # Write to SQLite audit log
+            from database.audit_log import log_auth_attempt
+            log_auth_attempt(desktop_name, method, result, confidence)
             
             if success:
                 # Resume process
@@ -258,8 +290,19 @@ class FaceGateApplication(QObject):
         self._settings_window = None
 
     @Slot()
-    def quit_app(self):
+    def quit_app(self, bypass_protection=False):
         logging.info("Quit requested. Performing restoration...")
+        
+        # Check uninstall protection
+        if not bypass_protection:
+            if self.config.get("behavior.uninstall_protection", True):
+                logging.info("Uninstall protection is active. Prompting for master password...")
+                from ui.auth_dialog import AuthDialog
+                dialog = AuthDialog("FaceGate Shutdown", mode="password")
+                res = dialog.exec()
+                if res != QDialog.DialogCode.Accepted:
+                    logging.info("Shutdown cancelled due to password verification failure.")
+                    return
         
         # Restore launchers
         try:
@@ -345,6 +388,7 @@ def main():
     parser.add_argument("--recognize", type=str, help="Run the face recognition subprocess dialog for target desktop")
     parser.add_argument("--set-master-password", action="store_true", help="Set or change the master password")
     parser.add_argument("--key-fd", type=int, help="File descriptor to read the encryption key from")
+    parser.add_argument("--emergency-kill", action="store_true", help="Send emergency kill signal to running daemon via D-Bus")
     
     args, unknown = parser.parse_known_args()
 
@@ -356,6 +400,22 @@ def main():
             set_cached_key(key_bytes)
         except Exception as e:
             logging.error(f"Failed to read key from fd {args.key_fd}: {e}")
+
+    if args.emergency_kill:
+        from PySide6.QtDBus import QDBusInterface, QDBusConnection
+        bus = QDBusConnection.sessionBus()
+        if bus.isConnected():
+            interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
+            if interface.isValid():
+                interface.call("EmergencyKill")
+                logging.info("Emergency kill command sent to FaceGate daemon.")
+                sys.exit(0)
+            else:
+                logging.error("FaceGate daemon D-Bus interface is not active.")
+                sys.exit(1)
+        else:
+            logging.error("Failed to connect to Session D-Bus.")
+            sys.exit(1)
 
     if args.set_master_password:
         from security.credential_store import set_master_password_cli
@@ -391,6 +451,9 @@ def main():
         result = dialog.exec()
         
         if result == QDialog.DialogCode.Accepted:
+            if hasattr(dialog, "final_score") and dialog.final_score is not None:
+                print(f"FACEGATE_SCORE:{dialog.final_score}")
+                sys.stdout.flush()
             sys.exit(0)
         else:
             if dialog.fallback_to_password:
