@@ -907,13 +907,21 @@ class SettingsWindow(QDialog):
         
         # Write config back to file
         if self.config.save():
-            res = QMessageBox.question(
-                self, "Settings Saved",
-                "Settings have been saved successfully.\n\n"
-                "Would you like to restart the FaceGate daemon now to apply these changes?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if res == QMessageBox.StandardButton.Yes:
+            from ui.theme import ACCENT_PURPLE, TEXT_PRIMARY, BORDER_NEUTRAL
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Settings Saved")
+            msg_box.setText("Settings have been saved successfully.\n\n"
+                            "Would you like to restart the FaceGate daemon now to apply these changes?")
+            msg_box.setIcon(QMessageBox.Icon.Question)
+            
+            yes_btn = msg_box.addButton(QMessageBox.StandardButton.Yes)
+            no_btn = msg_box.addButton(QMessageBox.StandardButton.No)
+            
+            yes_btn.setStyleSheet(f"background-color: {ACCENT_PURPLE}; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px; border: none;")
+            no_btn.setStyleSheet(f"background-color: #ede9fe; color: {TEXT_PRIMARY}; border: 1px solid {BORDER_NEUTRAL}; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px;")
+            
+            msg_box.exec()
+            if msg_box.clickedButton() == yes_btn:
                 self.restart_daemon()
             self.accept()
         else:
@@ -1069,12 +1077,20 @@ class SettingsWindow(QDialog):
             logging.error(f"Failed to delete intruder file: {e}")
 
     def clear_all_intruders(self):
-        ret = QMessageBox.question(
-            self, "Clear All Photos",
-            "Are you sure you want to delete all caught intruder photos?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if ret == QMessageBox.StandardButton.Yes:
+        from ui.theme import ACCENT_PURPLE, TEXT_PRIMARY, BORDER_NEUTRAL
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Clear All Photos")
+        msg_box.setText("Are you sure you want to delete all caught intruder photos?")
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        
+        yes_btn = msg_box.addButton(QMessageBox.StandardButton.Yes)
+        no_btn = msg_box.addButton(QMessageBox.StandardButton.No)
+        
+        yes_btn.setStyleSheet("background-color: #ef4444; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px; border: none;")
+        no_btn.setStyleSheet(f"background-color: #ede9fe; color: {TEXT_PRIMARY}; border: 1px solid {BORDER_NEUTRAL}; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px;")
+        
+        msg_box.exec()
+        if msg_box.clickedButton() == yes_btn:
             import os
             import glob
             intruder_dir = os.path.expanduser("~/.config/facegate/intruders")

@@ -244,13 +244,21 @@ class EnrollmentWizard(QDialog):
         try:
             embeddings = load_embeddings()
             if username in embeddings:
-                res = QMessageBox.question(
-                    self, "Overwrite User?", 
-                    f"User '{username}' already exists in database.\n\n"
-                    "Do you want to overwrite their facial profile with the new capture?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if res != QMessageBox.StandardButton.Yes:
+                from ui.theme import ACCENT_PURPLE, TEXT_PRIMARY, BORDER_NEUTRAL
+                msg_box = QMessageBox(self)
+                msg_box.setWindowTitle("Overwrite User?")
+                msg_box.setText(f"User '{username}' already exists in database.\n\n"
+                                "Do you want to overwrite their facial profile with the new capture?")
+                msg_box.setIcon(QMessageBox.Icon.Question)
+                
+                yes_btn = msg_box.addButton(QMessageBox.StandardButton.Yes)
+                no_btn = msg_box.addButton(QMessageBox.StandardButton.No)
+                
+                yes_btn.setStyleSheet(f"background-color: {ACCENT_PURPLE}; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px; border: none;")
+                no_btn.setStyleSheet(f"background-color: #ede9fe; color: {TEXT_PRIMARY}; border: 1px solid {BORDER_NEUTRAL}; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px;")
+                
+                msg_box.exec()
+                if msg_box.clickedButton() != yes_btn:
                     return
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to check existing entries: {e}")
