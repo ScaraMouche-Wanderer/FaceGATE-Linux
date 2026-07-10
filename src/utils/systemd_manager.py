@@ -55,3 +55,23 @@ def disable() -> bool:
     except Exception as e:
         logging.error(f"Error disabling systemd service: {e}")
         return False
+
+def restart() -> bool:
+    """
+    Restarts facegate.service in systemd's user manager.
+    """
+    try:
+        res = subprocess.run(
+            ["systemctl", "--user", "restart", "facegate.service"],
+            capture_output=True,
+            text=True
+        )
+        if res.returncode == 0:
+            logging.info("Systemd service 'facegate.service' restarted successfully.")
+            return True
+        else:
+            logging.error(f"Failed to restart systemd service: {res.stderr.strip()}")
+            return False
+    except Exception as e:
+        logging.error(f"Error restarting systemd service: {e}")
+        return False

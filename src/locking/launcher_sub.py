@@ -176,3 +176,32 @@ def restore_substitution(protected_apps: List[Dict]):
                 os.remove(backup_path)
             except Exception as e:
                 logging.warning(f"Failed to remove backup file for '{desktop_name}': {e}")
+
+def check_and_fix_substitutions(protected_apps: List[Dict]):
+    """
+    Checks if launcher files have been reverted (e.g. by Flatpak/system updates)
+    and re-applies substitutions if necessary. Logs whenever a reversion is corrected.
+    """
+    for app in protected_apps:
+        desktop_name = app.get("desktop_name")
+        if not desktop_name:
+            continue
+            
+        user_path = os.path.join(USER_DESKTOP_DIR, desktop_name)
+        reverted = False
+        
+        if not os.path.exists(user_path):
+            reverted = True
+        else:
+            try:
+                with open(user_path, 'r') as f:
+                    content = f.read()
+                    if "# Modified by FaceGate" not in content:
+                        reverted = True
+            except Exception as e:
+                logging.error(f"Error checking user launcher '{desktop_name}' for re-check: {e}")
+                reverted = True
+                
+        if reverted:
+            logging.warning(f"Launcher Recheck: Reversion detected for '{desktop_name}'. Re-applying substitution.")
+            apply_substitution([app])

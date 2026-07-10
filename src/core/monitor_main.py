@@ -25,6 +25,7 @@ class FaceGateApplication(QObject):
         self.active = True
         self.disabled_until = None
         self.authorized_apps = {}  # app_id -> bool
+        self.auth_timestamps = {}  # app_id -> float (timestamp)
         
         # Initialize authorized state for all protected apps as False
         for app in self.get_protected_apps():
@@ -34,6 +35,13 @@ class FaceGateApplication(QObject):
         self.disabled_timer = QTimer(self)
         self.disabled_timer.setSingleShot(True)
         self.disabled_timer.timeout.connect(self.resume)
+
+        # Setup periodic recheck of desktop launcher shadowing
+        recheck_interval = int(self.config.get("behavior.launcher_recheck_interval_minutes", 10))
+        if recheck_interval > 0:
+            self.recheck_timer = QTimer(self)
+            self.recheck_timer.timeout.connect(self.recheck_launcher_shadowing)
+            self.recheck_timer.start(recheck_interval * 60 * 1000)
 
         # Setup AppMonitor
         poll_interval = float(self.config.get("app_monitor.poll_interval_seconds", 1.5))
@@ -81,6 +89,7 @@ class FaceGateApplication(QObject):
     def authorize_app(self, app_identifier: str):
         app_id = self.get_app_id_from_desktop(app_identifier)
         self.authorized_apps[app_id] = True
+        self.auth_timestamps[app_id] = time.time()
         logging.info(f"State updated: Application '{app_id}' is UNLOCKED.")
 
     def relock_app(self, app_id: str):
@@ -93,6 +102,10 @@ class FaceGateApplication(QObject):
     def relock_all(self):
         for app in self.get_protected_apps():
             self.relock_app(app["id"])
+
+    def recheck_launcher_shadowing(self):
+        from locking.launcher_sub import check_and_fix_substitutions
+        check_and_fix_substitutions(self.get_protected_apps())
         logging.info("All applications re-locked.")
 
     @Slot()
@@ -491,7 +504,15 @@ def main():
             if dialog.fallback_to_password:
                 sys.exit(4)
             elif dialog.camera_error:
-                sys.exit(3)
+                err_msg = getattr(dialog, "camera_error_msg", "")
+                if "Device not found" in err_msg:
+                    sys.exit(10)
+                elif "Permission denied" in err_msg:
+                    sys.exit(11)
+                elif "Device busy" in err_msg:
+                    sys.exit(12)
+                else:
+                    sys.exit(3)
             elif dialog.timed_out:
                 sys.exit(2)
             else:

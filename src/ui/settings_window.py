@@ -178,14 +178,56 @@ class SettingsWindow(QDialog):
         self.create_logs_tab()
         self.create_about_tab()
 
-        right_layout.addWidget(self.tab_stack)
-
-        # Footer Actions (Save / Cancel / Warning)
-        footer_layout = QHBoxLayout()
+        # Banner for daemon restart warning (initially hidden)
+        from PySide6.QtWidgets import QFrame
+        self.restart_banner = QFrame()
+        self.restart_banner.setObjectName("restartBanner")
+        self.restart_banner.setStyleSheet("""
+            QFrame#restartBanner {
+                background-color: #2d261e;
+                border: 1px solid #d97706;
+                border-radius: 6px;
+            }
+            QLabel {
+                color: #fef3c7;
+                font-size: 13px;
+                border: none;
+            }
+            QPushButton {
+                background-color: #d97706;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #b45309;
+            }
+        """)
+        banner_layout = QHBoxLayout(self.restart_banner)
+        banner_layout.setContentsMargins(12, 8, 12, 8)
+        banner_layout.setSpacing(12)
         
-        self.warn_label = QLabel("⚠️ Restart FaceGate for changes to take effect")
-        self.warn_label.setStyleSheet("color: #fbbf24; font-weight: 500; font-size: 12px;")
-        footer_layout.addWidget(self.warn_label)
+        self.banner_label = QLabel("Some changes require restarting FaceGate to take effect.")
+        self.restart_btn = QPushButton("Restart Now")
+        self.restart_btn.clicked.connect(self.restart_daemon)
+        self.dismiss_btn = QPushButton("Dismiss")
+        self.dismiss_btn.setStyleSheet("background-color: transparent; color: #a1a1aa; text-decoration: underline; border: none;")
+        self.dismiss_btn.clicked.connect(self.restart_banner.hide)
+        
+        banner_layout.addWidget(self.banner_label)
+        banner_layout.addStretch()
+        banner_layout.addWidget(self.restart_btn)
+        banner_layout.addWidget(self.dismiss_btn)
+        
+        right_layout.addWidget(self.tab_stack)
+        right_layout.addWidget(self.restart_banner)
+        self.restart_banner.hide()
+
+        # Footer Actions (Save / Cancel)
+        footer_layout = QHBoxLayout()
         footer_layout.addStretch()
         
         self.cancel_btn = QPushButton("Cancel")
@@ -204,6 +246,19 @@ class SettingsWindow(QDialog):
 
     def switch_tab(self, index):
         self.tab_stack.setCurrentIndex(index)
+        if index == 3:
+            self.populate_logs_table()
+
+    def show_restart_banner(self):
+        self.restart_banner.show()
+
+    def restart_daemon(self):
+        from utils.systemd_manager import restart
+        if restart():
+            QMessageBox.information(self, "Restart Successful", "FaceGate daemon has been restarted successfully.")
+            self.restart_banner.hide()
+        else:
+            QMessageBox.critical(self, "Restart Failed", "Failed to restart FaceGate daemon via systemd user manager.")
 
     # ------------------ Tab Creation Methods ------------------
     
@@ -494,6 +549,12 @@ class SettingsWindow(QDialog):
         # 5. Populate Logs Table
         self.populate_logs_table()
 
+        # Connect signals for restart indicator after initial populate
+        self.policy_combo.currentIndexChanged.connect(self.show_restart_banner)
+        self.timeout_spin.valueChanged.connect(self.show_restart_banner)
+        self.protection_check.stateChanged.connect(self.show_restart_banner)
+        self.hotkey_input.textChanged.connect(self.show_restart_banner)
+
     def populate_apps_table(self):
         self.apps_table.setRowCount(len(self.current_apps))
         for row, app in enumerate(self.current_apps):
@@ -524,6 +585,7 @@ class SettingsWindow(QDialog):
 
     def populate_logs_table(self):
         from database.audit_log import get_recent_logs
+        from PySide6.QtGui import QColor
         logs = get_recent_logs(50)
         self.logs_table.setRowCount(len(logs))
         for row, log in enumerate(logs):
@@ -531,14 +593,17 @@ class SettingsWindow(QDialog):
             self.logs_table.setItem(row, 1, QTableWidgetItem(log["app_identifier"]))
             self.logs_table.setItem(row, 2, QTableWidgetItem(log["method"].upper()))
             
-            # Color code result
+            # Color code result with modern dark theme palette
             result_item = QTableWidgetItem(log["result"].upper())
-            if log["result"] == "success":
-                result_item.setForeground(Qt.GlobalColor.green)
-            elif log["result"] == "timeout":
-                result_item.setForeground(Qt.GlobalColor.yellow)
+            res_lower = log["result"].lower()
+            if res_lower == "success":
+                result_item.setForeground(QColor("#10b981"))  # Green
+            elif res_lower == "timeout":
+                result_item.setForeground(QColor("#3b82f6"))  # Blue
+            elif res_lower == "bypass":
+                result_item.setForeground(QColor("#fbbf24"))  # Amber/Orange
             else:
-                result_item.setForeground(Qt.GlobalColor.red)
+                result_item.setForeground(QColor("#ef4444"))  # Red
             self.logs_table.setItem(row, 3, result_item)
             
             score_str = f"{log['confidence_score']:.4f}" if log["confidence_score"] is not None else "N/A"
@@ -554,6 +619,7 @@ class SettingsWindow(QDialog):
             app = self.current_apps[index]
             self.current_apps.pop(index)
             self.populate_apps_table()
+            self.show_restart_banner()
             logging.info(f"Staged app removal: '{app.get('id')}'")
 
     def open_app_picker(self):
@@ -578,6 +644,7 @@ class SettingsWindow(QDialog):
                 
             self.current_apps.append(new_app)
             self.populate_apps_table()
+            self.show_restart_banner()
             logging.info(f"Staged app protection addition: '{new_app['id']}'")
 
     def handle_protection_clicked(self, checked):

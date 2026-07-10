@@ -52,6 +52,33 @@ def detect_camera_device() -> int:
     logging.info(f"Fallback: using camera at index {best_idx}")
     return best_idx
 
+def diagnose_camera_error(device_index: int) -> str:
+    """
+    Diagnoses the cause of a camera open failure on Linux.
+    """
+    import os
+    dev_path = f"/dev/video{device_index}"
+    if not os.path.exists(dev_path):
+        return f"Device not found: '{dev_path}' does not exist."
+        
+    # Check permissions
+    if not os.access(dev_path, os.R_OK):
+        import grp
+        import getpass
+        username = getpass.getuser()
+        try:
+            video_group = grp.getgrnam("video")
+            in_group = username in video_group.gr_mem
+        except Exception:
+            in_group = False
+            
+        msg = f"Permission denied: cannot read '{dev_path}'."
+        if not in_group:
+            msg += f" User '{username}' is not in the 'video' group."
+        return msg
+        
+    return f"Device busy: '{dev_path}' is already in use by another process."
+
 class CameraSignals(QObject):
     frame_ready = Signal(object)  # Emits np.ndarray
     error = Signal(str)
@@ -87,7 +114,7 @@ class CameraWorker:
             self.cap = cv2.VideoCapture(self.device_index)
             
         if not self.cap.isOpened():
-            err_msg = f"Failed to open video capture device at index {self.device_index}"
+            err_msg = diagnose_camera_error(self.device_index)
             logging.error(err_msg)
             self.signals.error.emit(err_msg)
             return

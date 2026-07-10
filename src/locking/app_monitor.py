@@ -83,10 +83,18 @@ class AppMonitor:
                             app_id = match_app.get("id")
                             desktop_name = match_app.get("desktop_name")
 
-                            # If app is globally authorized, let it run
+                            # If app is globally authorized, check if session timeout elapsed
                             if self.main_app.is_app_authorized(app_id):
-                                self._seen_pids.add(pid)
-                                continue
+                                timeout = int(self.main_app.config.get("security.session_timeout_seconds", 300))
+                                auth_time = self.main_app.auth_timestamps.get(app_id, 0)
+                                if timeout > 0 and (time.time() - auth_time) > timeout:
+                                    logging.info(f"AppMonitor: Session timeout elapsed for '{app_id}' (PID: {pid}). Relocking app.")
+                                    self.main_app.relock_app(app_id)
+                                    if pid in self._seen_pids:
+                                        self._seen_pids.remove(pid)
+                                else:
+                                    self._seen_pids.add(pid)
+                                    continue
 
                             logging.info(f"AppMonitor: Detected target process '{name}' (PID: {pid}). Suspending via SIGSTOP.")
                             

@@ -73,6 +73,10 @@ def convert_cv_to_pixmap(frame: "np.ndarray", width: int = 360, height: int = 27
     return QPixmap.fromImage(q_img.copy())
 
 class AuthDialog(QDialog):
+    # Class-level variables to track failed attempts and lockout across dialog instances in a single session
+    failed_attempts_count = 0
+    lockout_until = 0.0
+
     def __init__(self, app_name: str, mode: str = "password", timeout_seconds: int = 0, parent=None):
         super().__init__(parent)
         self.app_name = app_name
@@ -85,6 +89,7 @@ class AuthDialog(QDialog):
         self.timed_out = False
         self.success_count = 0
         self.final_score = None
+        self.close_match_attempts = 0
         
         self.detector = None
         self.camera_worker = None
@@ -191,6 +196,7 @@ class AuthDialog(QDialog):
             self.pwd_fallback_btn = QPushButton("Use Password Instead")
             self.pwd_fallback_btn.setObjectName("pwdFallbackBtn")
             self.pwd_fallback_btn.clicked.connect(self.handle_password_fallback)
+            self.pwd_fallback_btn.setVisible(False)  # Hidden initially
             layout.addWidget(self.pwd_fallback_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
             # Cancel Button
@@ -248,6 +254,19 @@ class AuthDialog(QDialog):
             layout.addLayout(btn_layout)
 
             QTimer.singleShot(50, self.password_input.setFocus)
+            
+            # Setup lockout check on initialization
+            self.lockout_timer = QTimer(self)
+            self.lockout_timer.timeout.connect(self.update_lockout_countdown)
+            self.lockout_seconds_remaining = 0
+            
+            import math
+            import time
+            if time.time() < AuthDialog.lockout_until:
+                remaining = int(math.ceil(AuthDialog.lockout_until - time.time()))
+                if remaining > 0:
+                    # Delay layout layout pass slightly to ensure buttons exist and can be disabled
+                    QTimer.singleShot(50, lambda: self.start_lockout(remaining))
 
         self.setLayout(layout)
 
@@ -350,11 +369,39 @@ class AuthDialog(QDialog):
                 self.accept()
         else:
             self.success_count = 0
+            if len(faces) > 0:
+                # Find maximum score among detected faces to check for close mismatches
+                max_score = 0.0
+                for face in faces:
+                    emb = face['embedding']
+                    from recognition.matcher import match_face
+                    _, score = match_face(emb)
+                    if score > max_score:
+                        max_score = score
+                        
+                from utils.config_loader import get_config
+                config = get_config()
+                threshold = float(config.get("recognition.similarity_threshold", 0.65))
+                margin = float(config.get("recognition.ambiguity_margin", 0.03))
+                
+                if max_score >= (threshold - margin):
+                    self.status_label.setText("Almost — try better lighting or move closer")
+                    self.status_label.setStyleSheet("color: #fbbf24; font-size: 13px; font-weight: bold;")
+                    self.close_match_attempts += 1
+                    if self.close_match_attempts >= 2:
+                        self.pwd_fallback_btn.setVisible(True)
+                else:
+                    self.status_label.setText("Position your face in the camera view...")
+                    self.status_label.setStyleSheet("font-size: 13px; color: #a0aec0;")
 
     @Slot(str)
     def handle_camera_error(self, err_msg: str):
         self.camera_error = True
-        self.reject()
+        self.camera_error_msg = err_msg
+        self.cleanup_camera()
+        self.status_label.setStyleSheet("color: #ef4444; font-size: 13px; font-weight: bold;")
+        self.status_label.setText(f"❌ Camera Error: {err_msg}")
+        self.pwd_fallback_btn.setVisible(True)
 
     def handle_password_fallback(self):
         self.fallback_to_password = True
@@ -366,12 +413,15 @@ class AuthDialog(QDialog):
         self.reject()
 
     def handle_unlock(self):
+        import time
         password = self.password_input.text()
         if verify_password(password):
+            AuthDialog.failed_attempts_count = 0
+            AuthDialog.lockout_until = 0.0
             self.authenticated = True
             self.accept()
         else:
-            self.error_label.setText("⚠️ Incorrect password. Try again.")
+            AuthDialog.failed_attempts_count += 1
             self.password_input.selectAll()
             
             # Temporary error styling
@@ -385,7 +435,42 @@ class AuthDialog(QDialog):
                     font-size: 14px;
                 }
             """)
-            QTimer.singleShot(1500, self.reset_input_style)
+            
+            if AuthDialog.failed_attempts_count >= 3:
+                attempts = AuthDialog.failed_attempts_count
+                if attempts == 3:
+                    delay = 2
+                elif attempts == 4:
+                    delay = 5
+                elif attempts == 5:
+                    delay = 15
+                else:
+                    delay = 30
+                    
+                AuthDialog.lockout_until = time.time() + delay
+                self.start_lockout(delay)
+            else:
+                self.error_label.setText(f"⚠️ Incorrect password. Try again. ({3 - AuthDialog.failed_attempts_count} attempts remaining)")
+                QTimer.singleShot(1500, self.reset_input_style)
+
+    def start_lockout(self, seconds):
+        self.password_input.setEnabled(False)
+        self.unlock_btn.setEnabled(False)
+        self.error_label.setText(f"Too many failed attempts. Locked out for {seconds}s.")
+        self.lockout_seconds_remaining = seconds
+        self.lockout_timer.start(1000)
+
+    def update_lockout_countdown(self):
+        self.lockout_seconds_remaining -= 1
+        if self.lockout_seconds_remaining <= 0:
+            self.lockout_timer.stop()
+            self.password_input.setEnabled(True)
+            self.unlock_btn.setEnabled(True)
+            self.error_label.setText("")
+            self.password_input.setStyleSheet("") # Restore default stylesheet
+            self.password_input.setFocus()
+        else:
+            self.error_label.setText(f"Too many failed attempts. Locked out for {self.lockout_seconds_remaining}s.")
 
     def reset_input_style(self):
         if self.mode != "face":

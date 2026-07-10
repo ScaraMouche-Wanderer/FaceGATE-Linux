@@ -88,7 +88,7 @@ class FaceGateService(QObject):
                 result = "success"
             elif exit_code == 2:
                 result = "timeout"
-            elif exit_code in (3, 4):
+            elif exit_code in (3, 4, 10, 11, 12):
                 # Fallback to password dialog in daemon process
                 logging.info(f"Subprocess returned {exit_code}. Displaying password fallback dialog in daemon.")
                 app_name = self.main_app.get_app_name(app_identifier) if self.main_app else app_identifier
@@ -126,6 +126,12 @@ class FaceGateService(QObject):
 
     def emergency_kill_internal(self):
         logging.info("Emergency kill command received via D-Bus.")
+        try:
+            from database.audit_log import log_auth_attempt
+            log_auth_attempt("facegate-daemon", "emergency_hotkey", "bypass", None)
+        except Exception as e:
+            logging.error(f"Failed to log emergency kill to audit trail: {e}")
+            
         if self.main_app:
             self.main_app.quit_app(bypass_protection=True)
 

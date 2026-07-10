@@ -51,7 +51,6 @@ def test_recognition_smoke():
         assert emb.shape == (512,), f"Unexpected embedding shape: {emb.shape} (expected (512,))"
         
     print("\n=== Smoke Test Passed Successfully! ===")
-    sys.exit(0)
 
 if __name__ == "__main__":
     test_recognition_smoke()
