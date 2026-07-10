@@ -507,7 +507,6 @@ def main():
         
     elif args.settings:
         from ui.settings_window import SettingsWindow
-        from ui.auth_dialog import AuthDialog
         from database.embedding_store import load_embeddings
         from database.audit_log import log_auth_attempt
         
