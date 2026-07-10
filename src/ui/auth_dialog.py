@@ -90,6 +90,7 @@ class AuthDialog(QDialog):
         self.success_count = 0
         self.final_score = None
         self.close_match_attempts = 0
+        self.latest_frame = None
         
         self.detector = None
         self.camera_worker = None
@@ -106,10 +107,24 @@ class AuthDialog(QDialog):
         )
         self.setModal(True)
         
-        if self.mode == "face":
-            self.setFixedSize(420, 480)
+        # Determine screen-based size
+        from PySide6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen()
+        if screen:
+            screen_size = screen.size()
+            if self.mode == "face":
+                width = max(420, min(int(screen_size.width() * 0.35), 600))
+                height = max(480, min(int(screen_size.height() * 0.55), 700))
+                self.setFixedSize(width, height)
+            else:
+                width = max(380, min(int(screen_size.width() * 0.3), 500))
+                height = max(220, min(int(screen_size.height() * 0.35), 300))
+                self.setFixedSize(width, height)
         else:
-            self.setFixedSize(380, 220)
+            if self.mode == "face":
+                self.setFixedSize(420, 480)
+            else:
+                self.setFixedSize(380, 220)
         
         from ui.theme import get_theme_qss, ACCENT_PURPLE, TEXT_SECONDARY
         self.setStyleSheet(get_theme_qss() + f"""
@@ -226,6 +241,7 @@ class AuthDialog(QDialog):
             self.cancel_btn.clicked.connect(self.reject)
             
             self.unlock_btn = QPushButton("Unlock")
+            self.unlock_btn.setDefault(True)
             self.unlock_btn.clicked.connect(self.handle_unlock)
 
             btn_layout.addWidget(self.cancel_btn)
@@ -308,6 +324,12 @@ class AuthDialog(QDialog):
     @Slot(list, object)
     def handle_detection_result(self, faces, frame):
         import cv2
+        
+        # Save camera frame to latest_frame. If a face is found, we always update it.
+        # Otherwise, if no frame has been captured yet, save this frame as a fallback.
+        if len(faces) > 0 or not hasattr(self, "latest_frame") or self.latest_frame is None:
+            self.latest_frame = frame.copy()
+            
         display_frame = frame.copy()
         matched_user = None
         matched_score = 0.0
@@ -486,7 +508,33 @@ class AuthDialog(QDialog):
 
     def reject(self):
         self.cleanup_camera()
+        if not self.authenticated:
+            self.save_intruder_selfie()
         super().reject()
+
+    def save_intruder_selfie(self):
+        if not hasattr(self, "latest_frame") or self.latest_frame is None:
+            return
+        try:
+            import os
+            import cv2
+            import datetime
+            
+            intruder_dir = os.path.expanduser("~/.config/facegate/intruders")
+            os.makedirs(intruder_dir, exist_ok=True)
+            
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_app_name = "".join(c for c in self.app_name if c.isalnum() or c in ("-", "_")).strip()
+            if not safe_app_name:
+                safe_app_name = "unknown"
+                
+            filename = f"{timestamp}_{safe_app_name}.jpg"
+            filepath = os.path.join(intruder_dir, filename)
+            
+            cv2.imwrite(filepath, self.latest_frame)
+            logging.info(f"Intruder selfie captured and saved to: {filepath}")
+        except Exception as e:
+            logging.error(f"Failed to save intruder selfie: {e}")
 
     def accept(self):
         self.cleanup_camera()

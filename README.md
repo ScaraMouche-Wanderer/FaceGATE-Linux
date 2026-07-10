@@ -1,75 +1,58 @@
 # FaceGate-Linux
 
-FaceGate-Linux is a locking skeleton tray daemon and app monitor built using PySide6 and D-Bus.
+FaceGate-Linux is a secure, user-level application locker daemon and tray interface for Linux desktop environments. Designed to prevent unauthorized access to sensitive application windows (such as web browsers, terminal consoles, or system settings), FaceGate intercepts target launches and gates them behind fast, local biometric face recognition (powered by InsightFace) and liveness checking, with a secure password fallback.
+
+---
+
+## Features
+
+- **Biometric Application Locking**: Automatically detects process launches and suspends them via `SIGSTOP` until the user is authenticated via face recognition or password.
+- **Local Face Recognition**: Employs ONNX Runtime and the lightweight `buffalo_l` InsightFace model to perform real-time, low-latency, private local biometric verification.
+- **Biometric Security Hardening**: Built-in blink detection and head-pose liveness checks protect against photo and video spoofing bypass attempts.
+- **Intruder Selfie Gallery**: Automatically captures webcam photos of unauthorized users during failed or cancelled authentication attempts and organizes them in a private visual settings gallery.
+- **AES-256-GCM Encryption-at-Rest**: Facial embeddings and configuration profiles are encrypted locally using PBKDF2-HMAC-SHA256 (600,000 iterations).
+- **Uninstall & Deletion Protection**: Prevents unauthorized modifications, directory deletion, or settings purging by gating configuration changes behind admin verification.
+- **Emergency Override**: Configurable GNOME-wide emergency shortcut to stop the daemon and restore processes in case of camera failure.
+- **SQLite Audit Trail**: Maintains a local, tamper-evident log of all access attempts, failures, and bypasses, visible via the Settings GUI.
+- **Guided GUI Wizard**: Includes an interactive step-by-step setup utility for profile enrollment and system calibration.
+
+---
+
+## Security Model & Limitations
+
+FaceGate-Linux is designed to raise the bar against casual, opportunistic, or physical-presence bypass attempts on shared or unlocked desktop environments. However, users should understand its security model and inherent boundaries:
+
+### 1. The Root Shell Limitation
+FaceGate-Linux runs as an unprivileged, user-level daemon (`systemd --user`). This means any user or process with **root (superuser) shell access** can easily bypass the lock. They can kill the daemon, unmount/delete configuration directories (bypassing uninstall protection), modify launcher paths, or read configuration values. FaceGate is intended to protect your personal user session from other local users or casual intruders with physical access to your device — not to defend against a local root administrator.
+
+### 2. Process Detection & Binary Resolution
+To detect launched processes, FaceGate polls the system processes list via `psutil` at a configured polling interval (default: `1.5` seconds). This introduces a small, empirical delay (average ~1s) between application launch and window suspension.
+- **Symlinks & Path Aliases**: Target applications are matched using their resolved canonical paths (`os.path.realpath(exe)`), preventing trivial path-aliasing bypasses (e.g. running via `/usr/bin/../bin/firefox` or using symlinks).
+- **Renamed Copies**: If a user makes a physical copy of a protected binary under a different name (e.g., `cp /usr/bin/firefox /usr/bin/firefox2`), FaceGate employs a name-based heuristic. If the candidate name matches or contains a substring of a protected executable, FaceGate hashes the running binary and compares it with the target binary's cached SHA-256 hash.
+- **Dissimilar Copies (Open Gap)**: If an attacker copies a protected binary to an entirely arbitrary, unrelated path and name (e.g., `cp /usr/bin/firefox /tmp/x`), FaceGate's heuristic will not trigger a hash check to avoid CPU regressions. This remains a known limitation of user-level polling.
+
+---
 
 ## Installation & Setup
 
-Ensure you have Poetry installed:
-```bash
-poetry install
-```
-
-## Running the Application
-
-To run the monitor daemon:
-```bash
-poetry run facegate --monitor
-```
+1. Make sure you have Poetry and PySide6 dependencies installed on your system.
+2. Clone the repository and run the installation script:
+   ```bash
+   ./install.sh
+   ```
+3. The installer compiles assets, configures user systemd services, and registers desktop file overrides.
 
 ---
 
-## How this works, and its limits
+## Screenshots & Visuals
 
-### 1. Polling vs. Event-Based Process Scanning
-We utilize `psutil` polling to scan for protected app processes at a configured interval (`app_monitor.poll_interval_seconds`, default `1.5` seconds).
-- **Trade-off**: This introduces a latency window bounded by the poll interval (empirically measured average detection delay: **1.0462 seconds**). 
-- **Alternative**: Netlink process connector (`CONFIG_PROC_EVENTS`) would offer event-driven, near-zero latency scanning but requires kernel-level netlink socket access and `CAP_NET_ADMIN` privilege grants. We avoided this to ensure FaceGate runs cleanly as a personal, unprivileged desktop user application.
-
-### 2. SIGSTOP Process Interception
-On process launch detection, we issue a `SIGSTOP` signal to suspend the application process rather than immediately executing `SIGKILL`.
-- **Reasoning**: This preserves the process's internal execution state. If the user successfully authenticates, we send `SIGCONT` to resume execution without work loss. `SIGKILL` is only executed if authentication fails or the dialog times out.
-
-### 3. Flatpak Integration Limitation
-Desktop launcher shadowing works by overriding `.desktop` files in the user-level directory `~/.local/share/applications/`. Flatpak runtimes can regenerate their exported desktop files upon app updates, which silently reverts launcher substitutions.
-- **Mitigation**: We re-apply and verify launcher substitutions on every daemon startup. Note that this mitigation is not airtight if an update occurs mid-session.
-
-### 4. What the initial version does not do
-- **No Face Recognition**: The authentication gate is a temporary, plaintext password-only dialog (`admin` by default). Liveness detection and model inference are implemented in biometric releases.
-- **No Encrypted Credential Storage**: Password verification is a plaintext-in-memory-only placeholder. PBKDF2-tuned validation and AES-256-GCM encrypted-at-rest key rings are deferred to security updates.
-- **No systemd Packaging**: Automatic daemon startup is not handled in this release.
+*Screenshots and UI walk-through recordings will be added for the upcoming public release.*
+- **Settings Dashboard**: Management of protected applications, liveness settings, and general preferences.
+- **Authentication Dialog**: Smooth 30 FPS camera scanner pane with liveness guidance.
+- **Intruder Alerts Pane**: Local visual gallery storing attempts and captured webcam feeds.
 
 ---
 
-## Face Recognition & Subprocess Architecture
+## License
 
-Face recognition introduces real face recognition using **InsightFace** (`buffalo_l` model) and **ONNX Runtime**.
-
-### 1. Short-Lived Subprocess Model
-To maintain a low idle memory footprint, the main resident daemon process (`facegate --monitor`) does not import any computer vision or machine learning libraries (such as `cv2`, `numpy`, `insightface`, or `onnxruntime`). 
-
-Instead, when an authentication challenge is triggered, the daemon spawns a short-lived subprocess (`facegate --recognize <desktop_name>`). This subprocess:
-1. Loads the `buffalo_l` face recognition models (average load time: **0.8057 seconds**).
-2. Spawns a dedicated camera thread running at **30 FPS** and `640x480` resolution.
-3. Captures, detects, and validates faces against enrolled user templates.
-4. Exits with a predefined exit code contract.
-
-### 2. Exit Code Contract
-The `--recognize` subprocess communicates authentication results to the parent daemon using exit codes:
-- `0`: **Authenticated**: Face matched successfully.
-- `1`: **Rejected**: Face matching finished, but similarity was below threshold or ambiguous.
-- `2`: **Timeout**: Authentication timed out before a face could be matched.
-- `3`: **Camera/Model Error**: Failed to open the camera device or initialize models.
-- `4`: **Password Fallback**: User chose to authenticate using a password instead.
-
-If the subprocess exits with `3` (error) or `4` (password fallback), the parent daemon falls back to showing the password dialog in-process, ensuring the user is never locked out.
-
-### 3. Wayland Camera Permissions
-Under standard Arch Linux GNOME Wayland desktop environments, native desktop applications are not prompted for camera permissions. Unsandboxed applications can directly access `/dev/video*` devices, provided the running user is a member of the Unix `video` group.
-
-### 4. CLI Enrollment
-To enroll a face template:
-```bash
-poetry run facegate --enroll <username>
-```
-This utility captures sharp, non-blurry frames, extracts the embeddings, averages them to create a template, and immediately discards all raw images from memory.
-
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

@@ -34,8 +34,22 @@ class EnrollmentWizard(QDialog):
 
     def init_ui(self):
         self.setWindowTitle("FaceGate Enrollment Wizard")
-        self.setFixedSize(500, 520)
         self.setModal(True)
+
+        # Determine screen-based size
+        from PySide6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen()
+        if screen:
+            screen_size = screen.size()
+            width = int(screen_size.width() * 0.35)
+            height = int(screen_size.height() * 0.55)
+            width = max(500, min(width, 700))
+            height = max(520, min(height, 750))
+            self.resize(width, height)
+            self.setMinimumSize(480, 500)
+        else:
+            self.resize(500, 520)
+            self.setMinimumSize(480, 500)
 
         # Apply global theme stylesheet
         from ui.theme import get_theme_qss
@@ -57,6 +71,7 @@ class EnrollmentWizard(QDialog):
         self.create_success_page()
 
         self.stack.setCurrentIndex(0)
+        self.intro_next_btn.setDefault(True)
 
     # ------------------ Page Creation ------------------
     
@@ -248,6 +263,8 @@ class EnrollmentWizard(QDialog):
     
     def start_capture_flow(self):
         self.stack.setCurrentIndex(1)
+        self.intro_next_btn.setDefault(False)
+        self.save_btn.setDefault(False)
         self.embeddings = []
         self.progress_bar.setValue(0)
 
@@ -269,6 +286,9 @@ class EnrollmentWizard(QDialog):
     def on_detector_load_error(self, err_msg):
         QMessageBox.critical(self, "Model Load Error", f"Failed to load detector models: {err_msg}")
         self.stack.setCurrentIndex(0)
+        self.intro_next_btn.setDefault(True)
+        self.save_btn.setDefault(False)
+        self.username_input.setFocus()
 
     def start_camera_worker(self):
         self.instruction_lbl.setText("Initializing camera capture...")
@@ -280,6 +300,9 @@ class EnrollmentWizard(QDialog):
     def cancel_capture_flow(self):
         self.cleanup_camera()
         self.stack.setCurrentIndex(0)
+        self.intro_next_btn.setDefault(True)
+        self.save_btn.setDefault(False)
+        self.username_input.setFocus()
 
     @Slot(object)
     def on_frame_received(self, frame):
@@ -338,6 +361,9 @@ class EnrollmentWizard(QDialog):
         self.cleanup_camera()
         QMessageBox.critical(self, "Camera Error", f"Camera capture failed: {err_msg}")
         self.stack.setCurrentIndex(0)
+        self.intro_next_btn.setDefault(True)
+        self.save_btn.setDefault(False)
+        self.username_input.setFocus()
 
     def show_success_page(self):
         self.success_msg_lbl.setText(
@@ -348,6 +374,8 @@ class EnrollmentWizard(QDialog):
             f"Click 'Save Face Profile' below to encrypt and save the profile."
         )
         self.stack.setCurrentIndex(2)
+        self.save_btn.setDefault(True)
+        self.save_btn.setFocus()
 
     def save_enrollment(self):
         if self.avg_embedding is None:

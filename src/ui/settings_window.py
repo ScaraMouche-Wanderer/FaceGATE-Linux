@@ -28,8 +28,20 @@ class SettingsWindow(QDialog):
 
     def init_ui(self):
         self.setWindowTitle("FaceGate Settings")
-        self.resize(820, 540)
-        self.setMinimumSize(750, 500)
+        # Sizing based on content & screen resolution
+        from PySide6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen()
+        if screen:
+            screen_size = screen.size()
+            width = int(screen_size.width() * 0.5)
+            height = int(screen_size.height() * 0.6)
+            width = max(800, min(width, 1200))
+            height = max(560, min(height, 800))
+            self.resize(width, height)
+            self.setMinimumSize(780, 520)
+        else:
+            self.resize(820, 560)
+            self.setMinimumSize(780, 520)
         
         from ui.theme import get_theme_qss, ACCENT_PURPLE, BORDER_NEUTRAL, TEXT_PRIMARY, BG_NEUTRAL, AnimatedSpinBox
         # Set base theme styling
@@ -85,6 +97,7 @@ class SettingsWindow(QDialog):
         self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("system-lock-screen"), "Locked Apps"))
         self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("dialog-password"), "Authentication"))
         self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("preferences-system"), "Behavior"))
+        self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("camera-web"), "Intruder Alerts"))
         self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("document-properties"), "Audit Logs"))
         self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("help-about"), "About"))
         
@@ -103,6 +116,7 @@ class SettingsWindow(QDialog):
         self.create_locked_apps_tab()
         self.create_authentication_tab()
         self.create_behavior_tab()
+        self.create_intruder_gallery_tab()
         self.create_logs_tab()
         self.create_about_tab()
 
@@ -163,6 +177,7 @@ class SettingsWindow(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         
         self.save_btn = QPushButton("Save Changes")
+        self.save_btn.setDefault(True)
         self.save_btn.clicked.connect(self.save_and_close)
         
         footer_layout.addWidget(self.cancel_btn)
@@ -175,6 +190,8 @@ class SettingsWindow(QDialog):
     def switch_tab(self, index):
         self.tab_stack.setCurrentIndex(index)
         if index == 3:
+            self.populate_intruder_gallery()
+        elif index == 4:
             self.populate_logs_table()
 
     def show_restart_banner(self):
@@ -615,6 +632,9 @@ class SettingsWindow(QDialog):
         # 7. Populate Logs Table
         self.populate_logs_table()
 
+        # 8. Populate Intruder Gallery
+        self.populate_intruder_gallery()
+
         # Connect signals for restart indicator after initial populate
         self.policy_combo.currentIndexChanged.connect(self.show_restart_banner)
         self.timeout_spin.valueChanged.connect(self.show_restart_banner)
@@ -893,3 +913,170 @@ class SettingsWindow(QDialog):
             self.accept()
         else:
             QMessageBox.critical(self, "Save Failed", "Failed to save configuration parameters.")
+
+    def create_intruder_gallery_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        from ui.theme import TEXT_PRIMARY, TEXT_SECONDARY, BORDER_NEUTRAL, CARD_NEUTRAL
+        header = QLabel("Intruder Alerts & Captures")
+        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
+        layout.addWidget(header)
+
+        desc = QLabel("View photos of unauthorized access attempts caught by the camera.")
+        desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px;")
+        layout.addWidget(desc)
+
+        # Clear All Button
+        self.clear_intruders_btn = QPushButton("Clear All Photos")
+        self.clear_intruders_btn.clicked.connect(self.clear_all_intruders)
+        self.clear_intruders_btn.setStyleSheet("background-color: #ef4444; color: white;")
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.addWidget(self.clear_intruders_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # Scroll area for grid of captures
+        from PySide6.QtWidgets import QScrollArea, QGridLayout
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet(f"border: 1px solid {BORDER_NEUTRAL}; border-radius: 8px; background-color: {CARD_NEUTRAL};")
+        
+        self.gallery_widget = QWidget()
+        self.gallery_widget.setStyleSheet(f"background-color: {CARD_NEUTRAL};")
+        self.gallery_layout = QGridLayout(self.gallery_widget)
+        self.gallery_layout.setSpacing(16)
+        self.gallery_layout.setContentsMargins(16, 16, 16, 16)
+        
+        self.scroll_area.setWidget(self.gallery_widget)
+        layout.addWidget(self.scroll_area)
+
+        # Empty State
+        self.intruders_empty_label = QLabel("🛡️ No intruder attempts detected. Your system is safe!")
+        self.intruders_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.intruders_empty_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 15px; font-weight: bold; padding: 60px;")
+        layout.addWidget(self.intruders_empty_label)
+
+        self.tab_stack.addWidget(page)
+
+    def populate_intruder_gallery(self):
+        import os
+        import glob
+        import datetime
+        from PySide6.QtGui import QPixmap
+        
+        # Clear existing layout items
+        while self.gallery_layout.count():
+            item = self.gallery_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        intruder_dir = os.path.expanduser("~/.config/facegate/intruders")
+        if not os.path.exists(intruder_dir):
+            files = []
+        else:
+            files = glob.glob(os.path.join(intruder_dir, "*.jpg"))
+            files.sort(reverse=True) # Show newest first
+
+        if not files:
+            self.scroll_area.hide()
+            self.clear_intruders_btn.hide()
+            self.intruders_empty_label.show()
+            return
+
+        self.intruders_empty_label.hide()
+        self.scroll_area.show()
+        self.clear_intruders_btn.show()
+
+        columns = 3
+        from PySide6.QtWidgets import QFrame
+        for index, filepath in enumerate(files):
+            filename = os.path.basename(filepath)
+            parts = filename.replace(".jpg", "").split("_")
+            if len(parts) >= 3:
+                date_str = parts[0]
+                time_str = parts[1]
+                app_name = "_".join(parts[2:])
+                
+                try:
+                    dt = datetime.datetime.strptime(f"{date_str}_{time_str}", "%Y%m%d_%H%M%S")
+                    formatted_time = dt.strftime("%b %d, %Y - %I:%M:%S %p")
+                except ValueError:
+                    formatted_time = f"{date_str} {time_str}"
+            else:
+                app_name = filename
+                formatted_time = "Unknown time"
+
+            # Create a card for each capture
+            card = QFrame()
+            card.setStyleSheet(f"border: 1px solid #e9e7f1; border-radius: 8px; background-color: #ffffff;")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(8, 8, 8, 8)
+            card_layout.setSpacing(6)
+
+            # Image label
+            img_lbl = QLabel()
+            pixmap = QPixmap(filepath)
+            if not pixmap.isNull():
+                img_lbl.setPixmap(pixmap.scaled(180, 135, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
+                img_lbl.setFixedSize(180, 135)
+                img_lbl.setStyleSheet("border-radius: 6px; border: 1px solid #e9e7f1;")
+            else:
+                img_lbl.setText("Image missing")
+                img_lbl.setFixedSize(180, 135)
+            card_layout.addWidget(img_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+
+            # App Name Label
+            app_lbl = QLabel(f"<b>Attempted:</b> {app_name}")
+            app_lbl.setStyleSheet("font-size: 12px; color: #1e1b4b; border: none;")
+            app_lbl.setWordWrap(True)
+            card_layout.addWidget(app_lbl)
+
+            # Time Label
+            time_lbl = QLabel(formatted_time)
+            time_lbl.setStyleSheet("font-size: 11px; color: #5c5770; border: none;")
+            card_layout.addWidget(time_lbl)
+
+            # Delete Button
+            del_btn = QPushButton("Delete")
+            del_btn.setStyleSheet("background-color: transparent; color: #ef4444; border: 1px solid #ef4444; font-size: 11px; padding: 4px; font-weight: bold;")
+            del_btn.clicked.connect(self.make_delete_intruder_callback(filepath))
+            card_layout.addWidget(del_btn)
+
+            row = index // columns
+            col = index % columns
+            self.gallery_layout.addWidget(card, row, col)
+
+    def make_delete_intruder_callback(self, filepath):
+        return lambda: self.delete_intruder_file(filepath)
+
+    def delete_intruder_file(self, filepath):
+        try:
+            import os
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            self.populate_intruder_gallery()
+        except Exception as e:
+            logging.error(f"Failed to delete intruder file: {e}")
+
+    def clear_all_intruders(self):
+        ret = QMessageBox.question(
+            self, "Clear All Photos",
+            "Are you sure you want to delete all caught intruder photos?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if ret == QMessageBox.StandardButton.Yes:
+            import os
+            import glob
+            intruder_dir = os.path.expanduser("~/.config/facegate/intruders")
+            if os.path.exists(intruder_dir):
+                for f in glob.glob(os.path.join(intruder_dir, "*.jpg")):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
+            self.populate_intruder_gallery()

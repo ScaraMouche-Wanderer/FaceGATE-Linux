@@ -3,8 +3,21 @@ import signal
 import time
 import logging
 import threading
+import shutil
 from PySide6.QtCore import QObject, Signal
 import psutil
+import hashlib
+
+def calculate_sha256(filepath):
+    """Calculates SHA-256 checksum of the target file to detect copied binaries."""
+    try:
+        sha256_hash = hashlib.sha256()
+        with open(filepath, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
+    except Exception:
+        return None
 
 class AppMonitorSignals(QObject):
     # Signal emitted when a protected process is detected and suspended
@@ -19,6 +32,11 @@ class AppMonitor:
         self.running = False
         self.thread = None
         self._seen_pids = set()  # Tracks PIDs that have been processed
+        
+        self._cached_apps = None
+        self._canonical_map = {}
+        self._hash_map = {}
+        self._heuristics = []
 
     def start(self):
         self.running = True
@@ -36,6 +54,30 @@ class AppMonitor:
         """Clears the seen PIDs history to re-trigger checks for active processes."""
         self._seen_pids.clear()
 
+    def _update_cache_if_needed(self, protected_apps):
+        """Refreshes canonical paths and SHA-256 hashes if the protected apps list changed."""
+        if self._cached_apps == protected_apps:
+            return
+            
+        self._cached_apps = list(protected_apps)
+        self._canonical_map = {}
+        self._hash_map = {}
+        self._heuristics = []
+        
+        for app in protected_apps:
+            exec_name = app.get("executable")
+            if exec_name:
+                path = shutil.which(exec_name)
+                if path:
+                    real_path = os.path.realpath(path)
+                    self._canonical_map[real_path] = app
+                    
+                    # Cache SHA-256 hash for renamed copy detection
+                    h = calculate_sha256(real_path)
+                    if h:
+                        self._hash_map[h] = app
+                        self._heuristics.append((exec_name.lower(), app, h))
+
     def _monitor_loop(self):
         while self.running:
             try:
@@ -45,12 +87,7 @@ class AppMonitor:
                     continue
 
                 protected_apps = self.main_app.get_protected_apps()
-                # Create maps from exec name and desktop name to config
-                exec_to_app = {}
-                for app in protected_apps:
-                    exec_name = app.get("executable")
-                    if exec_name:
-                        exec_to_app[exec_name.lower()] = app
+                self._update_cache_if_needed(protected_apps)
 
                 # Scan running processes
                 for proc in psutil.process_iter(['pid', 'name', 'exe']):
@@ -72,12 +109,32 @@ class AppMonitor:
                         exe = proc.info['exe']
                         
                         match_app = None
-                        if name and name.lower() in exec_to_app:
-                            match_app = exec_to_app[name.lower()]
-                        elif exe:
-                            exe_base = os.path.basename(exe).lower()
-                            if exe_base in exec_to_app:
-                                match_app = exec_to_app[exe_base]
+                        if exe:
+                            real_exe = os.path.realpath(exe)
+                            
+                            # 1. Match by canonical absolute path (handles symlinks, dots, alternate PATH layouts)
+                            if real_exe in self._canonical_map:
+                                match_app = self._canonical_map[real_exe]
+                            else:
+                                # 2. Match by content hash if the process name is suspicious
+                                name_lower = name.lower() if name else ""
+                                exe_base = os.path.basename(real_exe).lower()
+                                
+                                is_suspicious = False
+                                target_hash = None
+                                target_app = None
+                                
+                                for target_name, app_cfg, h in self._heuristics:
+                                    if target_name in name_lower or target_name in exe_base:
+                                        is_suspicious = True
+                                        target_hash = h
+                                        target_app = app_cfg
+                                        break
+                                
+                                if is_suspicious and target_hash and target_app:
+                                    proc_hash = calculate_sha256(real_exe)
+                                    if proc_hash == target_hash:
+                                        match_app = target_app
 
                         if match_app:
                             app_id = match_app.get("id")
