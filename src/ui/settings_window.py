@@ -587,7 +587,8 @@ class SettingsWindow(QDialog):
             # Resolve QIcon using shared utility
             from ui.theme import resolve_app_icon
             icon = resolve_app_icon(app.get("icon", ""))
-                
+            
+            icon_item = QTableWidgetItem(app.get("name", ""))
             icon_item.setIcon(icon)
             
             id_item = QTableWidgetItem(app.get("id", ""))

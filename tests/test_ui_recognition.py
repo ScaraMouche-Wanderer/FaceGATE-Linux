@@ -75,5 +75,39 @@ class TestUiRecognition(unittest.TestCase):
         self.assertFalse(dialog.camera_error)
         self.assertFalse(dialog.timed_out)
 
+    @patch('utils.systemd_manager.is_enabled', return_value=True)
+    def test_settings_window_load(self, mock_systemd):
+        print("=== Running UI Settings Window Load Test ===")
+        from ui.settings_window import SettingsWindow
+        from utils.config_loader import Config
+        
+        # Create a mock config
+        mock_config = Config()
+        mock_config.settings = {
+            "protected_apps": [
+                {"id": "kitty", "name": "Kitty Terminal", "executable": "kitty", "desktop_name": "kitty.desktop", "icon": "kitty"}
+            ],
+            "app_monitor": {
+                "on_auth_failure": "kill",
+                "auth_timeout_seconds": 60
+            },
+            "behavior": {
+                "uninstall_protection": True,
+                "emergency_key": "<Control><Alt>k",
+                "notify_on_auth": True,
+                "autolock_on_idle": False,
+                "autolock_on_idle_minutes": 10,
+                "startup_delay_seconds": 0
+            }
+        }
+        
+        # Instantiate the settings window dialog
+        dialog = SettingsWindow(config=mock_config)
+        
+        # Verify it populated correctly and no exceptions were thrown
+        self.assertEqual(dialog.apps_table.rowCount(), 1)
+        self.assertEqual(dialog.apps_table.item(0, 0).text(), "Kitty Terminal")
+        self.assertEqual(dialog.apps_table.item(0, 1).text(), "kitty")
+
 if __name__ == "__main__":
     unittest.main()
