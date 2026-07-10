@@ -326,8 +326,8 @@ class AuthDialog(QDialog):
             
             from camera.camera_worker import CameraWorker
             self.camera_worker = CameraWorker()
-            self.camera_worker.signals.frame_ready.connect(self.handle_frame)
-            self.camera_worker.signals.error.connect(self.handle_camera_error)
+            self.camera_worker.signals.frame_ready.connect(self.handle_frame, Qt.ConnectionType.QueuedConnection)
+            self.camera_worker.signals.error.connect(self.handle_camera_error, Qt.ConnectionType.QueuedConnection)
             self.status_label.setText("Accessing video capture device...")
             
             # Start timeout timer now that models are loaded and camera starts

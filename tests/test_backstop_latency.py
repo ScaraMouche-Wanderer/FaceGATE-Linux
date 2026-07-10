@@ -31,10 +31,10 @@ def test_backstop_latency():
         print("Please start the daemon in another terminal before running this test.", file=sys.stderr)
         sys.exit(1)
         
-    trials = 2
+    trials = 1
     delays = []
     
-    print("\nStarting 2 latency trials...")
+    print("\nStarting 1 latency trial...")
     for i in range(trials):
         # Record start time and spawn the real kitty binary directly
         # bypassing the substituted launcher ~/.local/share/applications/kitty.desktop

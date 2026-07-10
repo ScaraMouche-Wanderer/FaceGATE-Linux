@@ -151,5 +151,11 @@ class TestUiRecognition(unittest.TestCase):
         app.handle_screensaver_active_changed(True)
         self.assertFalse(app.authorized_apps.get("kitty", False))
 
+    def test_enrollment_wizard_load(self):
+        print("=== Running Enrollment Wizard Load Test ===")
+        from ui.enrollment_wizard import EnrollmentWizard
+        wizard = EnrollmentWizard()
+        self.assertIsNotNone(wizard.stack)
+
 if __name__ == "__main__":
     unittest.main()

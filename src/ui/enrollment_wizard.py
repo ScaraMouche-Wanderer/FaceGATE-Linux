@@ -341,8 +341,8 @@ class EnrollmentWizard(QDialog):
     def start_camera_worker(self):
         self.instruction_lbl.setText("Initializing camera capture...")
         self.camera_worker = CameraWorker()
-        self.camera_worker.signals.frame_ready.connect(self.on_frame_received)
-        self.camera_worker.signals.error.connect(self.on_camera_error)
+        self.camera_worker.signals.frame_ready.connect(self.on_frame_received, Qt.ConnectionType.QueuedConnection)
+        self.camera_worker.signals.error.connect(self.on_camera_error, Qt.ConnectionType.QueuedConnection)
         self.camera_worker.start()
 
     def cancel_capture_flow(self):
