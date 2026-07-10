@@ -907,9 +907,14 @@ class SettingsWindow(QDialog):
         
         # Write config back to file
         if self.config.save():
-            QMessageBox.information(self, "Settings Saved", 
-                                    "Settings have been saved successfully.\n\n"
-                                    "Please restart the FaceGate daemon to apply changes.")
+            res = QMessageBox.question(
+                self, "Settings Saved",
+                "Settings have been saved successfully.\n\n"
+                "Would you like to restart the FaceGate daemon now to apply these changes?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if res == QMessageBox.StandardButton.Yes:
+                self.restart_daemon()
             self.accept()
         else:
             QMessageBox.critical(self, "Save Failed", "Failed to save configuration parameters.")
