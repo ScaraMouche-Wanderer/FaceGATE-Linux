@@ -419,6 +419,45 @@ class FaceGateApplication(QObject):
         self._settings_window = None
 
     @Slot()
+    def open_enrollment(self):
+        """Opens the Guided Enrollment Wizard after master password and face verification."""
+        from ui.auth_dialog import AuthDialog
+        
+        # 1. Requiring master password verification
+        pwd_dialog = AuthDialog("Enrollment Password Check", mode="password")
+        pwd_res = pwd_dialog.exec()
+        if pwd_res != QDialog.DialogCode.Accepted:
+            logging.warning("Enrollment Access: Master password verification failed.")
+            return
+
+        # 2. Requiring face recognition verification of any pre-existing user (if enrolled faces exist)
+        from database.embedding_store import load_embeddings
+        try:
+            enrolled = load_embeddings()
+        except Exception:
+            enrolled = {}
+            
+        if enrolled:
+            timeout_sec = self.config.get("app_monitor.auth_timeout_seconds", 60)
+            face_dialog = AuthDialog("Enrollment Face Check", mode="face", timeout_seconds=timeout_sec)
+            face_res = face_dialog.exec()
+            if face_res != QDialog.DialogCode.Accepted:
+                logging.warning("Enrollment Access: Face verification failed.")
+                return
+
+        # 3. Open Enrollment Wizard
+        from ui.enrollment_wizard import EnrollmentWizard
+        if not hasattr(self, "_enrollment_wizard") or self._enrollment_wizard is None:
+            self._enrollment_wizard = EnrollmentWizard(parent=None)
+            self._enrollment_wizard.finished.connect(self.cleanup_enrollment_wizard)
+        self._enrollment_wizard.show()
+        self._enrollment_wizard.raise_()
+        self._enrollment_wizard.activateWindow()
+
+    def cleanup_enrollment_wizard(self, result):
+        self._enrollment_wizard = None
+
+    @Slot()
     def quit_app(self, bypass_protection=False):
         logging.info("Quit requested. Performing restoration...")
         

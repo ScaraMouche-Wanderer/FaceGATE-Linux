@@ -157,5 +157,27 @@ class TestUiRecognition(unittest.TestCase):
         wizard = EnrollmentWizard()
         self.assertIsNotNone(wizard.stack)
 
+    @patch('core.monitor_main.register_dbus_service', return_value=True)
+    @patch('ui.auth_dialog.AuthDialog.exec', return_value=1) # QDialog.DialogCode.Accepted
+    @patch('database.embedding_store.load_embeddings', return_value={"test_user": np.zeros(512)})
+    def test_open_enrollment_flow_auth(self, mock_load, mock_exec, mock_dbus):
+        print("=== Running Running Open Enrollment Flow Auth Test ===")
+        from core.monitor_main import FaceGateApplication
+        from utils.config_loader import Config
+        
+        mock_config = Config()
+        mock_config.settings = {
+            "protected_apps": [],
+            "app_monitor": {"auth_timeout_seconds": 60},
+            "behavior": {"uninstall_protection": False}
+        }
+        
+        app = FaceGateApplication(config=mock_config)
+        with patch('ui.enrollment_wizard.EnrollmentWizard.show') as mock_show:
+            app.open_enrollment()
+            # Assert auth dialog was executed twice: once for password, once for face!
+            self.assertEqual(mock_exec.call_count, 2)
+            mock_show.assert_called_once()
+
 if __name__ == "__main__":
     unittest.main()

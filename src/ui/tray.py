@@ -134,6 +134,11 @@ class FaceGateTray(QSystemTrayIcon):
         settings_action = QAction("Settings...", self.menu)
         settings_action.triggered.connect(self.main_app.open_settings)
         self.menu.addAction(settings_action)
+
+        # Enroll Face
+        enroll_action = QAction("Enroll Face...", self.menu)
+        enroll_action.triggered.connect(self.main_app.open_enrollment)
+        self.menu.addAction(enroll_action)
         
         self.menu.addSeparator()
         
