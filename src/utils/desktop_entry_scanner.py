@@ -17,6 +17,7 @@ def get_installed_desktop_entries() -> list:
     ]
     
     apps = []
+    seen_filenames = set()
     parser = configparser.ConfigParser(strict=False, interpolation=None)
     
     for directory in directories:
@@ -25,6 +26,9 @@ def get_installed_desktop_entries() -> list:
             
         for filename in os.listdir(directory):
             if not filename.endswith('.desktop'):
+                continue
+                
+            if filename in seen_filenames:
                 continue
                 
             filepath = os.path.join(directory, filename)
@@ -63,6 +67,10 @@ def get_installed_desktop_entries() -> list:
                 executable_path = tokens[0]
                 executable_name = os.path.basename(executable_path)
                 
+                # Exclude facegate wrappers to prevent self-locking loops
+                if executable_name == "facegate":
+                    continue
+                
                 apps.append({
                     "desktop_name": filename,
                     "name": name,
@@ -70,6 +78,7 @@ def get_installed_desktop_entries() -> list:
                     "icon": icon,
                     "path": filepath
                 })
+                seen_filenames.add(filename)
             except Exception as e:
                 logging.debug(f"Error parsing desktop file {filename}: {e}")
                 
