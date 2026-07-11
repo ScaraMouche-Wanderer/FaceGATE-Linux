@@ -3,7 +3,7 @@ import shlex
 import configparser
 import logging
 
-def get_installed_desktop_entries() -> list:
+def get_installed_desktop_entries(custom_dirs: list = None) -> list:
     """
     Scans system and user applications directories for installed `.desktop` files.
     Parses application Name, Exec (stripping field codes), and Icon fields.
@@ -11,8 +11,10 @@ def get_installed_desktop_entries() -> list:
     Returns a sorted list of dictionaries:
     [{"desktop_name", "name", "executable", "icon", "path"}, ...]
     """
-    directories = [
+    directories = custom_dirs if custom_dirs is not None else [
         "/usr/share/applications",
+        "/usr/local/share/applications",
+        "/var/lib/flatpak/exports/share/applications",
         os.path.expanduser("~/.local/share/applications")
     ]
     

@@ -74,6 +74,68 @@ def verify_password(password: str) -> bool:
         for i in range(len(pwd_bytes)):
             pwd_bytes[i] = 0
 
+def update_master_password(current_password: str | None, new_password: str) -> None:
+    """
+    Core function to set or change the master password.
+    If an envelope exists, it will attempt to decrypt it using current_password.
+    If decryption succeeds (or if no envelope exists yet), it will encrypt
+    the existing (or empty) database under new_password and save the new envelope.
+    """
+    if len(new_password) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+
+    # 1. Check if a master password already exists
+    envelope = read_envelope_file()
+    existing_data = {}
+    
+    if envelope:
+        if current_password is None:
+            raise ValueError("Current password is required to change password.")
+            
+        current_bytes = bytearray(current_password.encode('utf-8'))
+        try:
+            salt = envelope["salt"]
+            iterations = envelope["iterations"]
+            nonce = envelope["nonce"]
+            ciphertext = envelope["ciphertext"]
+            
+            key = derive_key(current_bytes, salt, iterations)
+            decrypted_bytes = decrypt(nonce, ciphertext, key)
+            existing_data = json.loads(decrypted_bytes.decode('utf-8'))
+        except Exception:
+            raise ValueError("Incorrect current master password.")
+        finally:
+            for i in range(len(current_bytes)):
+                current_bytes[i] = 0
+
+    pwd_bytes = bytearray(new_password.encode('utf-8'))
+    try:
+        from utils.config_loader import get_config
+        config = get_config()
+        salt = os.urandom(16)
+        iterations = int(config.get("security.pbkdf2_iterations", 600000))
+        new_key = derive_key(pwd_bytes, salt, iterations)
+        
+        plaintext_bytes = json.dumps(existing_data).encode('utf-8')
+        nonce, ciphertext = encrypt(plaintext_bytes, new_key)
+        
+        new_envelope = {
+            "kdf": "pbkdf2_hmac_sha256",
+            "iterations": iterations,
+            "salt": base64.b64encode(salt).decode('utf-8'),
+            "nonce": base64.b64encode(nonce).decode('utf-8'),
+            "ciphertext": base64.b64encode(ciphertext).decode('utf-8')
+        }
+        
+        os.makedirs(os.path.dirname(EMBEDDING_FILE), exist_ok=True)
+        with open(EMBEDDING_FILE, 'w') as f:
+            json.dump(new_envelope, f, indent=4)
+            
+        os.chmod(EMBEDDING_FILE, 0o600)
+    finally:
+        for i in range(len(pwd_bytes)):
+            pwd_bytes[i] = 0
+
 def set_master_password_cli():
     """
     CLI interface to set or change the FaceGate master password.
@@ -88,35 +150,16 @@ def set_master_password_cli():
     # 1. Detect if migration is needed
     if os.path.exists(OLD_EMBEDDING_FILE) and not os.path.exists(EMBEDDING_FILE):
         print("Plaintext embeddings.json detected. Performing migration.")
-        # Trigger migration flow (will prompt internally for a password if none given)
         check_and_perform_migration()
         return
 
     # 2. Check if a master password already exists
     envelope = read_envelope_file()
-    existing_data = {}
+    current_pwd = None
     
     if envelope:
         print("An encrypted embeddings store already exists.")
         current_pwd = getpass.getpass("Enter current master password: ")
-        current_bytes = bytearray(current_pwd.encode('utf-8'))
-        
-        try:
-            salt = envelope["salt"]
-            iterations = envelope["iterations"]
-            nonce = envelope["nonce"]
-            ciphertext = envelope["ciphertext"]
-            
-            key = derive_key(current_bytes, salt, iterations)
-            decrypted_bytes = decrypt(nonce, ciphertext, key)
-            existing_data = json.loads(decrypted_bytes.decode('utf-8'))
-            print("Current password verified successfully.\n")
-        except Exception:
-            print("Error: Incorrect current master password.", file=sys.stderr)
-            sys.exit(1)
-        finally:
-            for i in range(len(current_bytes)):
-                current_bytes[i] = 0
 
     # 3. Prompt for the new master password
     while True:
@@ -130,42 +173,12 @@ def set_master_password_cli():
             print("Error: Passwords do not match. Try again.")
             continue
             
-        new_password = p1
+        new_pwd = p1
         break
-        
-    pwd_bytes = bytearray(new_password.encode('utf-8'))
-    
+
     try:
-        # Derive key with fresh salt and OWASP iteration count (600,000)
-        salt = os.urandom(16)
-        iterations = 600000
-        new_key = derive_key(pwd_bytes, salt, iterations)
-        
-        # Encrypt the database contents (either existing_data or an empty dict)
-        plaintext_bytes = json.dumps(existing_data).encode('utf-8')
-        nonce, ciphertext = encrypt(plaintext_bytes, new_key)
-        
-        # Prepare envelope
-        new_envelope = {
-            "kdf": "pbkdf2_hmac_sha256",
-            "iterations": iterations,
-            "salt": base64.b64encode(salt).decode('utf-8'),
-            "nonce": base64.b64encode(nonce).decode('utf-8'),
-            "ciphertext": base64.b64encode(ciphertext).decode('utf-8')
-        }
-        
-        # Write to file
-        os.makedirs(os.path.dirname(EMBEDDING_FILE), exist_ok=True)
-        with open(EMBEDDING_FILE, 'w') as f:
-            json.dump(new_envelope, f, indent=4)
-            
-        # Enforce file permissions
-        os.chmod(EMBEDDING_FILE, 0o600)
-        
+        update_master_password(current_pwd, new_pwd)
         print("SUCCESS: Master password configured. Embeddings store encrypted at rest.")
     except Exception as e:
-        print(f"Error: Failed to encrypt or write credentials envelope: {e}", file=sys.stderr)
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-    finally:
-        for i in range(len(pwd_bytes)):
-            pwd_bytes[i] = 0

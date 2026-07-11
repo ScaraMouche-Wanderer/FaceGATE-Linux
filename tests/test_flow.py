@@ -20,10 +20,10 @@ from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply, QDBusAbs
 MOCK_AUTH_RESULT = True
 
 
-class TestFaceGateService(QObject):
+class MockFaceGateService(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.adaptor = TestFaceGateAdaptor(self)
+        self.adaptor = MockFaceGateAdaptor(self)
         self.auth_call_count = 0
 
     def request_auth_internal(self, app_identifier: str) -> bool:
@@ -33,8 +33,8 @@ class TestFaceGateService(QObject):
 
 
 @ClassInfo({"D-Bus Interface": "org.facegate.FaceGateTest"})
-class TestFaceGateAdaptor(QDBusAbstractAdaptor):
-    def __init__(self, parent: TestFaceGateService):
+class MockFaceGateAdaptor(QDBusAbstractAdaptor):
+    def __init__(self, parent: MockFaceGateService):
         super().__init__(parent)
         self.service = parent
 
@@ -58,7 +58,7 @@ def run_test():
     service_name = "org.facegate.FaceGateTest"
     object_path = "/org/facegate/FaceGateTest"
 
-    service_obj = TestFaceGateService()
+    service_obj = MockFaceGateService()
 
     if not bus.registerService(service_name):
         print(f"Error: Failed to register D-Bus service '{service_name}'")

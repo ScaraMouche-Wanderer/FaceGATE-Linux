@@ -75,3 +75,17 @@ def restart() -> bool:
     except Exception as e:
         logging.error(f"Error restarting systemd service: {e}")
         return False
+
+def is_active() -> bool:
+    """
+    Checks if facegate.service is active in systemd's user manager.
+    """
+    try:
+        res = subprocess.run(
+            ["systemctl", "--user", "is-active", "facegate.service"],
+            capture_output=True,
+            text=True
+        )
+        return res.stdout.strip() == "active"
+    except Exception:
+        return False

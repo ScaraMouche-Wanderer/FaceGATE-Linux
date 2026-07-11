@@ -39,6 +39,20 @@ FaceGATE-Linux is a **user-level** application locker. It is designed to protect
 
 For a full discussion of the security model, see the [README](README.md#security-model--limitations).
 
+### Process Detection & Interception Model (Direct-Launch Gap)
+
+- **Mechanism**: FaceGATE-Linux enforces locking via a dual-layer approach:
+  1. **Launcher Substitution**: It shadows the application's desktop entry (`.desktop` file) to run a helper wrapper that authenticates before executing the binary.
+  2. **Process Polling Monitor**: A background monitor (`AppMonitor`) polls running system processes at a configurable interval (default `0.4s`) to detect and suspend (via `SIGSTOP`) unauthorized instances of protected apps.
+- **Direct-Launch Exposure**: Because process monitoring relies on a polling thread, there is a sub-second window of exposure between a process spawning and it being detected and suspended.
+- **Direct Binary Launch Bypass**: Processes launched directly via their absolute or relative binary paths (e.g. from a terminal, a custom script, or an IDE run configuration) completely bypass the launcher substitution hook. In these cases, protection relies solely on the background process monitor, meaning the application will launch and briefly execute for up to the duration of the polling interval before being suspended and gated by the authentication dialog.
+
+### Liveness Verification (Anti-Spoofing)
+
+FaceGATE-Linux includes a basic motion-based liveness check to prevent static photo or screen bypasses:
+- **Mechanism**: Bounding box centroid tracking across the 3 confirmation frames requires a minimum micro-motion threshold (configurable via `recognition.liveness_min_motion` in `default.yaml`).
+- **Limitations**: This is a pure motion/jitter check. It does **not** perform hardware-backed 3D depth sensing or active infrared (IR) scanning. Therefore, a high-resolution video of the owner or a dynamic presentation attack could potentially bypass this check.
+
 ## Cryptographic Details
 
 - **Encryption**: AES-256-GCM (via Python `cryptography` library)

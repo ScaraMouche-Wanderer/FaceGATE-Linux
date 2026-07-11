@@ -157,7 +157,9 @@ def save_embedding(name: str, embedding: np.ndarray):
             iterations = envelope["iterations"]
             salt = envelope["salt"]
         else:
-            iterations = 600000
+            from utils.config_loader import get_config
+            config = get_config()
+            iterations = int(config.get("security.pbkdf2_iterations", 600000))
             salt = os.urandom(16)
             
         new_envelope = {
@@ -179,7 +181,7 @@ def save_embedding(name: str, embedding: np.ndarray):
 
 def check_and_perform_migration(password_str: str = None) -> bool:
     """
-    Detects if Phase 2 plaintext embeddings.json exists.
+    Detects if plaintext embeddings.json exists.
     Loads it, prompts user for master password, encrypts it under the new scheme,
     verifies it round-trips correctly, and deletes the old plaintext file.
     
@@ -226,8 +228,10 @@ def check_and_perform_migration(password_str: str = None) -> bool:
         
         # Derive key
         from security.crypto_engine import derive_key, encrypt, decrypt
+        from utils.config_loader import get_config
+        config = get_config()
         salt = os.urandom(16)
-        iterations = 600000
+        iterations = int(config.get("security.pbkdf2_iterations", 600000))
         key = derive_key(pwd_bytes, salt, iterations)
         
         # Encrypt the dict data

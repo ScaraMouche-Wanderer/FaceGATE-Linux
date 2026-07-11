@@ -1,6 +1,5 @@
 import sys
 import time
-import logging
 import cv2
 import numpy as np
 

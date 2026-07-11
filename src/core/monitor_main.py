@@ -174,25 +174,28 @@ class FaceGateApplication(QObject):
         Authenticates using face recognition.
         If there are no enrolled faces (first setup), returns True immediately.
         """
-        from database.embedding_store import load_embeddings
+        from database.embedding_store import load_embeddings, EMBEDDING_FILE
+        import os
         try:
             enrolled = load_embeddings()
         except Exception:
             enrolled = {}
             
-        if not enrolled:
-            logging.info("Admin verification: No enrolled faces found. Bypassing check.")
+        if not enrolled and not os.path.exists(EMBEDDING_FILE):
+            logging.info("Admin verification: No enrolled faces found and no database exists. Bypassing check.")
             return True
             
         from ui.auth_dialog import AuthDialog
         timeout_sec = self.config.get("app_monitor.auth_timeout_seconds", 60)
-        dialog = AuthDialog(reason, mode="face", timeout_seconds=timeout_sec)
+        mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
+        dialog = AuthDialog(reason, mode=mode, timeout_seconds=timeout_sec)
         result = dialog.exec()
         
         success = (result == QDialog.DialogCode.Accepted)
         
         from database.audit_log import log_auth_attempt
-        log_auth_attempt(reason, "face" if not dialog.fallback_to_password else "password", "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
+        method_used = "face" if (mode == "face" and not dialog.fallback_to_password) else "password"
+        log_auth_attempt(reason, method_used, "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
         
         return success
 
@@ -235,18 +238,21 @@ class FaceGateApplication(QObject):
                 logging.warning(f"Process PID {pid} died before auth was shown.")
                 return
 
-            from database.embedding_store import get_cached_key
+            from database.embedding_store import get_cached_key, EMBEDDING_FILE
             cached_key = get_cached_key()
             
             if not cached_key:
-                logging.info("Daemon is locked (backstop). Displaying GUI password prompt directly in daemon.")
+                import os
+                mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
+                logging.info(f"Daemon is locked (backstop). Displaying GUI {mode} auth prompt directly in daemon.")
                 app_name = self.get_app_name(desktop_name)
-                dialog = AuthDialog(app_name, mode="password")
+                dialog = AuthDialog(app_name, mode=mode)
                 res = dialog.exec()
                 success = (res == AuthDialog.DialogCode.Accepted)
                 
                 from database.audit_log import log_auth_attempt
-                log_auth_attempt(desktop_name, "password", "success" if success else "fail", None, getattr(dialog, "matched_user", None) if success else None)
+                method_used = "face" if not dialog.fallback_to_password else "password"
+                log_auth_attempt(desktop_name, method_used, "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
                 
                 if success:
                     self.authorize_app(desktop_name)
@@ -420,30 +426,24 @@ class FaceGateApplication(QObject):
 
     @Slot()
     def open_enrollment(self):
-        """Opens the Guided Enrollment Wizard after master password and face verification."""
+        """Opens the Guided Enrollment Wizard after verification."""
         from ui.auth_dialog import AuthDialog
+        from database.embedding_store import load_embeddings, EMBEDDING_FILE
+        import os
         
-        # 1. Requiring master password verification
-        pwd_dialog = AuthDialog("Enrollment Password Check", mode="password")
-        pwd_res = pwd_dialog.exec()
-        if pwd_res != QDialog.DialogCode.Accepted:
-            logging.warning("Enrollment Access: Master password verification failed.")
-            return
-
-        # 2. Requiring face recognition verification of any pre-existing user (if enrolled faces exist)
-        from database.embedding_store import load_embeddings
         try:
             enrolled = load_embeddings()
         except Exception:
             enrolled = {}
             
-        if enrolled:
-            timeout_sec = self.config.get("app_monitor.auth_timeout_seconds", 60)
-            face_dialog = AuthDialog("Enrollment Face Check", mode="face", timeout_seconds=timeout_sec)
-            face_res = face_dialog.exec()
-            if face_res != QDialog.DialogCode.Accepted:
-                logging.warning("Enrollment Access: Face verification failed.")
-                return
+        mode = "face" if (enrolled or os.path.exists(EMBEDDING_FILE)) else "password"
+        timeout_sec = self.config.get("app_monitor.auth_timeout_seconds", 60)
+        
+        dialog = AuthDialog("Enrollment Access", mode=mode, timeout_seconds=timeout_sec)
+        res = dialog.exec()
+        if res != QDialog.DialogCode.Accepted:
+            logging.warning("Enrollment Access: Verification failed.")
+            return
 
         # 3. Open Enrollment Wizard
         from ui.enrollment_wizard import EnrollmentWizard
@@ -464,12 +464,20 @@ class FaceGateApplication(QObject):
         # Check uninstall protection
         if not bypass_protection:
             if self.config.get("behavior.uninstall_protection", True):
-                logging.info("Uninstall protection is active. Prompting for master password...")
+                logging.info("Uninstall protection is active. Prompting for verification...")
+                from database.embedding_store import load_embeddings, EMBEDDING_FILE
+                import os
+                try:
+                    enrolled = load_embeddings()
+                except Exception:
+                    enrolled = {}
+                
                 from ui.auth_dialog import AuthDialog
-                dialog = AuthDialog("FaceGate Shutdown", mode="password")
+                mode = "face" if (enrolled or os.path.exists(EMBEDDING_FILE)) else "password"
+                dialog = AuthDialog("FaceGate Shutdown", mode=mode)
                 res = dialog.exec()
                 if res != QDialog.DialogCode.Accepted:
-                    logging.info("Shutdown cancelled due to password verification failure.")
+                    logging.info("Shutdown cancelled due to verification failure.")
                     return
         
         # Restore launchers
@@ -630,21 +638,55 @@ def main():
         app = QApplication(sys.argv)
         
         # Verify admin face if any embeddings exist
+        from database.embedding_store import EMBEDDING_FILE
+        has_enrolled = False
         try:
             enrolled = load_embeddings()
+            has_enrolled = len(enrolled) > 0
         except Exception:
-            enrolled = {}
+            has_enrolled = os.path.exists(EMBEDDING_FILE)
             
         config = get_config()
-        if enrolled and config.get("security.lock_settings_window", True):
-            timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
-            dialog = AuthDialog("Settings Access", mode="face", timeout_seconds=timeout_sec)
-            result = dialog.exec()
-            success = (result == QDialog.DialogCode.Accepted)
-            log_auth_attempt("Settings Access", "face" if not dialog.fallback_to_password else "password", "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
-            if not success:
-                logging.info("Settings Access: Verification failed. Exiting.")
-                sys.exit(1)
+        if (has_enrolled or os.path.exists(EMBEDDING_FILE)) and config.get("security.lock_settings_window", True):
+            # Check if FaceGate daemon is active on session D-Bus
+            dbus_success = False
+            dbus_active = False
+            
+            from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected():
+                interface = QDBusInterface(
+                    "org.facegate.FaceGate",
+                    "/org/facegate/FaceGate",
+                    "org.facegate.FaceGate",
+                    bus
+                )
+                if interface.isValid():
+                    dbus_active = True
+                    logging.info("Requesting Settings Access authorization via running FaceGate daemon...")
+                    raw_reply = interface.call("RequestAuth", "Settings Access")
+                    reply = QDBusReply(raw_reply)
+                    if reply.isValid():
+                        dbus_success = reply.value()
+                    else:
+                        logging.error(f"D-Bus auth call failed: {reply.error().message()}")
+            
+            if dbus_active:
+                if not dbus_success:
+                    logging.info("Settings Access: Verification failed via daemon. Exiting.")
+                    sys.exit(1)
+            else:
+                # Fallback to local AuthDialog
+                logging.info("FaceGate daemon is not active on D-Bus. Running local verification.")
+                mode = "face" if (has_enrolled or os.path.exists(EMBEDDING_FILE)) else "password"
+                timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
+                dialog = AuthDialog("Settings Access", mode=mode, timeout_seconds=timeout_sec)
+                result = dialog.exec()
+                success = (result == QDialog.DialogCode.Accepted)
+                log_auth_attempt("Settings Access", "face" if not dialog.fallback_to_password else "password", "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
+                if not success:
+                    logging.info("Settings Access: Verification failed. Exiting.")
+                    sys.exit(1)
                 
         dialog = SettingsWindow()
         dialog.exec()
@@ -658,7 +700,6 @@ def main():
         
     elif args.recognize:
         # Recognition subprocess mode (GUI)
-        from PySide6.QtWidgets import QDialog
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
         

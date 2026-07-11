@@ -44,13 +44,50 @@ def get_system_desktop_path(desktop_name: str) -> str:
         return path
     return None
 
+_temp_tray = None
+
+def notify_permission_error(desktop_name: str, failing_path: str, error_msg: str):
+    """Surfaces a one-time tray notification telling the user protection could not be applied."""
+    from PySide6.QtWidgets import QApplication, QSystemTrayIcon
+    app = QApplication.instance()
+    if not app:
+        return
+
+    found_tray = None
+    # Look for an existing QSystemTrayIcon in the application hierarchy
+    for obj in app.children():
+        if isinstance(obj, QSystemTrayIcon):
+            found_tray = obj
+            break
+        for child in obj.children():
+            if isinstance(child, QSystemTrayIcon):
+                found_tray = child
+                break
+
+    message_title = "FaceGate Protection Failed"
+    message_text = f"Could not lock '{desktop_name}' due to a permission error at: {failing_path}. Please check file permissions."
+
+    if found_tray:
+        found_tray.showMessage(message_title, message_text, QSystemTrayIcon.MessageIcon.Critical, 10000)
+    else:
+        global _temp_tray
+        _temp_tray = QSystemTrayIcon()
+        _temp_tray.show()
+        _temp_tray.showMessage(message_title, message_text, QSystemTrayIcon.MessageIcon.Critical, 10000)
+
 def apply_substitution(protected_apps: List[Dict]):
     """
     Substitutes system launchers for protected apps with a FaceGate wrapped command.
     Files are written to user-level ~/.local/share/applications/ to shadow system ones.
     """
-    os.makedirs(USER_DESKTOP_DIR, exist_ok=True)
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    try:
+        os.makedirs(USER_DESKTOP_DIR, exist_ok=True)
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+    except PermissionError as pe:
+        failing_path = pe.filename or USER_DESKTOP_DIR
+        logging.error(f"PermissionError: Failed to create directories at '{failing_path}': {pe}")
+        notify_permission_error("FaceGate System Directories", failing_path, str(pe))
+        return
     
     for app in protected_apps:
         desktop_name = app.get("desktop_name")
@@ -130,6 +167,10 @@ def apply_substitution(protected_apps: List[Dict]):
                 f.writelines(new_lines)
             logging.info(f"Successfully substituted launcher: {user_path}")
             
+        except PermissionError as pe:
+            failing_path = pe.filename or user_path
+            logging.error(f"Permission denied when modifying launcher '{desktop_name}' at path '{failing_path}': {pe}")
+            notify_permission_error(desktop_name, failing_path, str(pe))
         except Exception as e:
             logging.error(f"Failed to substitute launcher '{desktop_name}': {e}")
 

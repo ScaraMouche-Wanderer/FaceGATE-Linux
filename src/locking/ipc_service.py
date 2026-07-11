@@ -25,14 +25,17 @@ class FaceGateService(QObject):
         
         cached_key = get_cached_key()
         if not cached_key:
-            logging.info("Daemon is locked. Displaying GUI password prompt directly in daemon.")
+            from database.embedding_store import EMBEDDING_FILE
+            mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
+            logging.info(f"Daemon is locked. Spawning {mode} auth dialog directly in daemon.")
             app_name = self.main_app.get_app_name(app_identifier) if self.main_app else app_identifier
-            dialog = AuthDialog(app_name, mode="password")
+            dialog = AuthDialog(app_name, mode=mode)
             res = dialog.exec()
             success = (res == AuthDialog.DialogCode.Accepted)
             
             from database.audit_log import log_auth_attempt
-            log_auth_attempt(app_identifier, "password", "success" if success else "fail", None, getattr(dialog, "matched_user", None) if success else None)
+            method_used = "face" if not dialog.fallback_to_password else "password"
+            log_auth_attempt(app_identifier, method_used, "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
             
             if success and self.main_app:
                 self.main_app.authorize_app(app_identifier)
@@ -137,12 +140,15 @@ class FaceGateService(QObject):
         """
         logging.warning("Emergency kill command received via D-Bus. Requiring authentication.")
 
-        # Require master password before honoring the kill
+        # Require authentication before honoring the kill
         from ui.auth_dialog import AuthDialog
-        dialog = AuthDialog("Emergency Shutdown", mode="password")
+        from database.embedding_store import EMBEDDING_FILE
+        import os
+        mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
+        dialog = AuthDialog("Emergency Shutdown", mode=mode)
         res = dialog.exec()
         if res != AuthDialog.DialogCode.Accepted:
-            logging.warning("Emergency kill DENIED: password verification failed.")
+            logging.warning("Emergency kill DENIED: verification failed.")
             try:
                 from database.audit_log import log_auth_attempt
                 log_auth_attempt("facegate-daemon", "emergency_hotkey", "fail", None)

@@ -215,3 +215,61 @@ class TestCredentialStorePasswordVerification:
         source = inspect.getsource(verify_password)
         assert "pwd_bytes[i] = 0" in source, \
             "Password zeroing pattern not found in verify_password"
+
+
+class TestAdminFaceVerification:
+    """Tests for FaceGateApplication.verify_admin_face validation behavior (Item 1)."""
+
+    @patch('core.monitor_main.register_dbus_service', return_value=True)
+    @patch('ui.auth_dialog.AuthDialog')
+    @patch('database.embedding_store.load_embeddings')
+    @patch('os.path.exists')
+    def test_verify_admin_face_states(self, mock_exists, mock_load, mock_auth_dialog, mock_dbus):
+        from core.monitor_main import FaceGateApplication
+        from utils.config_loader import Config
+        from PySide6.QtWidgets import QDialog
+
+        mock_config = Config()
+        mock_config.settings = {
+            "app_monitor": {"auth_timeout_seconds": 60},
+        }
+        app = FaceGateApplication(config=mock_config)
+
+        # Mock the dialog instance to return Accepted
+        mock_instance = MagicMock()
+        mock_instance.exec.return_value = QDialog.DialogCode.Accepted
+        mock_instance.fallback_to_password = False
+        mock_instance.final_score = 0.9
+        mock_instance.matched_user = "admin"
+        mock_auth_dialog.return_value = mock_instance
+
+        # State 1: Fresh boot / true first-run (no enrolled faces, no database exists)
+        mock_load.return_value = {}
+        mock_exists.return_value = False
+
+        res = app.verify_admin_face("test_reason")
+        assert res is True, "First-run should bypass and return True immediately"
+        mock_auth_dialog.assert_not_called()
+
+        # State 2: Locked daemon with existing database (no cached key, so load_embeddings returns {}, but file exists)
+        mock_load.return_value = {}
+        mock_exists.return_value = True
+        mock_auth_dialog.reset_mock()
+
+        res = app.verify_admin_face("test_reason")
+        assert res is True, "Should require AuthDialog.exec() and return True when Accepted"
+        mock_auth_dialog.assert_called_once()
+        kwargs = mock_auth_dialog.call_args[1]
+        assert kwargs.get("mode") == "face", "Locked daemon with database should default to face mode first"
+
+        # State 3: Unlocked daemon (key is cached, load_embeddings returns face templates, file exists)
+        mock_load.return_value = {"admin": np.zeros(512)}
+        mock_exists.return_value = True
+        mock_auth_dialog.reset_mock()
+
+        res = app.verify_admin_face("test_reason")
+        assert res is True, "Should require AuthDialog.exec() and return True when Accepted"
+        mock_auth_dialog.assert_called_once()
+        kwargs = mock_auth_dialog.call_args[1]
+        assert kwargs.get("mode") == "face", "Unlocked daemon must run in face mode"
+

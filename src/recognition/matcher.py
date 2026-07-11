@@ -11,7 +11,7 @@ def cosine_similarity(emb1: np.ndarray, emb2: np.ndarray) -> float:
         return 0.0
     return float(dot_product / (norm1 * norm2))
 
-def match_face(live_embedding: np.ndarray) -> tuple:
+def match_face(live_embedding: np.ndarray, enrolled: dict = None) -> tuple:
     """
     Matches a live face embedding against enrolled embeddings.
     
@@ -22,7 +22,8 @@ def match_face(live_embedding: np.ndarray) -> tuple:
     threshold = float(config.get("recognition.similarity_threshold", 0.65))
     ambiguity_margin = float(config.get("recognition.ambiguity_margin", 0.03))
     
-    enrolled = load_embeddings()
+    if enrolled is None:
+        enrolled = load_embeddings()
     if not enrolled:
         logging.warning("No enrolled embeddings found.")
         return None, 0.0

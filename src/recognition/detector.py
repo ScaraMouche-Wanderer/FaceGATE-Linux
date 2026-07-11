@@ -1,4 +1,11 @@
 import os
+# Limit ONNX Runtime and math library threads to prevent CPU spikes and thermal throttling
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import time
 import logging
 import numpy as np
