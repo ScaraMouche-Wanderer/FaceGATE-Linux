@@ -1,16 +1,15 @@
 import os
+import subprocess
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
-from PySide6.QtCore import Qt, QRect, QVariantAnimation, QEasingCurve, QAbstractAnimation
+from PySide6.QtCore import Qt, QRect, QVariantAnimation, QEasingCurve, QAbstractAnimation, QPointF, Property, QPropertyAnimation
 from PySide6.QtWidgets import QSpinBox
 
-# Purple & White light palette
+# Global constants initialized to default light mode
 BG_NEUTRAL = "#f5f3ff"
 CARD_NEUTRAL = "#faf9fc"
 BORDER_NEUTRAL = "#e9e7f1"
 TEXT_PRIMARY = "#1e1b4b"
 TEXT_SECONDARY = "#5c5770"
-
-# Accents
 ACCENT_PURPLE = "#7c3aed"
 ACCENT_PURPLE_HOVER = "#6d28d9"
 ACCENT_PURPLE_PRESSED = "#5b21b6"
@@ -20,31 +19,162 @@ WARNING_AMBER = "#fbbf24"
 
 FONT_FAMILY = 'Inter, "Cantarell", "Noto Sans", sans-serif'
 
+def is_system_dark_mode() -> bool:
+    try:
+        res = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+                             capture_output=True, text=True, timeout=1.0)
+        if "prefer-dark" in res.stdout:
+            return True
+    except Exception:
+        pass
+    return False
+
+def get_colors() -> dict:
+    from utils.config_loader import get_config
+    try:
+        config = get_config()
+        theme = config.get("behavior.theme", "system")
+    except Exception:
+        theme = "system"
+        
+    is_dark = False
+    if theme == "dark":
+        is_dark = True
+    elif theme == "system":
+        is_dark = is_system_dark_mode()
+        
+    if is_dark:
+        return {
+            "IS_DARK": True,
+            "BG_NEUTRAL": "#0f0e15",
+            "CARD_NEUTRAL": "#181720",
+            "BORDER_NEUTRAL": "#2c2a38",
+            "TEXT_PRIMARY": "#e2e1e9",
+            "TEXT_SECONDARY": "#a5a3b4",
+            "ACCENT_PURPLE": "#a855f7",
+            "ACCENT_PURPLE_HOVER": "#b56cf8",
+            "ACCENT_PURPLE_PRESSED": "#8b5cf6",
+            "WIDGET_BG": "#1f1d29",
+            "LIST_ITEM_HOVER": "#312e43",
+            "CANCEL_BTN_BG": "#2c2a38",
+            "CANCEL_BTN_HOVER": "#3d3b4e",
+            "SHADOW_COLOR": "rgba(0, 0, 0, 0.5)",
+            "STATUS_HEADER_BG": "#23212f",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#fbbf24"
+        }
+    else:
+        return {
+            "IS_DARK": False,
+            "BG_NEUTRAL": "#f5f3ff",
+            "CARD_NEUTRAL": "#faf9fc",
+            "BORDER_NEUTRAL": "#e9e7f1",
+            "TEXT_PRIMARY": "#1e1b4b",
+            "TEXT_SECONDARY": "#5c5770",
+            "ACCENT_PURPLE": "#7c3aed",
+            "ACCENT_PURPLE_HOVER": "#6d28d9",
+            "ACCENT_PURPLE_PRESSED": "#5b21b6",
+            "WIDGET_BG": "#ffffff",
+            "LIST_ITEM_HOVER": "#f3e8ff",
+            "CANCEL_BTN_BG": "#f1f5f9",
+            "CANCEL_BTN_HOVER": "#e2e8f0",
+            "SHADOW_COLOR": "rgba(124, 58, 237, 0.15)",
+            "STATUS_HEADER_BG": "#f1f5f9",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#fbbf24"
+        }
+
+def refresh_theme_colors():
+    global BG_NEUTRAL, CARD_NEUTRAL, BORDER_NEUTRAL, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT_PURPLE, ACCENT_PURPLE_HOVER, ACCENT_PURPLE_PRESSED
+    c = get_colors()
+    BG_NEUTRAL = c["BG_NEUTRAL"]
+    CARD_NEUTRAL = c["CARD_NEUTRAL"]
+    BORDER_NEUTRAL = c["BORDER_NEUTRAL"]
+    TEXT_PRIMARY = c["TEXT_PRIMARY"]
+    TEXT_SECONDARY = c["TEXT_SECONDARY"]
+    ACCENT_PURPLE = c["ACCENT_PURPLE"]
+    ACCENT_PURPLE_HOVER = c["ACCENT_PURPLE_HOVER"]
+    ACCENT_PURPLE_PRESSED = c["ACCENT_PURPLE_PRESSED"]
+
+def get_sidebar_qss(c: dict) -> str:
+    is_dark = c.get("IS_DARK", False)
+    sidebar_bg = "#191624" if is_dark else "#ede9fe"
+    sidebar_color = "#a5a2b5" if is_dark else "#4c4664"
+    sidebar_hover_bg = "#252136" if is_dark else "#e5dbff"
+    
+    return f"""
+        QListWidget#sidebar {{
+            background-color: {sidebar_bg};
+            border: none;
+            border-bottom-left-radius: 12px;
+            border-right: 1px solid {c["BORDER_NEUTRAL"]};
+            padding-top: 10px;
+            color: {sidebar_color};
+            font-size: 13px;
+            font-weight: 500;
+        }}
+        QListWidget#sidebar::item {{
+            padding: 10px 16px;
+            border-radius: 6px;
+            margin: 4px 8px;
+            color: {sidebar_color};
+        }}
+        QListWidget#sidebar::item:hover {{
+            background-color: {sidebar_hover_bg};
+            color: {c["TEXT_PRIMARY"]};
+        }}
+        QListWidget#sidebar::item:selected {{
+            background-color: {c["ACCENT_PURPLE"]};
+            color: #ffffff;
+        }}
+        QPushButton#removeBtn {{
+            background-color: transparent;
+            color: #ef4444;
+            border: 1px solid #ef4444;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-weight: bold;
+        }}
+        QPushButton#removeBtn:hover {{
+            background-color: #ef4444;
+            color: white;
+        }}
+    """
+
 def get_theme_qss() -> str:
+    refresh_theme_colors()
+    c = get_colors()
+    
     return f"""
         QDialog, QMainWindow {{
-            background-color: {BG_NEUTRAL};
-            color: {TEXT_PRIMARY};
+            background-color: {c["BG_NEUTRAL"]};
+            color: {c["TEXT_PRIMARY"]};
             font-family: {FONT_FAMILY};
         }}
         QLabel {{
-            color: {TEXT_PRIMARY};
+            color: {c["TEXT_PRIMARY"]};
             font-family: {FONT_FAMILY};
         }}
+        QLabel[secondary="true"] {{
+            color: {c["TEXT_SECONDARY"]};
+        }}
         QLineEdit {{
-            background-color: #ffffff;
-            border: 1px solid {BORDER_NEUTRAL};
+            background-color: {c["WIDGET_BG"]};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
             border-radius: 6px;
             padding: 8px 12px;
-            color: {TEXT_PRIMARY};
+            color: {c["TEXT_PRIMARY"]};
             font-size: 13px;
             font-family: {FONT_FAMILY};
         }}
         QLineEdit:focus {{
-            border: 1px solid {ACCENT_PURPLE};
+            border: 1px solid {c["ACCENT_PURPLE"]};
         }}
         QPushButton {{
-            background-color: {ACCENT_PURPLE};
+            background-color: {c["ACCENT_PURPLE"]};
             color: white;
             border: none;
             border-radius: 6px;
@@ -54,24 +184,85 @@ def get_theme_qss() -> str:
             font-family: {FONT_FAMILY};
         }}
         QPushButton:hover {{
-            background-color: {ACCENT_PURPLE_HOVER};
+            background-color: {c["ACCENT_PURPLE_HOVER"]};
         }}
         QPushButton:pressed {{
-            background-color: {ACCENT_PURPLE_PRESSED};
+            background-color: {c["ACCENT_PURPLE_PRESSED"]};
         }}
         QPushButton#cancelBtn {{
-            background-color: #f1f5f9;
-            color: {TEXT_PRIMARY};
-            border: 1px solid {BORDER_NEUTRAL};
+            background-color: {c["CANCEL_BTN_BG"]};
+            color: {c["TEXT_PRIMARY"]};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
         }}
         QPushButton#cancelBtn:hover {{
-            background-color: #e2e8f0;
+            background-color: {c["CANCEL_BTN_HOVER"]};
+        }}
+        QPushButton#removeSelectedBtn {{
+            background-color: #ef4444;
+            color: white;
+        }}
+        QPushButton#removeSelectedBtn:hover {{
+            background-color: #dc2626;
+        }}
+        QPushButton#removeSelectedBtn:pressed {{
+            background-color: #b91c1c;
+        }}
+        QPushButton#enrollBtn {{
+            background-color: {SUCCESS_GREEN};
+            color: white;
+        }}
+        QPushButton#enrollBtn:hover {{
+            background-color: #16a34a;
+        }}
+        QPushButton#enrollBtn:pressed {{
+            background-color: #15803d;
+        }}
+        QPushButton#clearIntrudersBtn {{
+            background-color: #ef4444;
+            color: white;
+        }}
+        QPushButton#clearIntrudersBtn:hover {{
+            background-color: #dc2626;
+        }}
+        QPushButton#clearIntrudersBtn:pressed {{
+            background-color: #b91c1c;
+        }}
+        QPushButton#dismissBtn {{
+            background-color: transparent;
+            color: #a1a1aa;
+            text-decoration: underline;
+            border: none;
+        }}
+        QPushButton#dismissBtn:hover {{
+            color: {c["TEXT_PRIMARY"]};
+        }}
+        QPushButton#deleteIntruderBtn {{
+            background-color: transparent;
+            color: #ef4444;
+            border: 1px solid #ef4444;
+            border-radius: 4px;
+            font-size: 11px;
+            padding: 4px;
+            font-weight: bold;
+        }}
+        QPushButton#deleteIntruderBtn:hover {{
+            background-color: #ef4444;
+            color: white;
+        }}
+        QFrame#intruderCard {{
+            border: 1px solid {c["BORDER_NEUTRAL"]};
+            border-radius: 8px;
+            background-color: {c["CARD_NEUTRAL"]};
+        }}
+        QLabel#intruderImg {{
+            border-radius: 6px;
+            border: 1px solid {c["BORDER_NEUTRAL"]};
         }}
         QListWidget {{
-            background-color: {CARD_NEUTRAL};
-            border: 1px solid {BORDER_NEUTRAL};
+            background-color: {c["CARD_NEUTRAL"]};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
             border-radius: 8px;
-            color: {TEXT_PRIMARY};
+            color: {c["TEXT_PRIMARY"]};
             font-size: 13px;
             font-family: {FONT_FAMILY};
             padding: 4px;
@@ -79,112 +270,133 @@ def get_theme_qss() -> str:
         QListWidget::item {{
             padding: 8px;
             border-radius: 4px;
-            color: {TEXT_PRIMARY};
+            color: {c["TEXT_PRIMARY"]};
         }}
         QListWidget::item:hover {{
-            background-color: #f3e8ff;
+            background-color: {c["LIST_ITEM_HOVER"]};
         }}
         QListWidget::item:selected {{
-            background-color: {ACCENT_PURPLE};
+            background-color: {c["ACCENT_PURPLE"]};
             color: white;
         }}
         QTreeWidget {{
-            background-color: {CARD_NEUTRAL};
-            border: 1px solid {BORDER_NEUTRAL};
+            background-color: {c["CARD_NEUTRAL"]};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
             border-radius: 8px;
-            color: {TEXT_PRIMARY};
+            color: {c["TEXT_PRIMARY"]};
             font-family: {FONT_FAMILY};
             font-size: 13px;
             padding: 4px;
         }}
         QTreeWidget::item {{
             padding: 6px;
-            color: {TEXT_PRIMARY};
+            color: {c["TEXT_PRIMARY"]};
         }}
         QTreeWidget::item:hover {{
-            background-color: #f3e8ff;
+            background-color: {c["LIST_ITEM_HOVER"]};
         }}
         QTreeWidget::item:selected {{
-            background-color: {ACCENT_PURPLE};
+            background-color: {c["ACCENT_PURPLE"]};
             color: white;
         }}
         QHeaderView::section {{
-            background-color: #f1f5f9;
-            color: {TEXT_SECONDARY};
+            background-color: {c["STATUS_HEADER_BG"]};
+            color: {c["TEXT_SECONDARY"]};
             padding: 6px;
-            border: 1px solid {BORDER_NEUTRAL};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
             font-weight: bold;
         }}
         QComboBox {{
-            background-color: #ffffff;
-            border: 1px solid {BORDER_NEUTRAL};
+            background-color: {c["WIDGET_BG"]};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
             border-radius: 6px;
             padding: 6px 12px;
-            color: {TEXT_PRIMARY};
+            color: {c["TEXT_PRIMARY"]};
             font-family: {FONT_FAMILY};
             font-size: 13px;
         }}
         QComboBox:focus {{
-            border: 1px solid {ACCENT_PURPLE};
+            border: 1px solid {c["ACCENT_PURPLE"]};
         }}
         QSpinBox {{
-            background-color: #ffffff;
-            border: 1px solid {BORDER_NEUTRAL};
+            background-color: {c["WIDGET_BG"]};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
             border-radius: 6px;
             padding: 6px 12px;
-            color: {TEXT_PRIMARY};
+            color: {c["TEXT_PRIMARY"]};
             font-family: {FONT_FAMILY};
             font-size: 13px;
         }}
         QSpinBox:focus {{
-            border: 1px solid {ACCENT_PURPLE};
+            border: 1px solid {c["ACCENT_PURPLE"]};
         }}
         QCheckBox {{
             spacing: 8px;
-            color: {TEXT_PRIMARY};
+            color: {c["TEXT_PRIMARY"]};
             font-family: {FONT_FAMILY};
             font-size: 13px;
         }}
         QCheckBox::indicator {{
             width: 18px;
             height: 18px;
-            border: 1px solid {BORDER_NEUTRAL};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
             border-radius: 4px;
-            background-color: #ffffff;
+            background-color: {c["WIDGET_BG"]};
         }}
         QCheckBox::indicator:checked {{
-            background-color: {ACCENT_PURPLE};
-            border: 1px solid {ACCENT_PURPLE};
+            background-color: {c["ACCENT_PURPLE"]};
+            border: 1px solid {c["ACCENT_PURPLE"]};
         }}
         QProgressBar {{
-            border: 1px solid {BORDER_NEUTRAL};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
             border-radius: 6px;
-            background-color: #f1f5f9;
+            background-color: {c["CANCEL_BTN_BG"]};
             text-align: center;
-            color: {TEXT_PRIMARY};
+            color: {c["TEXT_PRIMARY"]};
             font-weight: bold;
             height: 18px;
         }}
         QProgressBar::chunk {{
-            background-color: {ACCENT_PURPLE};
+            background-color: {c["ACCENT_PURPLE"]};
             border-radius: 5px;
         }}
         QTableWidget {{
-            background-color: {CARD_NEUTRAL};
-            border: 1px solid {BORDER_NEUTRAL};
-            gridline-color: {BORDER_NEUTRAL};
-            color: {TEXT_PRIMARY};
+            background-color: {c["CARD_NEUTRAL"]};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
+            gridline-color: {c["BORDER_NEUTRAL"]};
+            color: {c["TEXT_PRIMARY"]};
             border-radius: 8px;
             font-family: {FONT_FAMILY};
             font-size: 13px;
         }}
         QTableWidget::item {{
             padding: 6px;
-            color: {TEXT_PRIMARY};
+            color: {c["TEXT_PRIMARY"]};
+        }}
+        QScrollArea {{
+            background-color: transparent;
+            border: none;
+        }}
+        QStackedWidget, QStackedWidget > QWidget {{
+            background-color: transparent;
+        }}
+        QPushButton#removeBtn {{
+            background-color: transparent;
+            color: #ef4444;
+            border: 1px solid #ef4444;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-weight: bold;
+        }}
+        QPushButton#removeBtn:hover {{
+            background-color: #ef4444;
+            color: white;
         }}
     """
 
 def get_card_qss(importance: str = "normal") -> str:
+    refresh_theme_colors()
     if importance == "danger":
         border_qss = f"border-left: 4px solid {DANGER_RED}; border-top: 1px solid {BORDER_NEUTRAL}; border-right: 1px solid {BORDER_NEUTRAL}; border-bottom: 1px solid {BORDER_NEUTRAL};"
     elif importance == "accent":
@@ -218,7 +430,7 @@ def resolve_app_icon(icon_source: str) -> QIcon:
 
 def composite_tray_icon(app_icon: QIcon, is_locked: bool) -> QIcon:
     pixmap = app_icon.pixmap(24, 24)
-    if pixmap.iorsNull():
+    if pixmap.isNull():
         pixmap = QPixmap(24, 24)
         pixmap.fill(Qt.GlobalColor.transparent)
         
@@ -286,6 +498,7 @@ class CustomTitleBar(QWidget):
         # 1. Window Title (Left side)
         self.title_lbl = QLabel(title)
         self.title_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {TEXT_PRIMARY}; font-family: {FONT_FAMILY};")
+        self.title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         layout.addWidget(self.title_lbl)
         
         layout.addStretch()
@@ -361,26 +574,199 @@ class CustomTitleBar(QWidget):
             }
         """)
         self.close_btn.clicked.connect(self.parent.close)
-            
+        
+        # Add sliding theme toggle
+        self.theme_toggle = SlidingThemeToggle(self)
+        self.theme_toggle.toggled.connect(self.on_theme_toggled)
+        layout.addWidget(self.theme_toggle)
+        layout.addSpacing(8)
+             
         layout.addWidget(self.min_btn)
         layout.addWidget(self.max_btn)
         layout.addWidget(self.close_btn)
         
-        # Dragging support
+        # Dragging support (disabled for normal system window)
         self.drag_position = QPoint()
+        self.apply_theme_dynamically()
+        
+    def apply_theme_dynamically(self):
+        from ui.theme import get_colors, FONT_FAMILY
+        c = get_colors()
+        self.title_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {c['TEXT_PRIMARY']}; font-family: {FONT_FAMILY};")
+        
+        disabled_bg = "#2c2a38" if c.get("IS_DARK") else "#e2e8f0"
+        if not self.allow_minimize:
+            self.min_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {disabled_bg};
+                    border-radius: 6px;
+                    border: none;
+                }}
+            """)
+        if not self.allow_maximize:
+            self.max_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {disabled_bg};
+                    border-radius: 6px;
+                    border: none;
+                }}
+            """)
+
+    def on_theme_toggled(self, new_theme):
+        from utils.config_loader import get_config
+        config = get_config()
+        config.set("behavior.theme", new_theme)
+        config.save()
+        
+        # Apply theme dynamically to the parent window
+        if hasattr(self.parent, "apply_theme_dynamically"):
+            self.parent.apply_theme_dynamically()
+            # If parent is Settings window and has theme_combo, sync it
+            if hasattr(self.parent, "theme_combo") and self.parent.theme_combo is not None:
+                self.parent.theme_combo.blockSignals(True)
+                idx = self.parent.theme_combo.findData(new_theme)
+                if idx >= 0:
+                    self.parent.theme_combo.setCurrentIndex(idx)
+                self.parent.theme_combo.blockSignals(False)
+        else:
+            from ui.theme import get_theme_qss
+            self.parent.setStyleSheet(get_theme_qss())
+            self.apply_theme_dynamically()
+            if hasattr(self.parent, "main_container"):
+                from ui.theme import get_colors
+                c = get_colors()
+                self.parent.main_container.setStyleSheet(f"""
+                    QWidget#mainContainer {{
+                        background-color: {c["BG_NEUTRAL"]};
+                        border: 1px solid {c["BORDER_NEUTRAL"]};
+                        border-radius: 12px;
+                    }}
+                """)
         
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.drag_position = event.globalPosition().toPoint() - self.parent.frameGeometry().topLeft()
-            event.accept()
+        pass
             
     def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.MouseButton.LeftButton:
-            self.parent.move(event.globalPosition().toPoint() - self.drag_position)
-            event.accept()
+        pass
             
     def toggle_maximize(self):
         if self.parent.isMaximized():
             self.parent.showNormal()
         else:
             self.parent.showMaximized()
+
+from PySide6.QtCore import Signal
+
+class SlidingThemeToggle(QWidget):
+    toggled = Signal(str) # Emits "light" or "dark"
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(50, 24)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Switch Theme (Light / Dark)")
+        
+        # Load initial theme state
+        from utils.config_loader import get_config
+        try:
+            config = get_config()
+            self.theme_mode = config.get("behavior.theme", "system")
+        except Exception:
+            self.theme_mode = "system"
+            
+        from ui.theme import is_system_dark_mode
+        is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
+        
+        self._knob_position = 1.0 if is_dark else 0.0
+        self.anim = None
+        
+    @Property(float)
+    def knob_position(self):
+        return self._knob_position
+        
+    @knob_position.setter
+    def knob_position(self, pos):
+        self._knob_position = pos
+        self.update()
+        
+    def update_toggle_state(self):
+        from utils.config_loader import get_config
+        try:
+            config = get_config()
+            self.theme_mode = config.get("behavior.theme", "system")
+        except Exception:
+            self.theme_mode = "system"
+            
+        from ui.theme import is_system_dark_mode
+        is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
+        target_pos = 1.0 if is_dark else 0.0
+        
+        if self.anim:
+            self.anim.stop()
+            
+        self.anim = QPropertyAnimation(self, b"knob_position")
+        self.anim.setDuration(250)
+        self.anim.setStartValue(self._knob_position)
+        self.anim.setEndValue(target_pos)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        self.anim.start()
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            from ui.theme import is_system_dark_mode
+            current_is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
+            
+            target_theme = "light" if current_is_dark else "dark"
+            self.theme_mode = target_theme
+            
+            target_pos = 1.0 if target_theme == "dark" else 0.0
+            
+            if self.anim:
+                self.anim.stop()
+                
+            self.anim = QPropertyAnimation(self, b"knob_position")
+            self.anim.setDuration(250)
+            self.anim.setStartValue(self._knob_position)
+            self.anim.setEndValue(target_pos)
+            self.anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+            self.anim.start()
+            
+            self.toggled.emit(target_theme)
+            event.accept()
+            
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        from ui.theme import get_colors
+        c = get_colors()
+        
+        # Smooth color transition based on knob position
+        r = int(124 + (168 - 124) * self._knob_position)
+        g = int(58 + (85 - 58) * self._knob_position)
+        b = int(237 + (247 - 237) * self._knob_position)
+        active_color = QColor(r, g, b)
+        
+        track_color = active_color if self._knob_position > 0.5 else QColor("#cbd5e1")
+        painter.setBrush(track_color)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), self.height() / 2, self.height() / 2)
+        
+        # Knob
+        knob_color = QColor("#ffffff")
+        painter.setBrush(knob_color)
+        
+        knob_radius = (self.height() - 6) / 2
+        start_x = knob_radius + 3
+        end_x = self.width() - knob_radius - 3
+        current_x = start_x + (end_x - start_x) * self._knob_position
+        
+        painter.drawEllipse(QPointF(current_x, self.height() / 2), knob_radius, knob_radius)
+
+def style_themed_label(label, color_key: str, extra_css: str = ""):
+    from ui.theme import get_colors
+    c = get_colors()
+    label.setStyleSheet(f"{extra_css} color: {c[color_key]};")
+
+def style_heading(label, size: int = 20):
+    style_themed_label(label, "TEXT_PRIMARY", f"font-size: {size}px; font-weight: bold;")
