@@ -4,7 +4,7 @@ All notable changes to the FaceGate-Linux project will be documented in this fil
 
 ---
 
-## [v0.7.0] - 2026-07-10 (Current Phase)
+## [v0.7.0] - 2026-07-10
 ### Added
 - **Intruder Selfie Capture**: Automatically snaps and saves a webcam photo of unauthorized access attempts locally on authentication cancellation, failure, or timeout.
 - **Intruder Gallery Tab**: A premium visual dashboard in the Settings window to view and delete captured intruder selfies.

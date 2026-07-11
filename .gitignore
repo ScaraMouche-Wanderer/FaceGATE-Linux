@@ -1,9 +1,25 @@
 models/
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
 .pytest_cache/
 .cache/
 .venv/
 *.db
 *.log
+*.enc
 config.yaml
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

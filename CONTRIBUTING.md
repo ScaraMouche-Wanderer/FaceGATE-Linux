@@ -38,4 +38,3 @@ Ensure new features are accompanied by corresponding unit or smoke tests under t
 - Retain detailed comments and logging outputs (particularly for security-sensitive IPC, D-Bus, and process management routines).
 - Use Qt layout managers and dynamic size/scaling policies for all PySide6 UI elements to ensure high-DPI and multi-resolution compatibility.
 
----
