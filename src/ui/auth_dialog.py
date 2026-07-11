@@ -560,6 +560,7 @@ class AuthDialog(QDialog):
             
             intruder_dir = os.path.expanduser("~/.config/facegate/intruders")
             os.makedirs(intruder_dir, exist_ok=True)
+            os.chmod(intruder_dir, 0o700)
             
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_app_name = "".join(c for c in self.app_name if c.isalnum() or c in ("-", "_")).strip()
@@ -570,6 +571,7 @@ class AuthDialog(QDialog):
             filepath = os.path.join(intruder_dir, filename)
             
             cv2.imwrite(filepath, self.latest_frame)
+            os.chmod(filepath, 0o600)
             logging.info(f"Intruder selfie captured and saved to: {filepath}")
         except Exception as e:
             logging.error(f"Failed to save intruder selfie: {e}")

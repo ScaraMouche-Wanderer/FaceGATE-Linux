@@ -5,6 +5,13 @@ Description=FaceGate-Linux background lock daemon
 ExecStart=%h/.local/bin/facegate --monitor
 Restart=on-failure
 RestartSec=2
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/.config/facegate %h/.local/share/facegate
+RestrictNamespaces=true
+RestrictSUIDSGID=true
 
 [Install]
 WantedBy=default.target

@@ -10,7 +10,9 @@ def init_audit_db():
     Performs safe migration to add 'username' column if missing.
     """
     try:
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        db_dir = os.path.dirname(DB_PATH)
+        os.makedirs(db_dir, exist_ok=True)
+        os.chmod(db_dir, 0o700)
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS audit_log (
@@ -52,6 +54,7 @@ def log_auth_attempt(app_identifier: str, method: str, result: str, confidence_s
                 )
             """)
             conn.commit()
+            os.chmod(DB_PATH, 0o600)
             logging.info(f"Audit Log: {result.upper()} auth for '{app_identifier}' via {method} (User: {username or 'unknown'}).")
     except Exception as e:
         logging.error(f"Error writing to audit log: {e}")

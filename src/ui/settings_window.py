@@ -301,13 +301,16 @@ class SettingsWindow(QDialog):
 
         # Table
         self.apps_table = QTableWidget()
-        self.apps_table.setColumnCount(3)
-        self.apps_table.setHorizontalHeaderLabels(["Application", "Identifier", "Action"])
+        self.apps_table.setColumnCount(4)
+        self.apps_table.setHorizontalHeaderLabels(["Application", "Executable & Desktop Info", "Show in Tray", "Action"])
         self.apps_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.apps_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.apps_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.apps_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.apps_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.apps_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.apps_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.apps_table.verticalHeader().setDefaultSectionSize(48)
+        self.apps_table.verticalHeader().setVisible(False)
         
         layout.addWidget(self.apps_table)
 
@@ -762,16 +765,68 @@ class SettingsWindow(QDialog):
             icon_item = QTableWidgetItem(app.get("name", ""))
             icon_item.setIcon(icon)
             
-            id_item = QTableWidgetItem(app.get("id", ""))
+            # Show executable path and desktop file info
+            details_text = f"{app.get('executable', '')}\n({app.get('desktop_name', '')})"
+            details_item = QTableWidgetItem(details_text)
+            details_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
             
-            # Action Remove Button
+            # Checkbox for Show in Tray
+            from PySide6.QtWidgets import QWidget, QHBoxLayout, QCheckBox
+            checkbox_widget = QWidget()
+            checkbox_layout = QHBoxLayout(checkbox_widget)
+            checkbox = QCheckBox()
+            checkbox.setChecked(app.get("show_in_tray", True))
+            checkbox.stateChanged.connect(lambda state, a_id=app["id"], cb=checkbox: self.handle_tray_toggle(a_id, state, cb))
+            checkbox_layout.addWidget(checkbox)
+            checkbox_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            checkbox_layout.setContentsMargins(0, 0, 0, 0)
+            
+            # Action Remove Button using app_id instead of row index to prevent indexing glitches
             remove_btn = QPushButton("Remove")
             remove_btn.setObjectName("removeBtn")
-            remove_btn.clicked.connect(self.make_remove_callback(row))
+            remove_btn.setStyleSheet("background-color: #ef4444; color: white; border: none; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
+            remove_btn.clicked.connect(lambda checked=False, a_id=app["id"]: self.remove_app_by_id(a_id))
             
             self.apps_table.setItem(row, 0, icon_item)
-            self.apps_table.setItem(row, 1, id_item)
-            self.apps_table.setCellWidget(row, 2, remove_btn)
+            self.apps_table.setItem(row, 1, details_item)
+            self.apps_table.setCellWidget(row, 2, checkbox_widget)
+            self.apps_table.setCellWidget(row, 3, remove_btn)
+
+    def handle_tray_toggle(self, app_id, state, checkbox):
+        checked = (state == Qt.CheckState.Checked.value)
+        if checked:
+            # Count other apps with show_in_tray enabled
+            active_count = sum(1 for a in self.current_apps if a.get("show_in_tray", True) and a["id"] != app_id)
+            if active_count >= 5:
+                from ui.theme import ACCENT_PURPLE, TEXT_PRIMARY, BORDER_NEUTRAL
+                msg_box = QMessageBox(self)
+                msg_box.setWindowTitle("Tray Limit Reached")
+                msg_box.setText("You can display a maximum of 5 applications in the system tray.\n\n"
+                                "Please uncheck another application first to display this one.")
+                msg_box.setIcon(QMessageBox.Icon.Warning)
+                ok_btn = msg_box.addButton(QMessageBox.StandardButton.Ok)
+                ok_btn.setStyleSheet(f"background-color: {ACCENT_PURPLE}; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px; border: none;")
+                
+                checkbox.blockSignals(True)
+                checkbox.setChecked(False)
+                checkbox.blockSignals(False)
+                
+                msg_box.exec()
+                return
+                
+        # Save state to current_apps
+        for app in self.current_apps:
+            if app["id"] == app_id:
+                app["show_in_tray"] = checked
+                break
+                
+        self.show_restart_banner()
+
+    def remove_app_by_id(self, app_id):
+        self.current_apps = [a for a in self.current_apps if a["id"] != app_id]
+        self.populate_apps_table()
+        self.show_restart_banner()
+        logging.info(f"Staged app removal: '{app_id}'")
 
     def populate_logs_table(self):
         from database.audit_log import get_recent_logs
@@ -875,29 +930,20 @@ class SettingsWindow(QDialog):
 
         self.logs_tree.expandAll()
 
-    def make_remove_callback(self, index):
-        return lambda: self.remove_app_at(index)
-
     # ------------------ Actions ------------------
-    
-    def remove_app_at(self, index):
-        if 0 <= index < len(self.current_apps):
-            app = self.current_apps[index]
-            self.current_apps.pop(index)
-            self.populate_apps_table()
-            self.show_restart_banner()
-            logging.info(f"Staged app removal: '{app.get('id')}'")
 
     def open_app_picker(self):
         dialog = AppPickerDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.selected_app:
             app_data = dialog.selected_app
             
+            show_in_tray_count = sum(1 for a in self.current_apps if a.get("show_in_tray", True))
             new_app = {
                 "id": app_data["executable"],
                 "name": app_data["name"],
                 "executable": app_data["executable"],
-                "desktop_name": app_data["desktop_name"]
+                "desktop_name": app_data["desktop_name"],
+                "show_in_tray": (show_in_tray_count < 5)
             }
             
             if app_data.get("icon"):

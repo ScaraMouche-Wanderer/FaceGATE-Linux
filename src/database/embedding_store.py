@@ -13,16 +13,28 @@ _cached_key = None
 def set_cached_key(key: bytes):
     """
     Caches the derived key in memory for this process's life cycle.
+    Converts to bytearray so it can be securely zeroed on shutdown.
     """
     global _cached_key
-    _cached_key = key
+    _cached_key = bytearray(key) if isinstance(key, bytes) else key
 
 def get_cached_key() -> bytes:
     """
     Retrieves the cached key from memory.
     """
     global _cached_key
-    return _cached_key
+    return bytes(_cached_key) if _cached_key else None
+
+def clear_cached_key():
+    """
+    Securely zeroes and removes the cached key from memory.
+    Call on daemon shutdown.
+    """
+    global _cached_key
+    if _cached_key is not None:
+        for i in range(len(_cached_key)):
+            _cached_key[i] = 0
+        _cached_key = None
 
 def read_envelope_file() -> dict:
     """
@@ -49,94 +61,35 @@ def read_envelope_file() -> dict:
 
 def get_or_prompt_key() -> bytes:
     """
-    Retrieves the cached key or derives it automatically from the default password.
-    If the database is missing or encrypted with a custom password, resets it to the
-    default password to maintain a seamless password-less user experience.
+    Retrieves the cached encryption key if available.
+
+    This function does NOT use any hardcoded default password. If the daemon
+    has not been unlocked via proper password authentication, it returns None.
+    Callers must handle the locked (None) state gracefully — typically by
+    falling back to a password-only auth dialog.
+
+    The master password must be set via `--set-master-password` or the
+    Enrollment Wizard before face recognition can function.
     """
     key = get_cached_key()
     if key:
         return key
-        
-    default_pwd = b"password123"
-    pwd_bytes = bytearray(default_pwd)
-    
-    envelope = read_envelope_file()
-    if not envelope:
-        # Initialize default database envelope
-        from security.crypto_engine import derive_key, encrypt
-        import secrets
-        try:
-            salt = secrets.token_bytes(16)
-            iterations = 100000
-            derived = derive_key(pwd_bytes, salt, iterations)
-            
-            plaintext_bytes = json.dumps({}).encode('utf-8')
-            nonce, ciphertext = encrypt(plaintext_bytes, derived)
-            
-            new_envelope = {
-                "kdf": "pbkdf2_hmac_sha256",
-                "iterations": iterations,
-                "salt": base64.b64encode(salt).decode('utf-8'),
-                "nonce": base64.b64encode(nonce).decode('utf-8'),
-                "ciphertext": base64.b64encode(ciphertext).decode('utf-8')
-            }
-            
-            os.makedirs(os.path.dirname(EMBEDDING_FILE), exist_ok=True)
-            with open(EMBEDDING_FILE, 'w') as f:
-                json.dump(new_envelope, f, indent=4)
-            os.chmod(EMBEDDING_FILE, 0o600)
-            
-            set_cached_key(derived)
-            return derived
-        except Exception as e:
-            logging.error(f"Auto-initialize failed: {e}")
-            return None
-            
-    # Try to decrypt using default password
-    try:
-        from security.crypto_engine import derive_key, decrypt
-        salt = envelope["salt"]
-        # Handle cases where salt is a base64 string or bytes
-        salt_bytes = base64.b64decode(salt) if isinstance(salt, str) else salt
-        iterations = envelope["iterations"]
-        nonce = envelope["nonce"]
-        ciphertext = envelope["ciphertext"]
-        
-        derived = derive_key(pwd_bytes, salt_bytes, iterations)
-        # Verify by decrypting
-        decrypt(nonce, ciphertext, derived)
-        set_cached_key(derived)
-        return derived
-    except Exception:
-        # If decryption fails (e.g. custom password), reset envelope to default
-        logging.info("Auto-unlock: Resetting database envelope to default password...")
-        try:
-            from security.crypto_engine import derive_key, encrypt
-            import secrets
-            salt = secrets.token_bytes(16)
-            iterations = 100000
-            derived = derive_key(pwd_bytes, salt, iterations)
-            
-            plaintext_bytes = json.dumps({}).encode('utf-8')
-            nonce, ciphertext = encrypt(plaintext_bytes, derived)
-            
-            new_envelope = {
-                "kdf": "pbkdf2_hmac_sha256",
-                "iterations": iterations,
-                "salt": base64.b64encode(salt).decode('utf-8'),
-                "nonce": base64.b64encode(nonce).decode('utf-8'),
-                "ciphertext": base64.b64encode(ciphertext).decode('utf-8')
-            }
-            
-            with open(EMBEDDING_FILE, 'w') as f:
-                json.dump(new_envelope, f, indent=4)
-            os.chmod(EMBEDDING_FILE, 0o600)
-            
-            set_cached_key(derived)
-            return derived
-        except Exception as ex:
-            logging.error(f"Auto-reset failed: {ex}")
-            return None
+
+    # No cached key available — daemon is in locked state.
+    # The caller (auth dialog, IPC service) must prompt the user for
+    # their master password to unlock. We never silently create or
+    # reset the encrypted database.
+    if not os.path.exists(EMBEDDING_FILE):
+        logging.warning(
+            "No encrypted embedding store found. "
+            "Please run 'facegate --set-master-password' to initialize."
+        )
+    else:
+        logging.info(
+            "Encrypted embedding store exists but no key is cached. "
+            "Master password entry required to unlock."
+        )
+    return None
 
 def load_embeddings() -> dict:
     """

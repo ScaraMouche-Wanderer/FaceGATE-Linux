@@ -483,6 +483,10 @@ class FaceGateApplication(QObject):
         if self.monitor:
             self.monitor.stop()
 
+        # Securely zero the cached encryption key from memory
+        from database.embedding_store import clear_cached_key
+        clear_cached_key()
+
         logging.info("Shutting down FaceGate event loop.")
         QApplication.quit()
 
@@ -540,6 +544,16 @@ def run_auth_launch(desktop_name: str, exec_args: list):
 def main():
     setup_logging()
     logging.info("Starting FaceGate-Linux application wrapper.")
+
+    # Prevent core dumps from leaking encryption keys from memory
+    try:
+        import ctypes
+        PR_SET_DUMPABLE = 4
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.prctl(PR_SET_DUMPABLE, 0)
+        logging.info("Core dumps disabled (PR_SET_DUMPABLE=0).")
+    except Exception as e:
+        logging.warning(f"Could not disable core dumps: {e}")
 
     # Fallback env variables for graphical execution compatibility (e.g. under systemd user manager)
     if "DISPLAY" not in os.environ:
@@ -715,11 +729,12 @@ def main():
             
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
-        
-        # Auto-unlock daemon on startup
-        from database.embedding_store import get_or_prompt_key
-        get_or_prompt_key()
-        
+
+        # Daemon starts in locked state. The user must authenticate via
+        # master password when the first protected app triggers auth.
+        # No hardcoded default password is used.
+        logging.info("Daemon starting in locked state. Master password required to unlock.")
+
         fg_app = FaceGateApplication(config)
 
         # Setup graceful signal handlers

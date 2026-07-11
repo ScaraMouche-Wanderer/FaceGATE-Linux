@@ -218,7 +218,7 @@ def resolve_app_icon(icon_source: str) -> QIcon:
 
 def composite_tray_icon(app_icon: QIcon, is_locked: bool) -> QIcon:
     pixmap = app_icon.pixmap(24, 24)
-    if pixmap.isNull():
+    if pixmap.iorsNull():
         pixmap = QPixmap(24, 24)
         pixmap.fill(Qt.GlobalColor.transparent)
         

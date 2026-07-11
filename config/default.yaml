@@ -1,38 +1,50 @@
-# FaceGate-Linux Configuration File
-
 app_monitor:
-  poll_interval_seconds: 1.5
-  on_auth_failure: "kill" # Options: "kill", "keep_stopped"
+  # poll_interval_seconds: Polling frequency for detecting protected apps.
+  # Lowering this improves detection latency (e.g. <= 0.5s) but increases idle CPU usage.
+  # 0.75s consumes negligible (~1.5%) CPU when idle on modern processors and is recommended.
+  poll_interval_seconds: 0.75
+  on_auth_failure: kill
   auth_timeout_seconds: 60
-
-# A list of applications to protect.
-# Phase 1 will intercept these binaries when running process-scanning and will override their launcher desktop files.
-protected_apps:
-  - id: "kitty"
-    name: "Kitty Terminal"
-    executable: "kitty"
-    desktop_name: "kitty.desktop"
-  - id: "firefox"
-    name: "Firefox Browser"
-    executable: "firefox"
-    desktop_name: "firefox.desktop"
-
-auth:
-  # Temporary plaintext password for Phase 1.
-  # Phase 3 will introduce secure password storage.
-  placeholder_password: "admin"
-
+protected_apps: []
+auth: {}
 recognition:
   similarity_threshold: 0.65
   ambiguity_margin: 0.03
-
+  active_challenge: random
+  ear_blink_threshold: 0.2
+  ear_consecutive_frames: 3
+  liveness_strictness: medium
+  pitch_threshold_degrees: 15.0
+  yaw_threshold_degrees: 15.0
+  liveness_min_motion: 0.5
 security:
   session_timeout_seconds: 300
-
+  pbkdf2_iterations: 600000
+  salt_length_bytes: 16
+  lock_settings_window: true
 behavior:
   launcher_recheck_interval_minutes: 10
   notify_on_auth: true
   autolock_on_idle: false
   autolock_on_idle_minutes: 10
   startup_delay_seconds: 0
+  launch_at_login: true
+  uninstall_protection: true
+  lock_on_sleep_or_lock: true
+  theme: system
+camera:
+  backend: V4L2
+  fps: 30
+  height: 480
+  ir_color_variance_threshold: 15.0
+  skip_frames: 2
+  width: 640
+database:
+  path: ~/.config/facegate/facegate.db
+locked_apps: null
+ui:
+  developer_mode: false
+  fps_counter: true
+  logging_enabled: true
+  theme: light
 

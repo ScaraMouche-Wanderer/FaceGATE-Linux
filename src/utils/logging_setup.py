@@ -5,6 +5,7 @@ from logging.handlers import RotatingFileHandler
 def setup_logging():
     log_dir = os.path.expanduser("~/.local/share/facegate")
     os.makedirs(log_dir, exist_ok=True)
+    os.chmod(log_dir, 0o700)
     log_file = os.path.join(log_dir, "facegate.log")
     
     root_logger = logging.getLogger()

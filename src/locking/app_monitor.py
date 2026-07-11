@@ -32,6 +32,8 @@ class AppMonitor:
         self.running = False
         self.thread = None
         self._seen_pids = set()  # Tracks PIDs that have been processed
+        self._not_suspicious_pids = set()  # Tracks non-matching PIDs to avoid re-evaluating heuristics
+        self._negative_hash_cache = {}  # real_exe -> (mtime, size, last_checked_time)
         
         self._cached_apps = None
         self._canonical_map = {}
@@ -53,6 +55,7 @@ class AppMonitor:
     def clear_seen_pids(self):
         """Clears the seen PIDs history to re-trigger checks for active processes."""
         self._seen_pids.clear()
+        self._not_suspicious_pids.clear()
 
     def _update_cache_if_needed(self, protected_apps):
         """Refreshes canonical paths and SHA-256 hashes if the protected apps list changed."""
@@ -102,6 +105,10 @@ class AppMonitor:
                         if pid in self._seen_pids:
                             continue
                             
+                        # If we know this PID is not suspicious, skip
+                        if pid in self._not_suspicious_pids:
+                            continue
+                            
                         if not proc.is_running():
                             continue
 
@@ -132,7 +139,28 @@ class AppMonitor:
                                         break
                                 
                                 if is_suspicious and target_hash and target_app:
-                                    proc_hash = calculate_sha256(real_exe)
+                                    cooldown_seconds = 5.0
+                                    use_cached_negative = False
+                                    try:
+                                        stat_res = os.stat(real_exe)
+                                        mtime = stat_res.st_mtime
+                                        size = stat_res.st_size
+                                    except Exception:
+                                        mtime = 0.0
+                                        size = 0
+                                        
+                                    if real_exe in self._negative_hash_cache:
+                                        cached_mtime, cached_size, cached_time = self._negative_hash_cache[real_exe]
+                                        if cached_mtime == mtime and cached_size == size and (time.time() - cached_time < cooldown_seconds):
+                                            use_cached_negative = True
+                                            
+                                    if use_cached_negative:
+                                        proc_hash = None
+                                    else:
+                                        proc_hash = calculate_sha256(real_exe)
+                                        if proc_hash != target_hash:
+                                            self._negative_hash_cache[real_exe] = (mtime, size, time.time())
+                                            
                                     if proc_hash == target_hash:
                                         match_app = target_app
 
@@ -163,15 +191,19 @@ class AppMonitor:
                             
                             # Request authorization (emitted to main GUI thread)
                             self.signals.request_auth.emit(desktop_name, pid)
+                        else:
+                            # Not a protected app, mark PID as non-suspicious to skip next iterations
+                            self._not_suspicious_pids.add(pid)
 
                     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         continue
 
-                # Housekeep seen PIDs
+                # Housekeep seen and non-suspicious PIDs
                 active_pids = set(psutil.pids())
                 self._seen_pids &= active_pids
+                self._not_suspicious_pids &= active_pids
 
             except Exception as e:
-                logging.error(f"Error in AppMonitor loop: {e}")
+                logging.error(f"Error in AppMonitor loop: {e}", exc_info=True)
 
             time.sleep(self.poll_interval)

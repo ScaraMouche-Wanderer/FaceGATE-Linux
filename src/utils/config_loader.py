@@ -61,17 +61,16 @@ class Config:
         val[parts[-1]] = value
 
     def save(self):
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        default_config_path = os.path.abspath(
-            os.path.join(current_dir, "..", "..", "config", "default.yaml")
-        )
+        user_config_path = os.path.expanduser("~/.config/facegate/config.yaml")
         try:
-            with open(default_config_path, 'w') as f:
+            os.makedirs(os.path.dirname(user_config_path), exist_ok=True)
+            with open(user_config_path, 'w') as f:
                 yaml.safe_dump(self.settings, f, default_flow_style=False, sort_keys=False)
-            logging.info(f"Configuration saved successfully to {default_config_path}")
+            os.chmod(user_config_path, 0o600)
+            logging.info(f"Configuration saved successfully to {user_config_path}")
             return True
         except Exception as e:
-            logging.error(f"Error saving config to {default_config_path}: {e}")
+            logging.error(f"Error saving config to {user_config_path}: {e}")
             return False
 
 # Global config instance

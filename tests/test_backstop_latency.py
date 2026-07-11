@@ -31,6 +31,17 @@ def test_backstop_latency():
         print("Please start the daemon in another terminal before running this test.", file=sys.stderr)
         sys.exit(1)
         
+    # Ensure all apps are locked so the interception is triggered
+    try:
+        import dbus
+        bus = dbus.SessionBus()
+        obj = bus.get_object("org.facegate.FaceGate", "/org/facegate/FaceGate")
+        iface = dbus.Interface(obj, "org.facegate.FaceGate")
+        iface.RelockAll()
+        print("Successfully called RelockAll via D-Bus to lock target apps.")
+    except Exception as e:
+        print(f"Warning: Could not call RelockAll via D-Bus: {e}")
+
     trials = 1
     delays = []
     

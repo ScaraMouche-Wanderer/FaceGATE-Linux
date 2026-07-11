@@ -75,8 +75,9 @@ class FaceGateTray(QSystemTrayIcon):
         
         # Protected apps rows
         protected_apps = self.main_app.get_protected_apps()
+        tray_apps = [app for app in protected_apps if app.get("show_in_tray", True)][:5]
         from ui.theme import resolve_app_icon, composite_tray_icon
-        for app in protected_apps:
+        for app in tray_apps:
             app_id = app.get("id")
             app_name = app.get("name", app_id)
             desktop_name = app.get("desktop_name")

@@ -131,13 +131,32 @@ class FaceGateService(QObject):
             return success
 
     def emergency_kill_internal(self):
-        logging.info("Emergency kill command received via D-Bus.")
+        """
+        Emergency kill requires master password verification to prevent
+        unauthenticated session-bus callers from disabling all protections.
+        """
+        logging.warning("Emergency kill command received via D-Bus. Requiring authentication.")
+
+        # Require master password before honoring the kill
+        from ui.auth_dialog import AuthDialog
+        dialog = AuthDialog("Emergency Shutdown", mode="password")
+        res = dialog.exec()
+        if res != AuthDialog.DialogCode.Accepted:
+            logging.warning("Emergency kill DENIED: password verification failed.")
+            try:
+                from database.audit_log import log_auth_attempt
+                log_auth_attempt("facegate-daemon", "emergency_hotkey", "fail", None)
+            except Exception:
+                pass
+            return
+
         try:
             from database.audit_log import log_auth_attempt
-            log_auth_attempt("facegate-daemon", "emergency_hotkey", "bypass", None)
+            log_auth_attempt("facegate-daemon", "emergency_hotkey", "bypass", None,
+                             getattr(dialog, "matched_user", None))
         except Exception as e:
             logging.error(f"Failed to log emergency kill to audit trail: {e}")
-            
+
         if self.main_app:
             self.main_app.quit_app(bypass_protection=True)
 
