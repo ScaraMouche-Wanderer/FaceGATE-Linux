@@ -1,5 +1,3 @@
-import os
-import sys
 import time
 import logging
 import cv2
@@ -8,10 +6,8 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QProgressBar, QStackedWidget, QWidget, QMessageBox
 )
-from PySide6.QtCore import Qt, QSize, Slot, QTimer
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtCore import Qt, Slot
 from camera.camera_worker import CameraWorker
-from recognition.detector import Detector
 from recognition.blur_checker import is_blurry
 from database.embedding_store import save_embedding, load_embeddings, get_cached_key
 from security.credential_store import verify_password
@@ -52,34 +48,29 @@ class EnrollmentWizard(QDialog):
             self.setMinimumSize(500, 520)
 
         # Apply global theme stylesheet
-        from ui.theme import get_theme_qss, BG_NEUTRAL, BORDER_NEUTRAL, CustomTitleBar
+        from ui.theme import get_theme_qss, get_colors, CustomTitleBar
+        c = get_colors()
         self.setStyleSheet(get_theme_qss())
         
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setWindowFlags(Qt.WindowType.Dialog)
         
         # Outer layout
         window_layout = QVBoxLayout(self)
-        window_layout.setContentsMargins(10, 10, 10, 10)
+        window_layout.setContentsMargins(0, 0, 0, 0)
         
         # Container
         self.main_container = QWidget()
         self.main_container.setObjectName("mainContainer")
         self.main_container.setStyleSheet(f"""
             QWidget#mainContainer {{
-                background-color: {BG_NEUTRAL};
-                border: 1px solid {BORDER_NEUTRAL};
+                background-color: {c["BG_NEUTRAL"]};
+                border: 1px solid {c["BORDER_NEUTRAL"]};
                 border-radius: 12px;
             }}
         """)
         
-        # Shadow
-        from PySide6.QtWidgets import QGraphicsDropShadowEffect
-        self.shadow = QGraphicsDropShadowEffect(self)
-        self.shadow.setBlurRadius(15)
-        self.shadow.setColor(QColor(0, 0, 0, 80))
-        self.shadow.setOffset(0, 4)
-        self.main_container.setGraphicsEffect(self.shadow)
+        # Shadow disabled (server-side decorations handle shadows now)
+        self.shadow = None
         
         window_layout.addWidget(self.main_container)
         
@@ -112,6 +103,7 @@ class EnrollmentWizard(QDialog):
 
         self.stack.setCurrentIndex(0)
         self.intro_next_btn.setDefault(True)
+        self.apply_theme_dynamically()
 
     # ------------------ Page Creation ------------------
     
@@ -121,13 +113,12 @@ class EnrollmentWizard(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
-        from ui.theme import TEXT_PRIMARY, TEXT_SECONDARY
         header = QLabel("Enrolled User Setup")
-        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
+        header.setObjectName("wizardHeader")
         layout.addWidget(header)
 
         desc = QLabel("Welcome to the guided FaceGate user enrollment. Enter the username you want to associate with your facial profile.")
-        desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; line-height: 1.4;")
+        desc.setObjectName("wizardDesc")
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
@@ -135,7 +126,7 @@ class EnrollmentWizard(QDialog):
         u_layout = QVBoxLayout()
         u_layout.setSpacing(6)
         u_lbl = QLabel("Enrolling Username:")
-        u_lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
+        u_lbl.setObjectName("boldLabel")
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("e.g. voidnode")
         u_layout.addWidget(u_lbl)
@@ -148,9 +139,8 @@ class EnrollmentWizard(QDialog):
         pwd_layout.setContentsMargins(0, 0, 0, 0)
         pwd_layout.setSpacing(6)
         
-        from ui.theme import WARNING_AMBER
         pwd_lbl = QLabel("Enter Master Password to Unlock Database:")
-        pwd_lbl.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {WARNING_AMBER};")
+        pwd_lbl.setObjectName("warningLabel")
         self.pwd_input = QLineEdit()
         self.pwd_input.setEchoMode(QLineEdit.EchoMode.Password)
         pwd_layout.addWidget(pwd_lbl)
@@ -185,14 +175,13 @@ class EnrollmentWizard(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        from ui.theme import TEXT_PRIMARY, WARNING_AMBER
         self.guided_lbl = QLabel("Face Guided Capture")
-        self.guided_lbl.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {TEXT_PRIMARY};")
+        self.guided_lbl.setObjectName("guidedHeader")
         layout.addWidget(self.guided_lbl)
 
         # Instructions
         self.instruction_lbl = QLabel("Starting camera...")
-        self.instruction_lbl.setStyleSheet(f"color: {WARNING_AMBER}; font-size: 14px; font-weight: bold;")
+        self.instruction_lbl.setObjectName("instructionLabel")
         self.instruction_lbl.setWordWrap(True)
         self.instruction_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.instruction_lbl)
@@ -230,12 +219,11 @@ class EnrollmentWizard(QDialog):
         layout.setSpacing(16)
 
         header = QLabel("Capture Succeeded!")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #10b981;")
+        header.setObjectName("successHeader")
         layout.addWidget(header)
 
-        from ui.theme import TEXT_SECONDARY
         self.success_msg_lbl = QLabel()
-        self.success_msg_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; line-height: 1.4;")
+        self.success_msg_lbl.setObjectName("wizardDesc")
         self.success_msg_lbl.setWordWrap(True)
         layout.addWidget(self.success_msg_lbl)
 
@@ -284,7 +272,8 @@ class EnrollmentWizard(QDialog):
         try:
             embeddings = load_embeddings()
             if username in embeddings:
-                from ui.theme import ACCENT_PURPLE, TEXT_PRIMARY, BORDER_NEUTRAL
+                from ui.theme import get_colors
+                c = get_colors()
                 msg_box = QMessageBox(self)
                 msg_box.setWindowTitle("Overwrite User?")
                 msg_box.setText(f"User '{username}' already exists in database.\n\n"
@@ -294,8 +283,8 @@ class EnrollmentWizard(QDialog):
                 yes_btn = msg_box.addButton(QMessageBox.StandardButton.Yes)
                 no_btn = msg_box.addButton(QMessageBox.StandardButton.No)
                 
-                yes_btn.setStyleSheet(f"background-color: {ACCENT_PURPLE}; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px; border: none;")
-                no_btn.setStyleSheet(f"background-color: #ede9fe; color: {TEXT_PRIMARY}; border: 1px solid {BORDER_NEUTRAL}; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px;")
+                yes_btn.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px; border: none;")
+                no_btn.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px;")
                 
                 msg_box.exec()
                 if msg_box.clickedButton() != yes_btn:
@@ -464,3 +453,52 @@ class EnrollmentWizard(QDialog):
     def reject(self):
         self.cleanup_camera()
         super().reject()
+
+    def apply_theme_dynamically(self):
+        from ui.theme import get_theme_qss, get_colors
+        c = get_colors()
+        self.setStyleSheet(get_theme_qss() + f"""
+            QLabel#wizardHeader {{
+                font-size: 20px;
+                font-weight: bold;
+                color: {c["TEXT_PRIMARY"]};
+            }}
+            QLabel#guidedHeader {{
+                font-size: 18px;
+                font-weight: bold;
+                color: {c["TEXT_PRIMARY"]};
+            }}
+            QLabel#successHeader {{
+                font-size: 20px;
+                font-weight: bold;
+                color: #10b981;
+            }}
+            QLabel#wizardDesc {{
+                font-size: 13px;
+                color: {c["TEXT_SECONDARY"]};
+            }}
+            QLabel#boldLabel {{
+                font-weight: bold;
+                font-size: 13px;
+                color: {c["TEXT_PRIMARY"]};
+            }}
+            QLabel#warningLabel {{
+                font-weight: bold;
+                font-size: 13px;
+                color: {c["WARNING_AMBER"]};
+            }}
+            QLabel#instructionLabel {{
+                font-size: 14px;
+                font-weight: bold;
+                color: {c["WARNING_AMBER"]};
+            }}
+        """)
+        self.main_container.setStyleSheet(f"""
+            QWidget#mainContainer {{
+                background-color: {c["BG_NEUTRAL"]};
+                border: 1px solid {c["BORDER_NEUTRAL"]};
+                border-radius: 12px;
+            }}
+        """)
+        if hasattr(self, "title_bar") and self.title_bar:
+            self.title_bar.apply_theme_dynamically()

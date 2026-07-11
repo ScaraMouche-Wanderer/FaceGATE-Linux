@@ -1,6 +1,6 @@
 import logging
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QApplication, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 )
 from PySide6.QtCore import Qt, QTimer, Slot, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
@@ -40,12 +40,17 @@ class FaceDetectorWorker(QThread):
             self.frame_to_process = frame
             
     def run(self):
+        last_process_time = 0.0
         while self.running:
             frame = None
-            with self.lock:
-                if self.frame_to_process is not None:
-                    frame = self.frame_to_process
-                    self.frame_to_process = None
+            current_time = time.perf_counter()
+            # Rate limit: only run detection at most once every 150ms
+            if current_time - last_process_time >= 0.15:
+                with self.lock:
+                    if self.frame_to_process is not None:
+                        frame = self.frame_to_process
+                        self.frame_to_process = None
+                        last_process_time = current_time
                     
             if frame is not None:
                 try:
@@ -91,6 +96,10 @@ class AuthDialog(QDialog):
         self.final_score = None
         self.close_match_attempts = 0
         self.latest_frame = None
+        self.unknown_face_ticks = 0
+        self.matched_centroids = []
+        self.enrolled_embeddings = {}
+        self.failed_pwd_attempts = 0
         
         self.detector = None
         self.camera_worker = None
@@ -101,10 +110,8 @@ class AuthDialog(QDialog):
         self.setWindowTitle("FaceGate Authentication")
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint | 
-            Qt.WindowType.Dialog | 
-            Qt.WindowType.FramelessWindowHint
+            Qt.WindowType.Dialog
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
         
         # Determine screen-based size
@@ -115,54 +122,54 @@ class AuthDialog(QDialog):
             if self.mode == "face":
                 width = max(420, min(int(screen_size.width() * 0.35), 600))
                 height = max(480, min(int(screen_size.height() * 0.55), 700))
-                self.setFixedSize(width + 20, height + 20)
+                self.resize(width, height)
+                self.setMinimumSize(400, 420)
             else:
                 width = max(380, min(int(screen_size.width() * 0.3), 500))
-                height = max(220, min(int(screen_size.height() * 0.35), 300))
-                self.setFixedSize(width + 20, height + 20)
+                height = max(260, min(int(screen_size.height() * 0.35), 350))
+                self.resize(width, height)
+                self.setMinimumSize(360, 265)
         else:
             if self.mode == "face":
-                self.setFixedSize(440, 500)
+                self.resize(440, 500)
+                self.setMinimumSize(400, 420)
             else:
-                self.setFixedSize(400, 240)
+                self.resize(400, 290)
+                self.setMinimumSize(360, 265)
         
-        from ui.theme import get_theme_qss, ACCENT_PURPLE, TEXT_SECONDARY, BG_NEUTRAL, BORDER_NEUTRAL, CustomTitleBar
+        from ui.theme import get_theme_qss, get_colors, CustomTitleBar, TEXT_SECONDARY, DANGER_RED
+        c = get_colors()
         self.setStyleSheet(get_theme_qss() + f"""
             QPushButton#pwdFallbackBtn {{
                 background-color: transparent;
-                color: {ACCENT_PURPLE};
+                color: {c["ACCENT_PURPLE"]};
                 border: none;
                 font-size: 13px;
                 font-weight: bold;
                 text-decoration: underline;
             }}
             QPushButton#pwdFallbackBtn:hover {{
-                color: #6d28d9;
+                color: {c["ACCENT_PURPLE_HOVER"]};
             }}
         """)
 
         # Outer layout
         window_layout = QVBoxLayout(self)
-        window_layout.setContentsMargins(10, 10, 10, 10)
+        window_layout.setContentsMargins(0, 0, 0, 0)
         
         # Container
         self.main_container = QWidget()
         self.main_container.setObjectName("mainContainer")
         self.main_container.setStyleSheet(f"""
             QWidget#mainContainer {{
-                background-color: {BG_NEUTRAL};
-                border: 1px solid {BORDER_NEUTRAL};
+                background-color: {c["BG_NEUTRAL"]};
+                border: 1px solid {c["BORDER_NEUTRAL"]};
                 border-radius: 12px;
             }}
         """)
         
-        # Shadow
-        from PySide6.QtWidgets import QGraphicsDropShadowEffect
-        self.shadow = QGraphicsDropShadowEffect(self)
-        self.shadow.setBlurRadius(15)
-        self.shadow.setColor(QColor(0, 0, 0, 80))
-        self.shadow.setOffset(0, 4)
-        self.main_container.setGraphicsEffect(self.shadow)
+        # Shadow disabled (server-side decorations handle shadows now)
+        self.shadow = None
         
         window_layout.addWidget(self.main_container)
         
@@ -174,139 +181,198 @@ class AuthDialog(QDialog):
         # Custom Title Bar
         self.title_bar = CustomTitleBar(self, title="FaceGate Authentication", allow_maximize=False, allow_minimize=False)
         container_layout.addWidget(self.title_bar)
+
+        # Stacked layout for pages
+        from PySide6.QtWidgets import QStackedWidget
+        self.stack = QStackedWidget()
+        container_layout.addWidget(self.stack)
+
+        # PAGE 0: Face Mode
+        face_page = QWidget()
+        face_layout = QVBoxLayout(face_page)
+        face_layout.setContentsMargins(24, 24, 24, 24)
+        face_layout.setSpacing(16)
         
-        # Content layout widget
-        content_widget = QWidget()
-        layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
-        container_layout.addWidget(content_widget)
+        self.header_label_face = QLabel(f"🔒 <b>{self.app_name}</b> is locked.")
+        self.header_label_face.setObjectName("headerLabel")
+        self.header_label_face.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        face_layout.addWidget(self.header_label_face)
 
+        self.status_label = QLabel("Loading face recognition models...")
+        self.status_label.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        face_layout.addWidget(self.status_label)
+
+        # Camera View QLabel
+        self.camera_label = QLabel()
+        self.camera_label.setFixedSize(360, 270)
+        self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.camera_label.setStyleSheet("border: 2px solid #3a3a4a; border-radius: 8px; background-color: #0d0d11;")
+        face_layout.addWidget(self.camera_label, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Password Fallback Button
+        self.pwd_fallback_btn = QPushButton("Use Password Instead")
+        self.pwd_fallback_btn.setObjectName("pwdFallbackBtn")
+        self.pwd_fallback_btn.clicked.connect(self.switch_to_password_mode)
+        self.pwd_fallback_btn.setVisible(True)
+        face_layout.addWidget(self.pwd_fallback_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Cancel Button
+        face_btn_layout = QHBoxLayout()
+        self.face_cancel_btn = QPushButton("Cancel")
+        self.face_cancel_btn.setObjectName("cancelBtn")
+        self.face_cancel_btn.clicked.connect(self.reject)
+        face_btn_layout.addWidget(self.face_cancel_btn)
+        face_layout.addLayout(face_btn_layout)
+
+        self.stack.addWidget(face_page)
+
+        # PAGE 1: Password Mode
+        pwd_page = QWidget()
+        pwd_layout = QVBoxLayout(pwd_page)
+        pwd_layout.setContentsMargins(24, 24, 24, 24)
+        pwd_layout.setSpacing(16)
+
+        self.header_label_pwd = QLabel(f"🔒 <b>{self.app_name}</b> is locked.")
+        self.header_label_pwd.setObjectName("headerLabel")
+        self.header_label_pwd.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pwd_layout.addWidget(self.header_label_pwd)
+
+        self.sub_label = QLabel("Enter password to unlock application:")
+        self.sub_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pwd_layout.addWidget(self.sub_label)
+
+        # Password Input
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setPlaceholderText("Password")
+        self.password_input.returnPressed.connect(self.handle_unlock)
+        pwd_layout.addWidget(self.password_input)
+
+        # Error label
+        self.error_label = QLabel("")
+        self.error_label.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: bold;")
+        self.error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pwd_layout.addWidget(self.error_label)
+
+        # Lockout progress bar (initially hidden)
+        from PySide6.QtWidgets import QProgressBar
+        self.lockout_progress = QProgressBar()
+        self.lockout_progress.setTextVisible(False)
+        self.lockout_progress.setFixedHeight(6)
+        
+        self.lockout_progress.setStyleSheet(f"""
+            QProgressBar {{
+                border: 1px solid {c["BORDER_NEUTRAL"]};
+                border-radius: 3px;
+                background-color: {c["CANCEL_BTN_BG"]};
+                height: 6px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {DANGER_RED};
+                border-radius: 2px;
+            }}
+        """)
+        self.lockout_progress.hide()
+        pwd_layout.addWidget(self.lockout_progress)
+
+        # Buttons
+        pwd_btn_layout = QHBoxLayout()
+        pwd_btn_layout.setSpacing(12)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setObjectName("cancelBtn")
+        self.cancel_btn.clicked.connect(self.reject)
+        
+        self.unlock_btn = QPushButton("Unlock")
+        self.unlock_btn.setDefault(True)
+        self.unlock_btn.clicked.connect(self.handle_unlock)
+
+        pwd_btn_layout.addWidget(self.cancel_btn)
+        pwd_btn_layout.addWidget(self.unlock_btn)
+        pwd_layout.addLayout(pwd_btn_layout)
+
+        self.stack.addWidget(pwd_page)
+
+        # Setup initial stack page and trigger camera if face mode
         if self.mode == "face":
-            # Header Info
-            header_label = QLabel(f"🔒 <b>{self.app_name}</b> is locked.")
-            header_label.setStyleSheet("font-size: 16px; font-weight: 500;")
-            header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(header_label)
-
-            self.status_label = QLabel("Loading face recognition models...")
-            self.status_label.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
-            self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(self.status_label)
-
-            # Camera View QLabel
-            self.camera_label = QLabel()
-            self.camera_label.setFixedSize(360, 270)
-            self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.camera_label.setStyleSheet("border: 2px solid #3a3a4a; border-radius: 8px; background-color: #0d0d11;")
-            layout.addWidget(self.camera_label, alignment=Qt.AlignmentFlag.AlignCenter)
-
-            # Password Fallback Button
-            self.pwd_fallback_btn = QPushButton("Use Password Instead")
-            self.pwd_fallback_btn.setObjectName("pwdFallbackBtn")
-            self.pwd_fallback_btn.clicked.connect(self.handle_password_fallback)
-            self.pwd_fallback_btn.setVisible(False)  # Hidden initially
-            layout.addWidget(self.pwd_fallback_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-
-            # Cancel Button
-            btn_layout = QHBoxLayout()
-            self.cancel_btn = QPushButton("Cancel")
-            self.cancel_btn.setObjectName("cancelBtn")
-            self.cancel_btn.clicked.connect(self.reject)
-            btn_layout.addWidget(self.cancel_btn)
-            layout.addLayout(btn_layout)
-
-            # Force window stays on top
+            self.stack.setCurrentIndex(0)
             self.activateWindow()
-            
-            # Start Camera and Model load after window displays
             QTimer.singleShot(100, self.start_camera_and_models)
-
         else:
-            # Password Mode (Phase 1 fallback)
-            header_label = QLabel(f"🔒 <b>{self.app_name}</b> is locked.")
-            header_label.setStyleSheet("font-size: 16px; font-weight: 500;")
-            header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(header_label)
-
-            sub_label = QLabel("Enter password to unlock application:")
-            sub_label.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
-            sub_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(sub_label)
-
-            # Password Input
-            self.password_input = QLineEdit()
-            self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.password_input.setPlaceholderText("Password")
-            self.password_input.returnPressed.connect(self.handle_unlock)
-            layout.addWidget(self.password_input)
-
-            # Error label
-            self.error_label = QLabel("")
-            self.error_label.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: bold;")
-            self.error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(self.error_label)
-
-            # Lockout progress bar (initially hidden)
-            from PySide6.QtWidgets import QProgressBar
-            self.lockout_progress = QProgressBar()
-            self.lockout_progress.setTextVisible(False)
-            self.lockout_progress.setFixedHeight(6)
-            
-            from ui.theme import DANGER_RED, BORDER_NEUTRAL
-            self.lockout_progress.setStyleSheet(f"""
-                QProgressBar {{
-                    border: 1px solid {BORDER_NEUTRAL};
-                    border-radius: 3px;
-                    background-color: #1a1a20;
-                    height: 6px;
-                }}
-                QProgressBar::chunk {{
-                    background-color: {DANGER_RED};
-                    border-radius: 2px;
-                }}
-            """)
-            self.lockout_progress.hide()
-            layout.addWidget(self.lockout_progress)
-
-            # Buttons
-            btn_layout = QHBoxLayout()
-            btn_layout.setSpacing(12)
-
-            self.cancel_btn = QPushButton("Cancel")
-            self.cancel_btn.setObjectName("cancelBtn")
-            self.cancel_btn.clicked.connect(self.reject)
-            
-            self.unlock_btn = QPushButton("Unlock")
-            self.unlock_btn.setDefault(True)
-            self.unlock_btn.clicked.connect(self.handle_unlock)
-
-            btn_layout.addWidget(self.cancel_btn)
-            btn_layout.addWidget(self.unlock_btn)
-            layout.addLayout(btn_layout)
-
+            self.stack.setCurrentIndex(1)
             QTimer.singleShot(50, self.password_input.setFocus)
-            
-            # Setup lockout check on initialization
-            self.lockout_timer = QTimer(self)
-            self.lockout_timer.timeout.connect(self.update_lockout_countdown)
-            self.lockout_seconds_remaining = 0
-            
-            import math
-            import time
-            if time.time() < AuthDialog.lockout_until:
-                remaining = int(math.ceil(AuthDialog.lockout_until - time.time()))
-                if remaining > 0:
-                    # Delay layout layout pass slightly to ensure buttons exist and can be disabled
-                    QTimer.singleShot(50, lambda: self.start_lockout(remaining))
 
-
+        # Setup lockout check on initialization
+        self.lockout_timer = QTimer(self)
+        self.lockout_timer.timeout.connect(self.update_lockout_countdown)
+        self.lockout_seconds_remaining = 0
+        
+        import math
+        import time
+        if time.time() < AuthDialog.lockout_until:
+            remaining = int(math.ceil(AuthDialog.lockout_until - time.time()))
+            if remaining > 0:
+                QTimer.singleShot(50, lambda: self.start_lockout(remaining))
 
         # Setup timeout timer if specified
         if self.timeout_seconds > 0:
             self.timeout_timer = QTimer(self)
             self.timeout_timer.setSingleShot(True)
             self.timeout_timer.timeout.connect(self.handle_timeout)
+            
+        self.apply_theme_dynamically()
+
+    def apply_theme_dynamically(self):
+        from ui.theme import get_theme_qss, get_colors
+        c = get_colors()
+        self.setStyleSheet(get_theme_qss() + f"""
+            QLabel#headerLabel {{
+                font-size: 16px;
+                font-weight: 500;
+                color: {c["TEXT_PRIMARY"]};
+            }}
+            QPushButton#pwdFallbackBtn {{
+                background-color: transparent;
+                color: {c["ACCENT_PURPLE"]};
+                border: none;
+                font-size: 13px;
+                font-weight: bold;
+                text-decoration: underline;
+            }}
+            QPushButton#pwdFallbackBtn:hover {{
+                color: {c["ACCENT_PURPLE_HOVER"]};
+            }}
+        """)
+        self.main_container.setStyleSheet(f"""
+            QWidget#mainContainer {{
+                background-color: {c["BG_NEUTRAL"]};
+                border: 1px solid {c["BORDER_NEUTRAL"]};
+                border-radius: 12px;
+            }}
+        """)
+        
+        if hasattr(self, "status_label") and self.status_label:
+            self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
+        if hasattr(self, "sub_label") and self.sub_label:
+            self.sub_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
+            
+        if hasattr(self, "lockout_progress") and self.lockout_progress:
+            self.lockout_progress.setStyleSheet(f"""
+                QProgressBar {{
+                    border: 1px solid {c["BORDER_NEUTRAL"]};
+                    border-radius: 3px;
+                    background-color: {c["CANCEL_BTN_BG"]};
+                    height: 6px;
+                }}
+                QProgressBar::chunk {{
+                    background-color: #ef4444;
+                    border-radius: 2px;
+                }}
+            """)
+            
+        if hasattr(self, "title_bar") and self.title_bar:
+            self.title_bar.apply_theme_dynamically()
 
     def start_camera_and_models(self):
         self.status_label.setText("Initializing face recognition detector...")
@@ -319,6 +385,13 @@ class AuthDialog(QDialog):
         try:
             self.detector = detector
             
+            from database.embedding_store import load_embeddings
+            try:
+                self.enrolled_embeddings = load_embeddings()
+            except Exception as e:
+                logging.error(f"Error loading enrolled embeddings: {e}")
+                self.enrolled_embeddings = {}
+                
             # Start background face detection worker
             self.detector_worker = FaceDetectorWorker(self.detector)
             self.detector_worker.detected.connect(self.handle_detection_result)
@@ -361,6 +434,7 @@ class AuthDialog(QDialog):
     @Slot(list, object)
     def handle_detection_result(self, faces, frame):
         import cv2
+        from ui.theme import TEXT_SECONDARY, WARNING_AMBER
         
         # Save camera frame to latest_frame. If a face is found, we always update it.
         # Otherwise, if no frame has been captured yet, save this frame as a fallback.
@@ -370,19 +444,23 @@ class AuthDialog(QDialog):
         display_frame = frame.copy()
         matched_user = None
         matched_score = 0.0
+        matched_face = None
         
+        face_matches = []
         for face in faces:
             bbox = face['bbox']
             emb = face['embedding']
             
             from recognition.matcher import match_face
-            name, score = match_face(emb)
+            name, score = match_face(emb, self.enrolled_embeddings)
+            face_matches.append((face, name, score))
             
             if name:
                 color = (0, 255, 0) # Green in BGR
                 text = f"{name} ({score:.2f})"
                 matched_user = name
                 matched_score = score
+                matched_face = face
             else:
                 color = (0, 0, 255) # Red in BGR
                 text = f"Unknown"
@@ -398,23 +476,55 @@ class AuthDialog(QDialog):
         self.camera_label.setPixmap(pixmap)
 
         # Handle matching threshold
-        if matched_user:
+        if matched_user and matched_face:
             self.success_count += 1
+            
+            # Record centroid of matched face
+            bbox = matched_face['bbox']
+            centroid = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
+            self.matched_centroids.append(centroid)
+            
             if self.success_count >= 3:
-                logging.info(f"Subprocess Auth: Matched enrolled user '{matched_user}' (Similarity: {matched_score:.4f})")
-                self.authenticated = True
-                self.final_score = matched_score
-                self.matched_user = matched_user
-                self.accept()
+                # Perform motion/liveness check
+                from utils.config_loader import get_config
+                config = get_config()
+                min_motion = float(config.get("recognition.liveness_min_motion", 0.5))
+                
+                total_dist = 0.0
+                if len(self.matched_centroids) >= 3:
+                    import math
+                    for idx in range(1, len(self.matched_centroids)):
+                        c1 = self.matched_centroids[idx - 1]
+                        c2 = self.matched_centroids[idx]
+                        total_dist += math.hypot(c2[0] - c1[0], c2[1] - c1[1])
+                
+                if total_dist < min_motion:
+                    logging.warning(f"Liveness check failed: total motion {total_dist:.4f} < threshold {min_motion}")
+                    self.success_count = 0
+                    self.matched_centroids.clear()
+                    self.status_label.setText("Liveness verification failed. Retrying...")
+                else:
+                    logging.info(f"Subprocess Auth: Matched enrolled user '{matched_user}' (Similarity: {matched_score:.4f}, Liveness motion: {total_dist:.4f})")
+                    self.authenticated = True
+                    self.final_score = matched_score
+                    self.matched_user = matched_user
+                    self.accept()
+            else:
+                self.status_label.setText("Hold still, verifying liveness…")
+                self.status_label.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
         else:
             self.success_count = 0
+            self.matched_centroids.clear()
             if len(faces) > 0:
+                self.unknown_face_ticks += 1
+                if self.unknown_face_ticks >= 45: # ~1.5 - 2s of unknown face detection
+                    logging.info("Face recognition failed (unknown face threshold). Falling back to password.")
+                    self.switch_to_password_mode()
+                    return
+
                 # Find maximum score among detected faces to check for close mismatches
                 max_score = 0.0
-                for face in faces:
-                    emb = face['embedding']
-                    from recognition.matcher import match_face
-                    _, score = match_face(emb)
+                for face, name, score in face_matches:
                     if score > max_score:
                         max_score = score
                         
@@ -424,12 +534,12 @@ class AuthDialog(QDialog):
                 margin = float(config.get("recognition.ambiguity_margin", 0.03))
                 
                 if max_score >= (threshold - margin):
-                    from ui.theme import WARNING_AMBER
                     self.status_label.setText("Almost — try better lighting or move closer")
                     self.status_label.setStyleSheet(f"color: {WARNING_AMBER}; font-size: 13px; font-weight: bold;")
                     self.close_match_attempts += 1
-                    if self.close_match_attempts >= 2:
-                        self.pwd_fallback_btn.setVisible(True)
+                    if self.close_match_attempts >= 3:
+                        logging.info("Too many close mismatch attempts. Falling back to password.")
+                        self.switch_to_password_mode()
                 else:
                     self.status_label.setText("Position your face in the camera view...")
                     self.status_label.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
@@ -442,11 +552,20 @@ class AuthDialog(QDialog):
         from ui.theme import DANGER_RED
         self.status_label.setStyleSheet(f"color: {DANGER_RED}; font-size: 13px; font-weight: bold;")
         self.status_label.setText(f"❌ Camera Error: {err_msg}")
-        self.pwd_fallback_btn.setVisible(True)
+        QTimer.singleShot(1000, self.switch_to_password_mode)
+
+    def switch_to_password_mode(self):
+        self.fallback_to_password = True
+        self.cleanup_camera()
+        
+        # Adjust dialog size
+        self.setMinimumSize(360, 265)
+        self.resize(400, 290)
+        self.stack.setCurrentIndex(1)
+        self.password_input.setFocus()
 
     def handle_password_fallback(self):
-        self.fallback_to_password = True
-        self.reject()
+        self.switch_to_password_mode()
 
     def handle_timeout(self):
         logging.warning("Authentication dialog timed out.")
@@ -465,17 +584,20 @@ class AuthDialog(QDialog):
             self.accept()
         else:
             AuthDialog.failed_attempts_count += 1
+            self.failed_pwd_attempts += 1
             self.password_input.selectAll()
             
             # Temporary error styling
-            from ui.theme import DANGER_RED, TEXT_PRIMARY
+            from ui.theme import DANGER_RED, get_colors as _get_colors
+            _c = _get_colors()
+            err_bg = "#3b1c1c" if _c.get("IS_DARK") else "#fef2f2"
             self.password_input.setStyleSheet(f"""
                 QLineEdit {{
-                    background-color: #fef2f2;
+                    background-color: {err_bg};
                     border: 1px solid {DANGER_RED};
                     border-radius: 6px;
                     padding: 8px 12px;
-                    color: {TEXT_PRIMARY};
+                    color: {_c['TEXT_PRIMARY']};
                     font-size: 13px;
                 }}
             """)
@@ -547,7 +669,11 @@ class AuthDialog(QDialog):
     def reject(self):
         self.cleanup_camera()
         if not self.authenticated:
-            self.save_intruder_selfie()
+            if (self.timed_out or 
+                self.close_match_attempts > 0 or 
+                self.unknown_face_ticks > 0 or 
+                self.failed_pwd_attempts > 0):
+                self.save_intruder_selfie()
         super().reject()
 
     def save_intruder_selfie(self):
