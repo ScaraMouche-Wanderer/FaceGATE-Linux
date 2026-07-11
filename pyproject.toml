@@ -2,7 +2,7 @@
 name = "facegate"
 version = "0.1.0"
 description = "FaceGate-Linux: A lightweight locking skeleton tray daemon and monitor"
-authors = ["voidnode"]
+authors = ["ScaraMouche-Wanderer <prathmeshnarwaria@gmail.com>"]
 readme = "README.md"
 packages = [{include = "*", from = "src"}]
 
