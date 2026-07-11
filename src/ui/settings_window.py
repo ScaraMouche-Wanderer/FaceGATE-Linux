@@ -1,5 +1,4 @@
 import os
-import shutil
 import subprocess
 import logging
 from PySide6.QtWidgets import (
@@ -7,17 +6,173 @@ from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QComboBox, QCheckBox, QMessageBox, QLineEdit, QTreeWidget, QTreeWidgetItem
 )
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt, QSize, QEvent, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QIcon, QColor
 from utils.config_loader import get_config
 from utils.systemd_manager import is_enabled, enable, disable
 from ui.app_picker_dialog import AppPickerDialog
 from locking.launcher_sub import apply_substitution, restore_substitution
 
+class AnimatedSidebar(QListWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(190)
+        self.anim = None
+        self.max_anim = None
+        self.setMouseTracking(True)
+        
+    def enterEvent(self, event):
+        if self.anim:
+            self.anim.stop()
+        if self.max_anim:
+            self.max_anim.stop()
+            
+        self.anim = QPropertyAnimation(self, b"minimumWidth")
+        self.anim.setDuration(220)
+        self.anim.setStartValue(self.width())
+        self.anim.setEndValue(215)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        
+        self.max_anim = QPropertyAnimation(self, b"maximumWidth")
+        self.max_anim.setDuration(220)
+        self.max_anim.setStartValue(self.width())
+        self.max_anim.setEndValue(215)
+        self.max_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        
+        self.anim.start()
+        self.max_anim.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        if self.anim:
+            self.anim.stop()
+        if self.max_anim:
+            self.max_anim.stop()
+            
+        self.anim = QPropertyAnimation(self, b"minimumWidth")
+        self.anim.setDuration(220)
+        self.anim.setStartValue(self.width())
+        self.anim.setEndValue(190)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        
+        self.max_anim = QPropertyAnimation(self, b"maximumWidth")
+        self.max_anim.setDuration(220)
+        self.max_anim.setStartValue(self.width())
+        self.max_anim.setEndValue(190)
+        self.max_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        
+        self.anim.start()
+        self.max_anim.start()
+        super().leaveEvent(event)
+
+
+class ChangePasswordDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("Change Master Password")
+        self.setFixedSize(400, 320)
+        self.setModal(True)
+
+        from ui.theme import get_theme_qss
+        self.setStyleSheet(get_theme_qss())
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
+
+        # Header Info
+        header_label = QLabel("Change FaceGate Master Password")
+        from ui.theme import style_heading
+        style_heading(header_label, 16)
+        layout.addWidget(header_label)
+
+        # Form fields
+        from database.embedding_store import read_envelope_file
+        envelope = read_envelope_file()
+        self.has_current = envelope is not None
+
+        if self.has_current:
+            self.current_label = QLabel("Current Password:")
+            self.current_input = QLineEdit()
+            self.current_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.current_input.setPlaceholderText("Enter current master password")
+            layout.addWidget(self.current_label)
+            layout.addWidget(self.current_input)
+        else:
+            self.current_input = None
+
+        self.new_label = QLabel("New Password (min 8 chars):")
+        self.new_input = QLineEdit()
+        self.new_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.new_input.setPlaceholderText("Enter new password")
+        layout.addWidget(self.new_label)
+        layout.addWidget(self.new_input)
+
+        self.confirm_label = QLabel("Confirm New Password:")
+        self.confirm_input = QLineEdit()
+        self.confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirm_input.setPlaceholderText("Confirm new password")
+        layout.addWidget(self.confirm_label)
+        layout.addWidget(self.confirm_input)
+
+        # Error label
+        self.error_label = QLabel("")
+        from ui.theme import style_themed_label
+        style_themed_label(self.error_label, "DANGER_RED", "font-size: 12px; font-weight: bold;")
+        layout.addWidget(self.error_label)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setObjectName("cancelBtn")
+        self.cancel_btn.clicked.connect(self.reject)
+
+        self.ok_btn = QPushButton("Change Password")
+        self.ok_btn.clicked.connect(self.handle_change)
+
+        btn_layout.addWidget(self.cancel_btn)
+        btn_layout.addWidget(self.ok_btn)
+        layout.addLayout(btn_layout)
+
+        self.setLayout(layout)
+
+    def handle_change(self):
+        current_pwd = self.current_input.text() if self.has_current else None
+        new_pwd = self.new_input.text()
+        confirm_pwd = self.confirm_input.text()
+
+        if self.has_current and not current_pwd:
+            self.error_label.setText("Please enter your current password.")
+            return
+
+        if len(new_pwd) < 8:
+            self.error_label.setText("New password must be at least 8 characters.")
+            return
+
+        if new_pwd != confirm_pwd:
+            self.error_label.setText("New passwords do not match.")
+            return
+
+        from security.credential_store import update_master_password
+        try:
+            update_master_password(current_pwd, new_pwd)
+            self.accept()
+        except ValueError as e:
+            self.error_label.setText(str(e))
+        except Exception as e:
+            self.error_label.setText(f"Failed to update password: {e}")
+
+
 class SettingsWindow(QDialog):
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
         self.config = config if config else get_config()
+        self._themed_labels = []  # List of (QLabel, str) to track and update theme colors dynamically
         
         # Keep track of initial apps list to perform delta substitutions on Save
         self.initial_apps = list(self.config.get("protected_apps", []))
@@ -43,75 +198,32 @@ class SettingsWindow(QDialog):
             self.resize(840, 580)
             self.setMinimumSize(800, 540)
             
-        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setWindowFlags(Qt.WindowType.Window)
         
-        from ui.theme import get_theme_qss, ACCENT_PURPLE, BORDER_NEUTRAL, TEXT_PRIMARY, BG_NEUTRAL, AnimatedSpinBox, CustomTitleBar
+        from ui.theme import get_theme_qss, get_sidebar_qss, get_colors, AnimatedSpinBox, CustomTitleBar
+        c = get_colors()
         # Set base theme styling
-        self.setStyleSheet(get_theme_qss() + f"""
-            QListWidget#sidebar {{
-                background-color: #ede9fe;
-                border: none;
-                border-bottom-left-radius: 12px;
-                border-right: 1px solid {BORDER_NEUTRAL};
-                padding-top: 10px;
-                color: #4c4664;
-                font-size: 13px;
-                font-weight: 500;
-            }}
-            QListWidget#sidebar::item {{
-                padding: 10px 16px;
-                border-radius: 6px;
-                margin: 4px 8px;
-                color: #4c4664;
-            }}
-            QListWidget#sidebar::item:hover {{
-                background-color: #e5dbff;
-                color: {TEXT_PRIMARY};
-            }}
-            QListWidget#sidebar::item:selected {{
-                background-color: {ACCENT_PURPLE};
-                color: #ffffff;
-            }}
-            QPushButton#removeBtn {{
-                background-color: transparent;
-                color: #ef4444;
-                border: 1px solid #ef4444;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 11px;
-                font-weight: bold;
-            }}
-            QPushButton#removeBtn:hover {{
-                background-color: #ef4444;
-                color: white;
-            }}
-        """)
+        self.setStyleSheet(get_theme_qss() + get_sidebar_qss(c))
 
         # Outer layout
-        window_layout = QVBoxLayout(self)
-        window_layout.setContentsMargins(10, 10, 10, 10)
+        self.window_layout = QVBoxLayout(self)
+        self.window_layout.setContentsMargins(0, 0, 0, 0)
         
         # Main container with rounded corners and border
         self.main_container = QWidget()
         self.main_container.setObjectName("mainContainer")
         self.main_container.setStyleSheet(f"""
             QWidget#mainContainer {{
-                background-color: {BG_NEUTRAL};
-                border: 1px solid {BORDER_NEUTRAL};
+                background-color: {c["BG_NEUTRAL"]};
+                border: 1px solid {c["BORDER_NEUTRAL"]};
                 border-radius: 12px;
             }}
         """)
         
-        # Drop shadow
-        from PySide6.QtWidgets import QGraphicsDropShadowEffect
-        self.shadow = QGraphicsDropShadowEffect(self)
-        self.shadow.setBlurRadius(15)
-        self.shadow.setColor(QColor(0, 0, 0, 80))
-        self.shadow.setOffset(0, 4)
-        self.main_container.setGraphicsEffect(self.shadow)
+        # Shadow disabled (server-side decorations handle shadows now)
+        self.shadow = None
         
-        window_layout.addWidget(self.main_container)
+        self.window_layout.addWidget(self.main_container)
         
         # Inner layout
         container_layout = QVBoxLayout(self.main_container)
@@ -129,9 +241,8 @@ class SettingsWindow(QDialog):
         container_layout.addLayout(main_layout)
 
         # 1. Left Sidebar Navigation
-        self.sidebar = QListWidget()
+        self.sidebar = AnimatedSidebar(self)
         self.sidebar.setObjectName("sidebar")
-        self.sidebar.setFixedWidth(190)
         self.sidebar.setIconSize(QSize(18, 18))
         
         self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("system-lock-screen"), "Locked Apps"))
@@ -162,20 +273,25 @@ class SettingsWindow(QDialog):
 
         # Banner for daemon restart warning (initially hidden)
         from PySide6.QtWidgets import QFrame
+        from ui.theme import get_colors as _gc
+        _c = _gc()
+        _banner_bg = "#2d261e" if _c.get("IS_DARK") else "#fffbeb"
+        _banner_border = "#d97706"
+        _banner_text = "#fef3c7" if _c.get("IS_DARK") else "#92400e"
         self.restart_banner = QFrame()
         self.restart_banner.setObjectName("restartBanner")
-        self.restart_banner.setStyleSheet("""
-            QFrame#restartBanner {
-                background-color: #2d261e;
-                border: 1px solid #d97706;
+        self.restart_banner.setStyleSheet(f"""
+            QFrame#restartBanner {{
+                background-color: {_banner_bg};
+                border: 1px solid {_banner_border};
                 border-radius: 6px;
-            }
-            QLabel {
-                color: #fef3c7;
+            }}
+            QLabel {{
+                color: {_banner_text};
                 font-size: 13px;
                 border: none;
-            }
-            QPushButton {
+            }}
+            QPushButton {{
                 background-color: #d97706;
                 color: white;
                 border: none;
@@ -183,10 +299,10 @@ class SettingsWindow(QDialog):
                 padding: 6px 12px;
                 font-weight: bold;
                 font-size: 11px;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #b45309;
-            }
+            }}
         """)
         banner_layout = QHBoxLayout(self.restart_banner)
         banner_layout.setContentsMargins(12, 8, 12, 8)
@@ -233,33 +349,37 @@ class SettingsWindow(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("""
-            QScrollArea {
+        from ui.theme import get_colors as _gc2
+        _c2 = _gc2()
+        _scrollbar_bg = "#4c3d99" if _c2.get("IS_DARK") else "#c7d2fe"
+        _scrollbar_hover = "#7c6ecf" if _c2.get("IS_DARK") else "#818cf8"
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
                 background: transparent;
                 border: none;
-            }
-            QScrollBar:vertical {
+            }}
+            QScrollBar:vertical {{
                 border: none;
                 background: transparent;
                 width: 8px;
                 margin: 0px 4px 0px 0px;
-            }
-            QScrollBar::handle:vertical {
-                background: #c7d2fe;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {_scrollbar_bg};
                 border-radius: 4px;
                 min-height: 20px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #818cf8;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {_scrollbar_hover};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 border: none;
                 background: none;
-            }
-            QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
+            }}
+            QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {{
                 border: none;
                 background: none;
-            }
+            }}
         """)
         scroll.setWidget(widget)
         return scroll
@@ -275,12 +395,55 @@ class SettingsWindow(QDialog):
         self.restart_banner.show()
 
     def restart_daemon(self):
-        from utils.systemd_manager import restart
-        if restart():
+        import subprocess
+        import psutil
+        import os
+        from utils.systemd_manager import restart, is_active
+        from locking.launcher_sub import get_facegate_executable
+
+        # 1. Try systemd first if the service is active or enabled
+        if is_active():
+            if restart():
+                QMessageBox.information(self, "Restart Successful", "FaceGate daemon has been restarted successfully via systemd.")
+                self.restart_banner.hide()
+                return
+            else:
+                logging.warning("Systemd restart failed, trying manual fallback...")
+
+        # 2. Manual fallback / non-systemd restart
+        # Find any running facegate monitor processes
+        daemon_procs = []
+        for proc in psutil.process_iter(['cmdline']):
+            try:
+                cmd = proc.info['cmdline']
+                # Ignore this settings window process (which might have --settings)
+                if cmd and any('facegate' in part or 'monitor_main' in part for part in cmd) and any('--monitor' in part for part in cmd):
+                    daemon_procs.append(proc)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        # Terminate any existing manual monitor processes
+        for proc in daemon_procs:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2.0)
+            except Exception as e:
+                logging.warning(f"Could not cleanly terminate process: {e}. Killing.")
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+        # Spawn a new facegate --monitor process in the background
+        facegate_exe = get_facegate_executable()
+        try:
+            # We run it completely detached from the current settings window process
+            # so that it survives when settings window closes!
+            subprocess.Popen([facegate_exe, "--monitor"], close_fds=True, start_new_session=True)
             QMessageBox.information(self, "Restart Successful", "FaceGate daemon has been restarted successfully.")
             self.restart_banner.hide()
-        else:
-            QMessageBox.critical(self, "Restart Failed", "Failed to restart FaceGate daemon via systemd user manager.")
+        except Exception as e:
+            QMessageBox.critical(self, "Restart Failed", f"Failed to restart FaceGate daemon: {e}")
 
     # ------------------ Tab Creation Methods ------------------
     
@@ -290,13 +453,16 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        from ui.theme import TEXT_PRIMARY, TEXT_SECONDARY
         header = QLabel("Locked Applications")
-        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
+        from ui.theme import style_heading
+        style_heading(header, 20)
+        header.setProperty("heading_size", 20)
+        self._themed_labels.append((header, "TEXT_PRIMARY"))
         layout.addWidget(header)
 
         desc = QLabel("Manage applications that trigger face recognition authentication on launch.")
-        desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px;")
+        desc.setStyleSheet("font-size: 13px;")
+        desc.setProperty("secondary", True)
         layout.addWidget(desc)
 
         # Table
@@ -308,16 +474,26 @@ class SettingsWindow(QDialog):
         self.apps_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.apps_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.apps_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.apps_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.apps_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.apps_table.verticalHeader().setDefaultSectionSize(48)
         self.apps_table.verticalHeader().setVisible(False)
         
         layout.addWidget(self.apps_table)
 
-        # Add Button
+        # Action Buttons
+        btn_layout = QHBoxLayout()
         self.add_app_btn = QPushButton("+ Add Application...")
         self.add_app_btn.clicked.connect(self.open_app_picker)
-        layout.addWidget(self.add_app_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        
+        self.remove_selected_btn = QPushButton("- Remove Selected")
+        self.remove_selected_btn.setObjectName("removeSelectedBtn")
+        self.remove_selected_btn.clicked.connect(self.remove_selected_apps)
+        
+        btn_layout.addWidget(self.add_app_btn)
+        btn_layout.addWidget(self.remove_selected_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
 
         self.tab_stack.addWidget(page)
 
@@ -327,9 +503,11 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(20)
 
-        from ui.theme import get_card_qss, SUCCESS_GREEN, TEXT_PRIMARY, TEXT_SECONDARY
+        from ui.theme import get_card_qss, ACCENT_PURPLE, style_heading, style_themed_label
         header = QLabel("Authentication & Primitives")
-        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
+        style_heading(header, 20)
+        header.setProperty("heading_size", 20)
+        self._themed_labels.append((header, "TEXT_PRIMARY"))
         layout.addWidget(header)
 
         # Master Password Config Card (Accent Border)
@@ -341,12 +519,13 @@ class SettingsWindow(QDialog):
         c1_layout.setSpacing(10)
 
         lbl1 = QLabel("Master Password")
-        lbl1.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY}; border: none;")
+        lbl1.setStyleSheet("font-size: 15px; font-weight: bold; border: none;")
         c1_layout.addWidget(lbl1)
 
         lbl2 = QLabel("Configures the local master password that secures your face database envelope. "
                       "Updating the password will re-encrypt all credentials at rest under a new random KDF salt.")
-        lbl2.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
+        lbl2.setStyleSheet("font-size: 13px; border: none;")
+        lbl2.setProperty("secondary", True)
         lbl2.setWordWrap(True)
         c1_layout.addWidget(lbl2)
 
@@ -354,7 +533,7 @@ class SettingsWindow(QDialog):
         self.change_pwd_btn.clicked.connect(self.trigger_password_change)
         
         self.enroll_btn = QPushButton("Enroll New Face (GUI)...")
-        self.enroll_btn.setStyleSheet(f"background-color: {SUCCESS_GREEN};")
+        self.enroll_btn.setObjectName("enrollBtn")
         self.enroll_btn.clicked.connect(self.open_enrollment_wizard)
         
         h_btn_layout = QHBoxLayout()
@@ -374,15 +553,18 @@ class SettingsWindow(QDialog):
         ce_layout.setSpacing(10)
 
         ce_lbl = QLabel("Enrolled Face Profiles")
-        ce_lbl.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY}; border: none;")
+        ce_lbl.setStyleSheet("font-size: 15px; font-weight: bold; border: none;")
         ce_layout.addWidget(ce_lbl)
 
         self.enrolled_users_desc = QLabel("The following users have enrolled faces and are authorized to unlock applications:")
-        self.enrolled_users_desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
+        self.enrolled_users_desc.setStyleSheet("font-size: 13px; border: none;")
+        self.enrolled_users_desc.setProperty("secondary", True)
         ce_layout.addWidget(self.enrolled_users_desc)
 
         self.enrolled_users_list = QLabel("")
-        self.enrolled_users_list.setStyleSheet("color: #7c3aed; font-size: 14px; font-weight: bold; border: none;")
+        style_themed_label(self.enrolled_users_list, "ACCENT_PURPLE", "font-size: 14px; font-weight: bold; border: none;")
+        self.enrolled_users_list.setProperty("extra_css", "font-size: 14px; font-weight: bold; border: none;")
+        self._themed_labels.append((self.enrolled_users_list, "ACCENT_PURPLE"))
         ce_layout.addWidget(self.enrolled_users_list)
         
         layout.addWidget(card_enrolled)
@@ -396,16 +578,18 @@ class SettingsWindow(QDialog):
         c2_layout.setSpacing(12)
 
         lbl3 = QLabel("Active Security Profiles")
-        lbl3.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY}; border: none;")
+        lbl3.setStyleSheet("font-size: 15px; font-weight: bold; border: none;")
         c2_layout.addWidget(lbl3)
 
         # Read-only attributes layout
         self.kdf_label = QLabel("KDF: PBKDF2-HMAC-SHA256 (600,000 iterations)")
-        self.kdf_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
+        self.kdf_label.setStyleSheet("font-size: 13px; border: none;")
+        self.kdf_label.setProperty("secondary", True)
         c2_layout.addWidget(self.kdf_label)
 
         self.cipher_label = QLabel("Cipher: AES-256-GCM (Authenticated Encrypt-then-MAC)")
-        self.cipher_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
+        self.cipher_label.setStyleSheet("font-size: 13px; border: none;")
+        self.cipher_label.setProperty("secondary", True)
         c2_layout.addWidget(self.cipher_label)
 
         # Load values dynamically from config
@@ -413,11 +597,13 @@ class SettingsWindow(QDialog):
         margin = self.config.get("recognition.ambiguity_margin", "0.03")
 
         self.thresh_label = QLabel(f"Similarity Threshold: {thresh} (Required matching score)")
-        self.thresh_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
+        self.thresh_label.setStyleSheet("font-size: 13px; border: none;")
+        self.thresh_label.setProperty("secondary", True)
         c2_layout.addWidget(self.thresh_label)
 
         self.margin_label = QLabel(f"Ambiguity Margin: {margin} (Required margin between top candidates)")
-        self.margin_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none;")
+        self.margin_label.setStyleSheet("font-size: 13px; border: none;")
+        self.margin_label.setProperty("secondary", True)
         c2_layout.addWidget(self.margin_label)
 
         layout.addWidget(card2)
@@ -436,9 +622,11 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
-        from ui.theme import get_card_qss, ACCENT_PURPLE, TEXT_PRIMARY, TEXT_SECONDARY, AnimatedSpinBox
+        from ui.theme import get_card_qss, ACCENT_PURPLE, AnimatedSpinBox, style_heading, style_themed_label
         header = QLabel("Daemon Behavior & Protection")
-        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
+        style_heading(header, 20)
+        header.setProperty("heading_size", 20)
+        self._themed_labels.append((header, "TEXT_PRIMARY"))
         layout.addWidget(header)
 
         from PySide6.QtWidgets import QFormLayout
@@ -452,7 +640,9 @@ class SettingsWindow(QDialog):
         startup_layout.setSpacing(10)
 
         startup_lbl = QLabel("Startup Settings")
-        startup_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_PURPLE};")
+        style_themed_label(startup_lbl, "ACCENT_PURPLE", "font-size: 14px; font-weight: bold;")
+        startup_lbl.setProperty("extra_css", "font-size: 14px; font-weight: bold;")
+        self._themed_labels.append((startup_lbl, "ACCENT_PURPLE"))
         startup_layout.addWidget(startup_lbl)
 
         self.autostart_check = QCheckBox("Start FaceGate automatically when you log in")
@@ -460,13 +650,29 @@ class SettingsWindow(QDialog):
 
         delay_layout = QHBoxLayout()
         delay_lbl = QLabel("Delay before starting on boot (seconds):")
-        delay_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
+        delay_lbl.setStyleSheet("font-size: 13px;")
+        delay_lbl.setProperty("secondary", True)
         self.delay_spin = AnimatedSpinBox()
         self.delay_spin.setRange(0, 60)
         delay_layout.addWidget(delay_lbl)
         delay_layout.addWidget(self.delay_spin)
         delay_layout.addStretch()
         startup_layout.addLayout(delay_layout)
+
+        # Theme Selection
+        theme_layout = QHBoxLayout()
+        theme_lbl = QLabel("Application Theme Mode:")
+        theme_lbl.setStyleSheet("font-size: 13px;")
+        theme_lbl.setProperty("secondary", True)
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("System Default Theme", "system")
+        self.theme_combo.addItem("Light Theme Mode", "light")
+        self.theme_combo.addItem("Dark Theme Mode", "dark")
+        self.theme_combo.currentIndexChanged.connect(self.handle_theme_changed)
+        theme_layout.addWidget(theme_lbl)
+        theme_layout.addWidget(self.theme_combo)
+        theme_layout.addStretch()
+        startup_layout.addLayout(theme_layout)
 
         layout.addWidget(startup_card)
 
@@ -479,7 +685,9 @@ class SettingsWindow(QDialog):
         policy_layout.setSpacing(10)
 
         policy_lbl = QLabel("Security & Scanning Policies")
-        policy_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_PURPLE};")
+        style_themed_label(policy_lbl, "ACCENT_PURPLE", "font-size: 14px; font-weight: bold;")
+        policy_lbl.setProperty("extra_css", "font-size: 14px; font-weight: bold;")
+        self._themed_labels.append((policy_lbl, "ACCENT_PURPLE"))
         policy_layout.addWidget(policy_lbl)
 
         policy_form = QFormLayout()
@@ -516,12 +724,14 @@ class SettingsWindow(QDialog):
         prot_layout.addWidget(self.protection_check)
         
         prot_desc = QLabel("Prevents unauthorized users from deleting FaceGate settings or bypassing protection.")
-        prot_desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; margin-left: 20px; border: none; background: transparent;")
+        prot_desc.setStyleSheet("font-size: 11px; margin-left: 20px; border: none; background: transparent;")
+        prot_desc.setProperty("secondary", True)
         prot_layout.addWidget(prot_desc)
 
         hk_layout = QHBoxLayout()
         hk_lbl = QLabel("Emergency Shutdown Shortcut:")
-        hk_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
+        hk_lbl.setStyleSheet("font-size: 13px;")
+        hk_lbl.setProperty("secondary", True)
         self.hotkey_input = QLineEdit()
         self.hotkey_input.setPlaceholderText("<Control><Alt>k")
         hk_layout.addWidget(hk_lbl)
@@ -530,13 +740,15 @@ class SettingsWindow(QDialog):
         prot_layout.addLayout(hk_layout)
 
         hk_desc = QLabel("Press this keyboard combination to immediately stop FaceGate and restore all apps in case of camera failure. Format: e.g. <Control><Alt>k")
-        hk_desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-style: italic; margin-bottom: 5px;")
+        hk_desc.setStyleSheet("font-size: 11px; font-style: italic; margin-bottom: 5px;")
+        hk_desc.setProperty("secondary", True)
         hk_desc.setWordWrap(True)
         prot_layout.addWidget(hk_desc)
 
         panic_hk_layout = QHBoxLayout()
         panic_hk_lbl = QLabel("Panic Lockdown Shortcut:")
-        panic_hk_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
+        panic_hk_lbl.setStyleSheet("font-size: 13px;")
+        panic_hk_lbl.setProperty("secondary", True)
         self.panic_hotkey_input = QLineEdit()
         self.panic_hotkey_input.setPlaceholderText("<Control><Alt>l")
         panic_hk_layout.addWidget(panic_hk_lbl)
@@ -545,7 +757,8 @@ class SettingsWindow(QDialog):
         prot_layout.addLayout(panic_hk_layout)
 
         panic_hk_desc = QLabel("Press this keyboard combination to immediately lock all running protected applications to prevent trespassing. Format: e.g. <Control><Alt>l")
-        panic_hk_desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-style: italic;")
+        panic_hk_desc.setStyleSheet("font-size: 11px; font-style: italic;")
+        panic_hk_desc.setProperty("secondary", True)
         panic_hk_desc.setWordWrap(True)
         prot_layout.addWidget(panic_hk_desc)
 
@@ -560,7 +773,9 @@ class SettingsWindow(QDialog):
         notif_layout.setSpacing(10)
 
         notif_lbl = QLabel("Notifications & Auto-Locking")
-        notif_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ACCENT_PURPLE};")
+        style_themed_label(notif_lbl, "ACCENT_PURPLE", "font-size: 14px; font-weight: bold;")
+        notif_lbl.setProperty("extra_css", "font-size: 14px; font-weight: bold;")
+        self._themed_labels.append((notif_lbl, "ACCENT_PURPLE"))
         notif_layout.addWidget(notif_lbl)
 
         self.notify_check = QCheckBox("Show desktop notification banners on successful unlocks")
@@ -571,7 +786,8 @@ class SettingsWindow(QDialog):
 
         idle_time_layout = QHBoxLayout()
         idle_time_lbl = QLabel("System idle time before locking (minutes):")
-        idle_time_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
+        idle_time_lbl.setStyleSheet("font-size: 13px;")
+        idle_time_lbl.setProperty("secondary", True)
         self.idle_spin = AnimatedSpinBox()
         self.idle_spin.setRange(1, 60)
         self.idle_spin.setEnabled(False)
@@ -598,19 +814,23 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        from ui.theme import TEXT_PRIMARY, TEXT_SECONDARY
         header = QLabel("Security Audit Logs")
-        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
+        from ui.theme import style_heading
+        style_heading(header, 20)
+        header.setProperty("heading_size", 20)
+        self._themed_labels.append((header, "TEXT_PRIMARY"))
         layout.addWidget(header)
 
         desc = QLabel("View recent application authorization attempts and outcomes.")
-        desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px;")
+        desc.setStyleSheet("font-size: 13px;")
+        desc.setProperty("secondary", True)
         layout.addWidget(desc)
 
         # Filter Chips/Dropdown Layout
         filter_layout = QHBoxLayout()
         filter_lbl = QLabel("Filter status:")
-        filter_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 500;")
+        filter_lbl.setStyleSheet("font-size: 13px; font-weight: 500;")
+        filter_lbl.setProperty("secondary", True)
         
         self.log_filter_combo = QComboBox()
         self.log_filter_combo.addItems(["All Attempts", "Success", "Failed", "Timeout", "Bypass"])
@@ -637,7 +857,8 @@ class SettingsWindow(QDialog):
         # Empty state label
         self.logs_empty_label = QLabel("No authentication activity yet")
         self.logs_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.logs_empty_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 14px; font-style: italic; padding: 40px;")
+        self.logs_empty_label.setStyleSheet("font-size: 14px; font-style: italic; padding: 40px;")
+        self.logs_empty_label.setProperty("secondary", True)
         layout.addWidget(self.logs_empty_label)
         self.logs_empty_label.hide()
 
@@ -649,9 +870,11 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
-        from ui.theme import TEXT_PRIMARY, TEXT_SECONDARY, get_card_qss
+        from ui.theme import get_card_qss, ACCENT_PURPLE, TEXT_SECONDARY, style_heading, style_themed_label
         header = QLabel("About FaceGate-Linux")
-        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
+        style_heading(header, 20)
+        header.setProperty("heading_size", 20)
+        self._themed_labels.append((header, "TEXT_PRIMARY"))
         layout.addWidget(header)
 
         card = QWidget()
@@ -662,24 +885,31 @@ class SettingsWindow(QDialog):
         card_layout.setSpacing(12)
 
         logo = QLabel("🔒 FaceGate-Linux")
-        logo.setStyleSheet("font-size: 24px; font-weight: bold; color: #7c3aed; border: none;")
+        style_themed_label(logo, "ACCENT_PURPLE", "font-size: 24px; font-weight: bold; border: none;")
+        logo.setProperty("extra_css", "font-size: 24px; font-weight: bold; border: none;")
+        self._themed_labels.append((logo, "ACCENT_PURPLE"))
         card_layout.addWidget(logo)
 
-        version = QLabel("Version: 0.1.0 (Phase 8 Build)")
-        version.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none; font-weight: bold;")
+        version = QLabel("Version: 0.1.0")
+        style_themed_label(version, "TEXT_SECONDARY", "font-size: 13px; border: none; font-weight: bold;")
+        version.setProperty("extra_css", "font-size: 13px; border: none; font-weight: bold;")
+        self._themed_labels.append((version, "TEXT_SECONDARY"))
+        version.setProperty("secondary", True)
         card_layout.addWidget(version)
 
         desc = QLabel("FaceGate-Linux is a lightweight security wrapper daemon that locks system application launches "
                       "using face recognition. It combines process scanning, SIGSTOP interception, D-Bus session controls, "
                       "and authenticated AES-256-GCM data storage.")
-        desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; border: none; line-height: 1.4;")
+        desc.setStyleSheet("font-size: 13px; border: none; line-height: 1.4;")
+        desc.setProperty("secondary", True)
         desc.setWordWrap(True)
         card_layout.addWidget(desc)
 
         card_layout.addSpacing(10)
         
-        info = QLabel("Written by Senior Linux Desktop Engineer.")
-        info.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; border: none; font-style: italic;")
+        info = QLabel("Created by voidnode.")
+        info.setStyleSheet("font-size: 12px; border: none; font-style: italic;")
+        info.setProperty("secondary", True)
         card_layout.addWidget(info)
 
         layout.addWidget(card)
@@ -720,6 +950,14 @@ class SettingsWindow(QDialog):
         self.idle_spin.setValue(self.config.get("behavior.autolock_on_idle_minutes", 10))
         self.idle_spin.setEnabled(self.idle_check.isChecked())
         self.delay_spin.setValue(self.config.get("behavior.startup_delay_seconds", 0))
+        
+        self.theme_combo.blockSignals(True)
+        theme_val = self.config.get("behavior.theme", "system")
+        theme_idx = self.theme_combo.findData(theme_val)
+        if theme_idx >= 0:
+            self.theme_combo.setCurrentIndex(theme_idx)
+        self.theme_combo.blockSignals(False)
+        
         self.sleep_lock_check.setChecked(self.config.get("behavior.lock_on_sleep_or_lock", True))
         self.lock_settings_check.setChecked(self.config.get("security.lock_settings_window", True))
 
@@ -798,14 +1036,15 @@ class SettingsWindow(QDialog):
             # Count other apps with show_in_tray enabled
             active_count = sum(1 for a in self.current_apps if a.get("show_in_tray", True) and a["id"] != app_id)
             if active_count >= 5:
-                from ui.theme import ACCENT_PURPLE, TEXT_PRIMARY, BORDER_NEUTRAL
+                from ui.theme import get_colors
+                c = get_colors()
                 msg_box = QMessageBox(self)
                 msg_box.setWindowTitle("Tray Limit Reached")
                 msg_box.setText("You can display a maximum of 5 applications in the system tray.\n\n"
                                 "Please uncheck another application first to display this one.")
                 msg_box.setIcon(QMessageBox.Icon.Warning)
                 ok_btn = msg_box.addButton(QMessageBox.StandardButton.Ok)
-                ok_btn.setStyleSheet(f"background-color: {ACCENT_PURPLE}; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px; border: none;")
+                ok_btn.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 6px; border: none;")
                 
                 checkbox.blockSignals(True)
                 checkbox.setChecked(False)
@@ -827,6 +1066,30 @@ class SettingsWindow(QDialog):
         self.populate_apps_table()
         self.show_restart_banner()
         logging.info(f"Staged app removal: '{app_id}'")
+
+    def remove_selected_apps(self):
+        selected_ranges = self.apps_table.selectedRanges()
+        if not selected_ranges:
+            QMessageBox.information(self, "No Selection", "Please select one or more applications from the table to remove.")
+            return
+            
+        # Identify all row indices to remove
+        rows_to_remove = set()
+        for r in selected_ranges:
+            for row in range(r.topRow(), r.bottomRow() + 1):
+                rows_to_remove.add(row)
+                
+        if not rows_to_remove:
+            return
+            
+        # Map row indices to application IDs
+        ids_to_remove = [self.current_apps[row]["id"] for row in rows_to_remove if row < len(self.current_apps)]
+        
+        # Perform removals
+        self.current_apps = [a for a in self.current_apps if a["id"] not in ids_to_remove]
+        self.populate_apps_table()
+        self.show_restart_banner()
+        logging.info(f"Staged removal of selected apps: {ids_to_remove}")
 
     def populate_logs_table(self):
         from database.audit_log import get_recent_logs
@@ -872,9 +1135,17 @@ class SettingsWindow(QDialog):
 
         for log in filtered_logs:
             ts_str = str(log["timestamp"])
-            parts = ts_str.split(" ")
-            date_part = parts[0]
-            time_part = parts[1] if len(parts) > 1 else ""
+            try:
+                clean_ts = ts_str.split(".")[0].replace("Z", "").split("+")[0]
+                from datetime import timezone
+                utc_dt = datetime.datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                local_dt = utc_dt.astimezone()
+                date_part = local_dt.strftime("%Y-%m-%d")
+                time_part = local_dt.strftime("%H:%M:%S")
+            except Exception:
+                parts = ts_str.split(" ")
+                date_part = parts[0]
+                time_part = parts[1] if len(parts) > 1 else ""
 
             if date_part == today_str:
                 group_key = "Today"
@@ -893,7 +1164,6 @@ class SettingsWindow(QDialog):
             header_item.setFirstColumnSpanned(True)
             header_item.setFlags(header_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             
-            from PySide6.QtGui import QFont
             font = header_item.font(0)
             font.setBold(True)
             header_item.setFont(0, font)
@@ -959,49 +1229,56 @@ class SettingsWindow(QDialog):
             self.show_restart_banner()
             logging.info(f"Staged app protection addition: '{new_app['id']}'")
 
+    def handle_theme_changed(self):
+        new_theme = self.theme_combo.itemData(self.theme_combo.currentIndex())
+        self.config.set("behavior.theme", new_theme)
+        self.apply_theme_dynamically()
+        self.show_restart_banner()
+
     def handle_protection_clicked(self, checked):
-        # Disabling protection requires master password auth
+        # Disabling protection requires auth
         if not checked:
-            logging.info("Request to disable App Deletion Protection. Requiring master password.")
+            logging.info("Request to disable App Deletion Protection. Requiring verification.")
             from ui.auth_dialog import AuthDialog
-            dialog = AuthDialog("Disable Deletion Protection", mode="password", parent=self)
+            from database.embedding_store import load_embeddings
+            try:
+                enrolled = load_embeddings()
+            except Exception:
+                enrolled = {}
+            mode = "face" if enrolled else "password"
+            dialog = AuthDialog("Disable Deletion Protection", mode=mode, parent=self)
             res = dialog.exec()
             if res != QDialog.DialogCode.Accepted:
                 self.protection_check.setChecked(True)
-                QMessageBox.warning(self, "Verification Failed", "Incorrect password. App Deletion Protection remains active.")
+                QMessageBox.warning(self, "Verification Failed", "Authentication failed. App Deletion Protection remains active.")
             else:
                 logging.info("App Deletion Protection successfully disabled.")
 
     def trigger_password_change(self):
-        terminals = ["kitty", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"]
-        term_bin = None
-        for term in terminals:
-            if shutil.which(term):
-                term_bin = term
-                break
-                
-        if not term_bin:
-            QMessageBox.critical(self, "No Terminal Found", 
-                                 "Could not find a terminal emulator (kitty, gnome-terminal, xterm, etc.) to run the password setup CLI.")
-            return
-
-        from locking.launcher_sub import get_facegate_executable
-        facegate_exe = get_facegate_executable()
-        
-        try:
-            if term_bin in ("gnome-terminal", "konsole", "xfce4-terminal"):
-                subprocess.Popen([term_bin, "--", facegate_exe, "--set-master-password"])
-            elif term_bin == "kitty":
-                subprocess.Popen([term_bin, facegate_exe, "--set-master-password"])
-            else:
-                subprocess.Popen([term_bin, "-e", f"{facegate_exe} --set-master-password"])
-            logging.info(f"Spawned password setup in terminal: {term_bin}")
-        except Exception as e:
-            QMessageBox.critical(self, "Terminal Launch Failed", f"Failed to open terminal setup: {e}")
+        dialog = ChangePasswordDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            QMessageBox.information(self, "Success", "Master password updated successfully.")
+        else:
+            logging.info("Password change cancelled or failed.")
 
     # ------------------ Save Settings ------------------
     
     def save_and_close(self):
+        # Prompt for verification before saving changes
+        from database.embedding_store import load_embeddings
+        try:
+            enrolled = load_embeddings()
+        except Exception:
+            enrolled = {}
+            
+        from ui.auth_dialog import AuthDialog
+        mode = "face" if enrolled else "password"
+        dialog = AuthDialog("Save Settings", mode=mode, parent=self)
+        res = dialog.exec()
+        if res != QDialog.DialogCode.Accepted:
+            logging.info("Save settings cancelled due to verification failure.")
+            return
+
         # 1. Update systemd login service configuration
         should_autostart = self.autostart_check.isChecked()
         current_autostart = is_enabled()
@@ -1073,7 +1350,8 @@ class SettingsWindow(QDialog):
         
         # Write config back to file
         if self.config.save():
-            from ui.theme import ACCENT_PURPLE, TEXT_PRIMARY, BORDER_NEUTRAL
+            from ui.theme import get_colors
+            c = get_colors()
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("Settings Saved")
             msg_box.setText("Settings have been saved successfully.\n\n"
@@ -1083,8 +1361,8 @@ class SettingsWindow(QDialog):
             yes_btn = msg_box.addButton(QMessageBox.StandardButton.Yes)
             no_btn = msg_box.addButton(QMessageBox.StandardButton.No)
             
-            yes_btn.setStyleSheet(f"background-color: {ACCENT_PURPLE}; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px; border: none;")
-            no_btn.setStyleSheet(f"background-color: #ede9fe; color: {TEXT_PRIMARY}; border: 1px solid {BORDER_NEUTRAL}; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px;")
+            yes_btn.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 6px; border: none;")
+            no_btn.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 6px;")
             
             msg_box.exec()
             if msg_box.clickedButton() == yes_btn:
@@ -1099,19 +1377,22 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
-        from ui.theme import TEXT_PRIMARY, TEXT_SECONDARY, BORDER_NEUTRAL, CARD_NEUTRAL
         header = QLabel("Intruder Alerts & Captures")
-        header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY};")
+        from ui.theme import style_heading
+        style_heading(header, 20)
+        header.setProperty("heading_size", 20)
+        self._themed_labels.append((header, "TEXT_PRIMARY"))
         layout.addWidget(header)
 
         desc = QLabel("View photos of unauthorized access attempts caught by the camera.")
-        desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px;")
+        desc.setStyleSheet("font-size: 13px;")
+        desc.setProperty("secondary", True)
         layout.addWidget(desc)
 
         # Clear All Button
         self.clear_intruders_btn = QPushButton("Clear All Photos")
         self.clear_intruders_btn.clicked.connect(self.clear_all_intruders)
-        self.clear_intruders_btn.setStyleSheet("background-color: #ef4444; color: white;")
+        self.clear_intruders_btn.setObjectName("clearIntrudersBtn")
         
         btn_layout = QHBoxLayout()
         btn_layout.addWidget(self.clear_intruders_btn)
@@ -1122,10 +1403,8 @@ class SettingsWindow(QDialog):
         from PySide6.QtWidgets import QScrollArea, QGridLayout
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet(f"border: 1px solid {BORDER_NEUTRAL}; border-radius: 8px; background-color: {CARD_NEUTRAL};")
         
         self.gallery_widget = QWidget()
-        self.gallery_widget.setStyleSheet(f"background-color: {CARD_NEUTRAL};")
         self.gallery_layout = QGridLayout(self.gallery_widget)
         self.gallery_layout.setSpacing(16)
         self.gallery_layout.setContentsMargins(16, 16, 16, 16)
@@ -1136,7 +1415,8 @@ class SettingsWindow(QDialog):
         # Empty State
         self.intruders_empty_label = QLabel("🛡️ No intruder attempts detected. Your system is safe!")
         self.intruders_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.intruders_empty_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 15px; font-weight: bold; padding: 60px;")
+        self.intruders_empty_label.setStyleSheet("font-size: 15px; font-weight: bold; padding: 60px;")
+        self.intruders_empty_label.setProperty("secondary", True)
         layout.addWidget(self.intruders_empty_label)
 
         self.tab_stack.addWidget(page)
@@ -1192,18 +1472,18 @@ class SettingsWindow(QDialog):
 
             # Create a card for each capture
             card = QFrame()
-            card.setStyleSheet(f"border: 1px solid #e9e7f1; border-radius: 8px; background-color: #ffffff;")
+            card.setObjectName("intruderCard")
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(8, 8, 8, 8)
             card_layout.setSpacing(6)
 
             # Image label
             img_lbl = QLabel()
+            img_lbl.setObjectName("intruderImg")
             pixmap = QPixmap(filepath)
             if not pixmap.isNull():
                 img_lbl.setPixmap(pixmap.scaled(180, 135, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
                 img_lbl.setFixedSize(180, 135)
-                img_lbl.setStyleSheet("border-radius: 6px; border: 1px solid #e9e7f1;")
             else:
                 img_lbl.setText("Image missing")
                 img_lbl.setFixedSize(180, 135)
@@ -1211,18 +1491,19 @@ class SettingsWindow(QDialog):
 
             # App Name Label
             app_lbl = QLabel(f"<b>Attempted:</b> {app_name}")
-            app_lbl.setStyleSheet("font-size: 12px; color: #1e1b4b; border: none;")
+            app_lbl.setStyleSheet("font-size: 12px;")
             app_lbl.setWordWrap(True)
             card_layout.addWidget(app_lbl)
 
             # Time Label
             time_lbl = QLabel(formatted_time)
-            time_lbl.setStyleSheet("font-size: 11px; color: #5c5770; border: none;")
+            time_lbl.setStyleSheet("font-size: 11px;")
+            time_lbl.setProperty("secondary", True)
             card_layout.addWidget(time_lbl)
 
             # Delete Button
             del_btn = QPushButton("Delete")
-            del_btn.setStyleSheet("background-color: transparent; color: #ef4444; border: 1px solid #ef4444; font-size: 11px; padding: 4px; font-weight: bold;")
+            del_btn.setObjectName("deleteIntruderBtn")
             del_btn.clicked.connect(self.make_delete_intruder_callback(filepath))
             card_layout.addWidget(del_btn)
 
@@ -1243,7 +1524,8 @@ class SettingsWindow(QDialog):
             logging.error(f"Failed to delete intruder file: {e}")
 
     def clear_all_intruders(self):
-        from ui.theme import ACCENT_PURPLE, TEXT_PRIMARY, BORDER_NEUTRAL
+        from ui.theme import get_colors
+        c = get_colors()
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Clear All Photos")
         msg_box.setText("Are you sure you want to delete all caught intruder photos?")
@@ -1252,8 +1534,8 @@ class SettingsWindow(QDialog):
         yes_btn = msg_box.addButton(QMessageBox.StandardButton.Yes)
         no_btn = msg_box.addButton(QMessageBox.StandardButton.No)
         
-        yes_btn.setStyleSheet("background-color: #ef4444; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px; border: none;")
-        no_btn.setStyleSheet(f"background-color: #ede9fe; color: {TEXT_PRIMARY}; border: 1px solid {BORDER_NEUTRAL}; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px;")
+        yes_btn.setStyleSheet("background-color: #ef4444; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 6px; border: none;")
+        no_btn.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 6px;")
         
         msg_box.exec()
         if msg_box.clickedButton() == yes_btn:
@@ -1267,3 +1549,104 @@ class SettingsWindow(QDialog):
                     except Exception:
                         pass
             self.populate_intruder_gallery()
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.WindowStateChange:
+            if self.isMaximized():
+                self.window_layout.setContentsMargins(0, 0, 0, 0)
+                from ui.theme import get_colors
+                c = get_colors()
+                self.main_container.setStyleSheet(f"""
+                    QWidget#mainContainer {{
+                        background-color: {c["BG_NEUTRAL"]};
+                        border: none;
+                        border-radius: 0px;
+                    }}
+                """)
+                if hasattr(self, "shadow") and self.shadow is not None:
+                    self.shadow.setEnabled(False)
+            else:
+                self.window_layout.setContentsMargins(0, 0, 0, 0)
+                from ui.theme import get_colors
+                c = get_colors()
+                self.main_container.setStyleSheet(f"""
+                    QWidget#mainContainer {{
+                        background-color: {c["BG_NEUTRAL"]};
+                        border: 1px solid {c["BORDER_NEUTRAL"]};
+                        border-radius: 12px;
+                    }}
+                """)
+                if hasattr(self, "shadow") and self.shadow is not None:
+                    self.shadow.setEnabled(True)
+        super().changeEvent(event)
+
+    def apply_theme_dynamically(self):
+        from ui.theme import get_theme_qss, get_sidebar_qss, get_colors
+        c = get_colors()
+        self.setStyleSheet(get_theme_qss() + get_sidebar_qss(c))
+        
+        # Sync the sliding theme toggle position
+        if hasattr(self, "title_bar") and self.title_bar:
+            self.title_bar.apply_theme_dynamically()
+            if hasattr(self.title_bar, "theme_toggle"):
+                self.title_bar.theme_toggle.update_toggle_state()
+        
+        # Refresh restart banner colors
+        if hasattr(self, "restart_banner"):
+            _banner_bg = "#2d261e" if c.get("IS_DARK") else "#fffbeb"
+            _banner_text = "#fef3c7" if c.get("IS_DARK") else "#92400e"
+            self.restart_banner.setStyleSheet(f"""
+                QFrame#restartBanner {{
+                    background-color: {_banner_bg};
+                    border: 1px solid #d97706;
+                    border-radius: 6px;
+                }}
+                QLabel {{
+                    color: {_banner_text};
+                    font-size: 13px;
+                    border: none;
+                }}
+                QPushButton {{
+                    background-color: #d97706;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-weight: bold;
+                    font-size: 11px;
+                }}
+                QPushButton:hover {{
+                    background-color: #b45309;
+                }}
+            """)
+            
+        # Apply current state borders
+        if self.isMaximized():
+            self.main_container.setStyleSheet(f"""
+                QWidget#mainContainer {{
+                    background-color: {c["BG_NEUTRAL"]};
+                    border: none;
+                    border-radius: 0px;
+                }}
+            """)
+        else:
+            self.main_container.setStyleSheet(f"""
+                QWidget#mainContainer {{
+                    background-color: {c["BG_NEUTRAL"]};
+                    border: 1px solid {c["BORDER_NEUTRAL"]};
+                    border-radius: 12px;
+                }}
+            """)
+
+        # Refresh dynamic themed labels
+        from ui.theme import style_heading, style_themed_label
+        for label, color_key in self._themed_labels:
+            try:
+                heading_size = label.property("heading_size")
+                extra_css = label.property("extra_css") or ""
+                if heading_size is not None:
+                    style_heading(label, heading_size)
+                else:
+                    style_themed_label(label, color_key, extra_css)
+            except Exception as e:
+                logging.error(f"Error updating themed label color: {e}")

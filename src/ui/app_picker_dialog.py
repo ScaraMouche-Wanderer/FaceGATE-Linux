@@ -1,9 +1,7 @@
-import os
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QLabel
 )
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon
 from utils.desktop_entry_scanner import get_installed_desktop_entries
 
 class AppPickerDialog(QDialog):
@@ -19,7 +17,7 @@ class AppPickerDialog(QDialog):
         self.setFixedSize(450, 500)
         self.setModal(True)
         
-        from ui.theme import get_theme_qss
+        from ui.theme import get_theme_qss, style_heading
         self.setStyleSheet(get_theme_qss())
 
         layout = QVBoxLayout()
@@ -28,7 +26,7 @@ class AppPickerDialog(QDialog):
 
         # Header Info
         header_label = QLabel("Select an installed application to protect:")
-        header_label.setStyleSheet("font-weight: 500; font-size: 14px;")
+        style_heading(header_label, 14)
         layout.addWidget(header_label)
 
         # Search box
@@ -88,4 +86,5 @@ class AppPickerDialog(QDialog):
             self.selected_app = selected_items[0].data(Qt.ItemDataRole.UserRole)
             self.accept()
         else:
-            self.reject()
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "No Selection", "Select an application first.")
