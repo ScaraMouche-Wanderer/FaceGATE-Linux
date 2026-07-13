@@ -45,14 +45,16 @@ def match_face(live_embedding: np.ndarray, enrolled: dict = None) -> tuple:
     # Check for ambiguity if multiple candidates are enrolled
     if len(scores) > 1:
         second_name, second_score = scores[1]
-        margin = top_score - second_score
-        if margin < ambiguity_margin and top_score >= threshold:
-            logging.warning(
-                f"Match rejected due to ambiguity: top candidate '{top_name}' ({top_score:.4f}) "
-                f"is too close to second candidate '{second_name}' ({second_score:.4f}) with margin {margin:.4f} "
-                f"(required margin: {ambiguity_margin})"
-            )
-            return None, top_score
+        # Only verify ambiguity margin if the second candidate is NOT a valid match themselves (below threshold)
+        if second_score < threshold:
+            margin = top_score - second_score
+            if margin < ambiguity_margin and top_score >= threshold:
+                logging.warning(
+                    f"Match rejected due to ambiguity: top candidate '{top_name}' ({top_score:.4f}) "
+                    f"is too close to second candidate '{second_name}' ({second_score:.4f}) with margin {margin:.4f} "
+                    f"(required margin: {ambiguity_margin})"
+                )
+                return None, top_score
             
     if top_score >= threshold:
         logging.info(f"Successful match: '{top_name}' (similarity: {top_score:.4f} >= threshold: {threshold})")
