@@ -143,7 +143,7 @@ class AuthDialog(QDialog):
                 self.resize(400, 290)
                 self.setMinimumSize(360, 265)
         
-        from ui.theme import get_theme_qss, get_colors, CustomTitleBar, TEXT_SECONDARY, DANGER_RED
+        from ui.theme import get_theme_qss, get_colors, CustomTitleBar
         c = get_colors()
         self.setStyleSheet(get_theme_qss() + f"""
             QPushButton#pwdFallbackBtn {{
@@ -205,7 +205,7 @@ class AuthDialog(QDialog):
         face_layout.addWidget(self.header_label_face)
 
         self.status_label = QLabel("Loading face recognition models...")
-        self.status_label.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
+        self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         face_layout.addWidget(self.status_label)
 
@@ -275,7 +275,7 @@ class AuthDialog(QDialog):
                 height: 6px;
             }}
             QProgressBar::chunk {{
-                background-color: {DANGER_RED};
+                background-color: {c["DANGER_RED"]};
                 border-radius: 2px;
             }}
         """)
@@ -440,7 +440,8 @@ class AuthDialog(QDialog):
     @Slot(list, object)
     def handle_detection_result(self, faces, frame):
         import cv2
-        from ui.theme import TEXT_SECONDARY, WARNING_AMBER
+        from ui.theme import get_colors
+        c = get_colors()
         
         # Save camera frame to latest_frame. If a face is found, we always update it.
         # Otherwise, if no frame has been captured yet, save this frame as a fallback.
@@ -517,7 +518,7 @@ class AuthDialog(QDialog):
                     self.accept()
             else:
                 self.status_label.setText("Hold still, verifying liveness…")
-                self.status_label.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
+                self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
         else:
             self.success_count = 0
             self.matched_centroids.clear()
@@ -541,22 +542,23 @@ class AuthDialog(QDialog):
                 
                 if max_score >= (threshold - margin):
                     self.status_label.setText("Almost — try better lighting or move closer")
-                    self.status_label.setStyleSheet(f"color: {WARNING_AMBER}; font-size: 13px; font-weight: bold;")
+                    self.status_label.setStyleSheet(f"color: {c['WARNING_AMBER']}; font-size: 13px; font-weight: bold;")
                     self.close_match_attempts += 1
                     if self.close_match_attempts >= 3:
                         logging.info("Too many close mismatch attempts. Falling back to password.")
                         self.switch_to_password_mode()
                 else:
                     self.status_label.setText("Position your face in the camera view...")
-                    self.status_label.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
+                    self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
 
     @Slot(str)
     def handle_camera_error(self, err_msg: str):
         self.camera_error = True
         self.camera_error_msg = err_msg
         self.cleanup_camera()
-        from ui.theme import DANGER_RED
-        self.status_label.setStyleSheet(f"color: {DANGER_RED}; font-size: 13px; font-weight: bold;")
+        from ui.theme import get_colors
+        c = get_colors()
+        self.status_label.setStyleSheet(f"color: {c['DANGER_RED']}; font-size: 13px; font-weight: bold;")
         self.status_label.setText(f"❌ Camera Error: {err_msg}")
         QTimer.singleShot(1000, self.switch_to_password_mode)
 
@@ -594,13 +596,13 @@ class AuthDialog(QDialog):
             self.password_input.selectAll()
             
             # Temporary error styling
-            from ui.theme import DANGER_RED, get_colors as _get_colors
+            from ui.theme import get_colors as _get_colors
             _c = _get_colors()
             err_bg = "#3b1c1c" if _c.get("IS_DARK") else "#fef2f2"
             self.password_input.setStyleSheet(f"""
                 QLineEdit {{
                     background-color: {err_bg};
-                    border: 1px solid {DANGER_RED};
+                    border: 1px solid {_c['DANGER_RED']};
                     border-radius: 6px;
                     padding: 8px 12px;
                     color: {_c['TEXT_PRIMARY']};

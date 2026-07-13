@@ -1259,6 +1259,10 @@ class SettingsWindow(QDialog):
         new_theme = self.theme_combo.itemData(self.theme_combo.currentIndex())
         self.config.set("behavior.theme", new_theme)
         self.apply_theme_dynamically()
+        self.load_settings()              # rebuilds enrolled_users_list, kdf/cipher/thresh/margin labels
+        self.populate_apps_table()        # rebuilds remove_btn colors
+        self.populate_logs_table()        # rebuilds table item colors
+        self.populate_intruder_gallery()  # rebuilds gallery cards
         self.show_restart_banner()
 
     def verify_settings_action(self, reason: str) -> bool:
