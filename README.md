@@ -56,7 +56,14 @@ To detect launched processes, FaceGate polls the system processes list via `psut
 
 ## Screenshots & Visuals
 
-*Screenshots and UI walk-through recordings will be added for the upcoming public release.*
+| Locked Applications | Enrollment Wizard |
+|---------------------|-------------------|
+| ![](assets/screenshots/locked-apps.png) | ![](assets/screenshots/enrollment-wizard.png) |
+
+| Authentication | Audit Logs |
+|---------------|------------|
+| ![](assets/screenshots/audit-logs.png) | ![](assets/screenshots/tray.png) |
+
 - **Settings Dashboard**: Management of protected applications, liveness settings, and general preferences.
 - **Authentication Dialog**: Smooth 30 FPS camera scanner pane with liveness guidance.
 - **Intruder Alerts Pane**: Local visual gallery storing attempts and captured webcam feeds.
