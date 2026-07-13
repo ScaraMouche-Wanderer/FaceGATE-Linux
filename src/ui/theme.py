@@ -33,9 +33,9 @@ def get_colors() -> dict:
     from utils.config_loader import get_config
     try:
         config = get_config()
-        theme = config.get("behavior.theme", "system")
+        theme = config.get("behavior.theme", "light")
     except Exception:
-        theme = "system"
+        theme = "light"
         
     is_dark = False
     if theme == "dark":
@@ -670,9 +670,9 @@ class SlidingThemeToggle(QWidget):
         from utils.config_loader import get_config
         try:
             config = get_config()
-            self.theme_mode = config.get("behavior.theme", "system")
+            self.theme_mode = config.get("behavior.theme", "light")
         except Exception:
-            self.theme_mode = "system"
+            self.theme_mode = "light"
             
         from ui.theme import is_system_dark_mode
         is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
@@ -693,9 +693,9 @@ class SlidingThemeToggle(QWidget):
         from utils.config_loader import get_config
         try:
             config = get_config()
-            self.theme_mode = config.get("behavior.theme", "system")
+            self.theme_mode = config.get("behavior.theme", "light")
         except Exception:
-            self.theme_mode = "system"
+            self.theme_mode = "light"
             
         from ui.theme import is_system_dark_mode
         is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
