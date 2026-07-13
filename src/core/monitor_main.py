@@ -254,35 +254,30 @@ class FaceGateApplication(QObject):
             stdout_data, _ = proc.communicate()
             success = (proc.returncode == 0)
             
-            score = None
-            matched_user = None
-            returned_key = None
             method = "face"
-            
-            if stdout_data:
+            actual_method = None
+            if success and stdout_data:
+                # Search for key returned and method
                 for line in stdout_data.splitlines():
                     line = line.strip()
-                    if line.startswith("FACEGATE_SCORE:"):
-                        try:
-                            score = float(line.split(":")[1])
-                        except ValueError:
-                            pass
-                    elif line.startswith("FACEGATE_USER:"):
-                        matched_user = line.split(":")[1]
+                    if line.startswith("FACEGATE_METHOD:"):
+                        actual_method = line.split(":")[1]
                     elif len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
                         try:
-                            returned_key = bytes.fromhex(line)
-                        except Exception:
-                            pass
-
-            if success:
-                if returned_key and len(returned_key) == 32:
-                    set_cached_key(returned_key)
-                    logging.info("Successfully cached key returned from recognition subprocess.")
-                    method = "password"
+                            key_bytes = bytes.fromhex(line)
+                            if len(key_bytes) == 32:
+                                set_cached_key(key_bytes)
+                                logging.info("Successfully cached key returned from recognition subprocess.")
+                        except Exception as ex:
+                            logging.error(f"Failed to parse key returned from subprocess: {ex}")
+            
+            if actual_method:
+                method = actual_method
+            else:
+                method = "password" if (success and "key_bytes" in locals() and len(key_bytes) == 32) else "face"
             
             from database.audit_log import log_auth_attempt
-            log_auth_attempt(reason, method, "success" if success else "fail", score, matched_user)
+            log_auth_attempt(reason, method, "success" if success else "fail", None, None)
             
             return success
         except Exception as e:
@@ -387,10 +382,11 @@ class FaceGateApplication(QObject):
             
             logging.info(f"Backstop recognition subprocess exited with code {exit_code}")
             
-            # Parse similarity score and user if present
+            # Parse similarity score, user, and method if present
             score = None
             matched_user = None
             returned_key = None
+            actual_method = None
             if stdout_data:
                 for line in stdout_data.splitlines():
                     line = line.strip()
@@ -401,6 +397,8 @@ class FaceGateApplication(QObject):
                             pass
                     elif line.startswith("FACEGATE_USER:"):
                         matched_user = line.split(":")[1]
+                    elif line.startswith("FACEGATE_METHOD:"):
+                        actual_method = line.split(":")[1]
                     elif len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
                         try:
                             returned_key = bytes.fromhex(line)
@@ -421,7 +419,10 @@ class FaceGateApplication(QObject):
                     from database.embedding_store import set_cached_key
                     set_cached_key(returned_key)
                     logging.info("Successfully cached key returned from backstop recognition subprocess.")
-                    method = "password"
+                if actual_method:
+                    method = actual_method
+                else:
+                    method = "password" if (returned_key and len(returned_key) == 32) else "face"
             elif exit_code == 2:
                 result = "timeout"
             else:
@@ -713,7 +714,8 @@ def main():
             else:
                 # Fallback to local AuthDialog
                 logging.info("FaceGate daemon is not active on D-Bus. Running local verification.")
-                mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
+                from database.embedding_store import get_cached_key
+                mode = "face" if (os.path.exists(EMBEDDING_FILE) and get_cached_key() is not None) else "password"
                 timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
                 dialog = AuthDialog("Settings Access", mode=mode, timeout_seconds=timeout_sec)
                 result = dialog.exec()
@@ -750,14 +752,17 @@ def main():
                 
         timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
         
-        # Run dialog in face mode if database exists, otherwise password
-        from database.embedding_store import EMBEDDING_FILE
-        mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
+        # Run dialog in password mode directly if database key is not cached (locked state)
+        from database.embedding_store import get_cached_key, EMBEDDING_FILE
+        has_key = get_cached_key() is not None
+        mode = "face" if (os.path.exists(EMBEDDING_FILE) and has_key) else "password"
         
         dialog = AuthDialog(app_name, mode=mode, timeout_seconds=timeout_sec)
         result = dialog.exec()
         
         if result == QDialog.DialogCode.Accepted:
+            actual_method = "password" if (dialog.fallback_to_password or mode == "password") else "face"
+            print(f"FACEGATE_METHOD:{actual_method}")
             if hasattr(dialog, "final_score") and dialog.final_score is not None:
                 print(f"FACEGATE_SCORE:{dialog.final_score}")
             if hasattr(dialog, "matched_user") and dialog.matched_user is not None:
