@@ -18,6 +18,16 @@ FaceGate-Linux is a secure, user-level application locker daemon and tray interf
 
 ---
 
+## System Architecture
+
+<p align="center">
+  <img src="assets/facegate_architecture.svg"
+       alt="FaceGate Architecture"
+       width="900">
+</p>
+
+---
+
 ## Security Model & Limitations
 
 FaceGate-Linux is designed to raise the bar against casual, opportunistic, or physical-presence bypass attempts on shared or unlocked desktop environments. However, users should understand its security model and inherent boundaries:
