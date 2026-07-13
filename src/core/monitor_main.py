@@ -256,12 +256,21 @@ class FaceGateApplication(QObject):
             
             method = "face"
             actual_method = None
+            score = None
+            matched_user = None
             if success and stdout_data:
-                # Search for key returned and method
+                # Search for key returned, method, score, and user
                 for line in stdout_data.splitlines():
                     line = line.strip()
                     if line.startswith("FACEGATE_METHOD:"):
                         actual_method = line.split(":")[1]
+                    elif line.startswith("FACEGATE_SCORE:"):
+                        try:
+                            score = float(line.split(":")[1])
+                        except ValueError:
+                            pass
+                    elif line.startswith("FACEGATE_USER:"):
+                        matched_user = line.split(":")[1]
                     elif len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
                         try:
                             key_bytes = bytes.fromhex(line)
@@ -277,7 +286,7 @@ class FaceGateApplication(QObject):
                 method = "password" if (success and "key_bytes" in locals() and len(key_bytes) == 32) else "face"
             
             from database.audit_log import log_auth_attempt
-            log_auth_attempt(reason, method, "success" if success else "fail", None, None)
+            log_auth_attempt(reason, method, "success" if success else "fail", score, matched_user if success else None)
             
             return success
         except Exception as e:
