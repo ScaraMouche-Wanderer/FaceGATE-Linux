@@ -93,7 +93,7 @@ class AppMonitor:
                 self._update_cache_if_needed(protected_apps)
 
                 # Scan running processes
-                for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
                     try:
                         pid = proc.info['pid']
                         
@@ -110,6 +110,18 @@ class AppMonitor:
                             continue
                             
                         if not proc.is_running():
+                            continue
+
+                        # Skip background services like --gapplication-service or background daemon mode
+                        cmdline = proc.info.get('cmdline') or []
+                        is_background_service = False
+                        for arg in cmdline:
+                            if "--gapplication-service" in arg or "--background" in arg:
+                                is_background_service = True
+                                break
+                                
+                        if is_background_service:
+                            self._not_suspicious_pids.add(pid)
                             continue
 
                         name = proc.info['name']

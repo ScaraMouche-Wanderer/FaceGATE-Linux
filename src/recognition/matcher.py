@@ -41,7 +41,7 @@ def match_face(live_embedding: np.ndarray, enrolled: dict = None) -> tuple:
     
     top_name, top_score = scores[0]
     logging.info(f"Top match candidate: '{top_name}' with similarity: {top_score:.4f}")
-    
+
     # Check for ambiguity if multiple candidates are enrolled
     if len(scores) > 1:
         second_name, second_score = scores[1]
