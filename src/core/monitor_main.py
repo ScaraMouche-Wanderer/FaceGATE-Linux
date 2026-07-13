@@ -174,7 +174,7 @@ class FaceGateApplication(QObject):
         Authenticates using face recognition.
         If there are no enrolled faces (first setup), returns True immediately.
         """
-        from database.embedding_store import load_embeddings, EMBEDDING_FILE, get_cached_key
+        from database.embedding_store import load_embeddings, EMBEDDING_FILE, get_cached_key, set_cached_key
         import os
         try:
             enrolled = load_embeddings()
@@ -185,19 +185,78 @@ class FaceGateApplication(QObject):
             logging.info("Admin verification: No enrolled faces found and no database exists. Bypassing check.")
             return True
             
-        from ui.auth_dialog import AuthDialog
-        timeout_sec = self.config.get("app_monitor.auth_timeout_seconds", 60)
-        mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
-        dialog = AuthDialog(reason, mode=mode, timeout_seconds=timeout_sec)
-        result = dialog.exec()
+        cached_key = get_cached_key()
+        if cached_key is None:
+            # Fallback to local AuthDialog directly inside the daemon if locked
+            from ui.auth_dialog import AuthDialog
+            from PySide6.QtWidgets import QDialog
+            timeout_sec = self.config.get("app_monitor.auth_timeout_seconds", 60)
+            mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
+            dialog = AuthDialog(reason, mode=mode, timeout_seconds=timeout_sec)
+            result = dialog.exec()
+            success = (result == QDialog.DialogCode.Accepted)
+            
+            from database.audit_log import log_auth_attempt
+            method_used = "face" if (mode == "face" and not dialog.fallback_to_password) else "password"
+            log_auth_attempt(reason, method_used, "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
+            return success
+
+        # Spawn the subprocess so GUI runs outside the systemd daemon sandbox when unlocked
+        from locking.launcher_sub import get_facegate_executable
+        facegate_bin = get_facegate_executable()
         
-        success = (result == QDialog.DialogCode.Accepted)
+        import subprocess
+        from PySide6.QtWidgets import QApplication
+        import time
         
-        from database.audit_log import log_auth_attempt
-        method_used = "face" if (mode == "face" and not dialog.fallback_to_password) else "password"
-        log_auth_attempt(reason, method_used, "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
+        cmd = [facegate_bin, "--recognize", reason]
+        pass_fds = []
         
-        return success
+        r, w = os.pipe()
+        os.set_inheritable(r, True)
+        cmd.extend(["--key-fd", str(r)])
+        pass_fds.append(r)
+            
+        logging.info(f"Spawning recognition subprocess: {facegate_bin} --recognize {reason}")
+        
+        try:
+            proc = subprocess.Popen(cmd, pass_fds=pass_fds, stdout=subprocess.PIPE, text=True, close_fds=True)
+            os.close(r)
+            try:
+                os.write(w, cached_key)
+            finally:
+                os.close(w)
+            
+            # Wait for subprocess while keeping event loop alive
+            while proc.poll() is None:
+                QApplication.processEvents()
+                time.sleep(0.05)
+                
+            stdout_data, _ = proc.communicate()
+            success = (proc.returncode == 0)
+            
+            method = "face"
+            if success and stdout_data:
+                # Search for key returned
+                for line in stdout_data.splitlines():
+                    line = line.strip()
+                    if len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
+                        try:
+                            key_bytes = bytes.fromhex(line)
+                            if len(key_bytes) == 32:
+                                set_cached_key(key_bytes)
+                                logging.info("Successfully cached key returned from recognition subprocess.")
+                                method = "password"
+                        except Exception as ex:
+                            logging.error(f"Failed to parse key returned from subprocess: {ex}")
+            
+            from database.audit_log import log_auth_attempt
+            log_auth_attempt(reason, method, "success" if success else "fail", None, None)
+            
+            return success
+        except Exception as e:
+            logging.error(f"Failed to spawn recognition subprocess: {e}")
+            return False
 
     def disable_for(self, minutes: int):
         if not self.verify_admin_face("Disable FaceGate"):
@@ -724,6 +783,10 @@ def main():
                 print(f"FACEGATE_SCORE:{dialog.final_score}")
             if hasattr(dialog, "matched_user") and dialog.matched_user is not None:
                 print(f"FACEGATE_USER:{dialog.matched_user}")
+            from database.embedding_store import get_cached_key
+            k = get_cached_key()
+            if k:
+                print(k.hex())
             sys.stdout.flush()
             sys.exit(0)
         else:

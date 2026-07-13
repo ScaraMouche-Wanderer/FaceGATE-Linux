@@ -20,118 +20,74 @@ class FaceGateService(QObject):
 
         import subprocess
         import os
-        from database.embedding_store import get_cached_key
+        from database.embedding_store import get_cached_key, set_cached_key
         from locking.launcher_sub import get_facegate_executable
+        from PySide6.QtWidgets import QApplication
+        import time
         
         cached_key = get_cached_key()
-        if not cached_key:
-            from database.embedding_store import EMBEDDING_FILE
-            mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
-            logging.info(f"Daemon is locked. Spawning {mode} auth dialog directly in daemon.")
-            app_name = self.main_app.get_app_name(app_identifier) if self.main_app else app_identifier
-            dialog = AuthDialog(app_name, mode=mode)
-            res = dialog.exec()
-            success = (res == AuthDialog.DialogCode.Accepted)
-            
-            from database.audit_log import log_auth_attempt
-            method_used = "face" if not dialog.fallback_to_password else "password"
-            log_auth_attempt(app_identifier, method_used, "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
-            
-            if success and self.main_app:
-                self.main_app.authorize_app(app_identifier)
-            return success
-
-        # Daemon is unlocked. Run face recognition!
         facegate_bin = get_facegate_executable()
-        logging.info(f"Spawning recognition subprocess: {facegate_bin} --recognize {app_identifier}")
         
         cmd = [facegate_bin, "--recognize", app_identifier]
         pass_fds = []
-        r, w = os.pipe()
-        os.set_inheritable(r, True)
-        cmd.extend(["--key-fd", str(r)])
-        pass_fds.append(r)
+        w = None
+        
+        if cached_key is not None:
+            r, w = os.pipe()
+            os.set_inheritable(r, True)
+            cmd.extend(["--key-fd", str(r)])
+            pass_fds.append(r)
             
+        logging.info(f"Spawning recognition subprocess: {facegate_bin} --recognize {app_identifier}")
+        
         try:
             proc = subprocess.Popen(cmd, pass_fds=pass_fds, stdout=subprocess.PIPE, text=True, close_fds=True)
-            os.close(r)
-            try:
-                os.write(w, cached_key)
-            finally:
-                os.close(w)
-
-            # Wait for subprocess to finish while keeping event loop alive
-            from PySide6.QtWidgets import QApplication
-            import time
+            if cached_key is not None:
+                os.close(r)
+                try:
+                    os.write(w, cached_key)
+                finally:
+                    os.close(w)
+            
+            # Wait for subprocess while keeping event loop alive
             while proc.poll() is None:
                 QApplication.processEvents()
                 time.sleep(0.05)
-
+                
             stdout_data, _ = proc.communicate()
             exit_code = proc.returncode
             logging.info(f"Recognition subprocess exited with code {exit_code}")
             
-            # Parse similarity score and user if present
-            score = None
-            matched_user = None
-            if stdout_data:
-                for line in stdout_data.splitlines():
-                    if line.startswith("FACEGATE_SCORE:"):
-                        try:
-                            score = float(line.split(":")[1])
-                        except ValueError:
-                            pass
-                    elif line.startswith("FACEGATE_USER:"):
-                        matched_user = line.split(":")[1]
-
-            success = False
+            success = (exit_code == 0)
             method = "face"
-            result = "fail"
-            confidence = score
             username = None
-
-            if exit_code == 0:
-                success = True
-                result = "success"
-                username = matched_user
-            elif exit_code == 2:
-                result = "timeout"
-            elif exit_code in (3, 4, 10, 11, 12):
-                # Fallback to password dialog in daemon process
-                logging.info(f"Subprocess returned {exit_code}. Displaying password fallback dialog in daemon.")
-                app_name = self.main_app.get_app_name(app_identifier) if self.main_app else app_identifier
-                dialog = AuthDialog(app_name, mode="password")
-                res = dialog.exec()
-                success = (res == AuthDialog.DialogCode.Accepted)
-                method = "password"
-                result = "success" if success else "fail"
-                confidence = None
-                username = getattr(dialog, "matched_user", None) if success else None
-            else:
-                result = "fail"
-
+            
+            if success:
+                # If subprocess returned a key (hex string on stdout), cache it in daemon!
+                if stdout_data:
+                    for line in stdout_data.splitlines():
+                        line = line.strip()
+                        if len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
+                            try:
+                                key_bytes = bytes.fromhex(line)
+                                if len(key_bytes) == 32:
+                                    set_cached_key(key_bytes)
+                                    logging.info("Successfully cached key returned from recognition subprocess.")
+                                    method = "password"
+                            except Exception as ex:
+                                logging.error(f"Failed to parse key returned from subprocess: {ex}")
+            
             # Write to SQLite audit log
             from database.audit_log import log_auth_attempt
-            log_auth_attempt(app_identifier, method, result, confidence, username)
-                
+            log_auth_attempt(app_identifier, method, "success" if success else "fail", None, username)
+            
             if success and self.main_app:
                 self.main_app.authorize_app(app_identifier)
                 
             return success
         except Exception as e:
-            logging.error(f"Failed to spawn recognition subprocess: {e}. Falling back to password dialog.")
-            app_name = self.main_app.get_app_name(app_identifier) if self.main_app else app_identifier
-            dialog = AuthDialog(app_name, mode="password")
-            res = dialog.exec()
-            success = (res == AuthDialog.DialogCode.Accepted)
-            
-            # Log fallback outcome
-            from database.audit_log import log_auth_attempt
-            log_auth_attempt(app_identifier, "password", "success" if success else "fail", None, getattr(dialog, "matched_user", None) if success else None)
-            
-            if success and self.main_app:
-                self.main_app.authorize_app(app_identifier)
-            return success
+            logging.error(f"Failed to spawn recognition subprocess: {e}")
+            return False
 
     def emergency_kill_internal(self):
         """
@@ -140,30 +96,23 @@ class FaceGateService(QObject):
         """
         logging.warning("Emergency kill command received via D-Bus. Requiring authentication.")
 
-        # Require authentication before honoring the kill
-        from ui.auth_dialog import AuthDialog
-        from database.embedding_store import EMBEDDING_FILE
-        import os
-        mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
-        dialog = AuthDialog("Emergency Shutdown", mode=mode)
-        res = dialog.exec()
-        if res != AuthDialog.DialogCode.Accepted:
-            logging.warning("Emergency kill DENIED: verification failed.")
+        if self.main_app:
+            success = self.main_app.verify_admin_face("Emergency Shutdown")
+            if not success:
+                logging.warning("Emergency kill DENIED: verification failed.")
+                try:
+                    from database.audit_log import log_auth_attempt
+                    log_auth_attempt("facegate-daemon", "emergency_hotkey", "fail", None)
+                except Exception:
+                    pass
+                return
+
             try:
                 from database.audit_log import log_auth_attempt
-                log_auth_attempt("facegate-daemon", "emergency_hotkey", "fail", None)
-            except Exception:
-                pass
-            return
+                log_auth_attempt("facegate-daemon", "emergency_hotkey", "bypass", None)
+            except Exception as e:
+                logging.error(f"Failed to log emergency kill to audit trail: {e}")
 
-        try:
-            from database.audit_log import log_auth_attempt
-            log_auth_attempt("facegate-daemon", "emergency_hotkey", "bypass", None,
-                             getattr(dialog, "matched_user", None))
-        except Exception as e:
-            logging.error(f"Failed to log emergency kill to audit trail: {e}")
-
-        if self.main_app:
             self.main_app.quit_app(bypass_protection=True)
 
     def relock_all_internal(self):
