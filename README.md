@@ -21,7 +21,7 @@ FaceGate-Linux is a secure, user-level application locker daemon and tray interf
 ## System Architecture
 
 <p align="center">
-  <img src="assets/facegate_architecture.svg"
+  <img src="assets/architecture.svg"
        alt="FaceGate Architecture"
        width="900">
 </p>
