@@ -104,7 +104,13 @@ class AuthDialog(QDialog):
         self.detector = None
         self.camera_worker = None
         
+        from utils.config_loader import get_config
+        self.grace_period_ms = int(get_config().get("authentication.password_fallback_grace_seconds", 15)) * 1000
+        
         self.init_ui()
+        
+        # Show fallback button only after grace period
+        QTimer.singleShot(self.grace_period_ms, lambda: self.pwd_fallback_btn.setVisible(True))
 
     def init_ui(self):
         self.setWindowTitle("FaceGate Authentication")
@@ -214,7 +220,7 @@ class AuthDialog(QDialog):
         self.pwd_fallback_btn = QPushButton("Use Password Instead")
         self.pwd_fallback_btn.setObjectName("pwdFallbackBtn")
         self.pwd_fallback_btn.clicked.connect(self.switch_to_password_mode)
-        self.pwd_fallback_btn.setVisible(True)
+        self.pwd_fallback_btn.setVisible(False)
         face_layout.addWidget(self.pwd_fallback_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Cancel Button

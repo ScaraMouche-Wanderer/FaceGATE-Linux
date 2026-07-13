@@ -7,6 +7,8 @@ app_monitor:
   auth_timeout_seconds: 60
 protected_apps: []
 auth: {}
+authentication:
+  password_fallback_grace_seconds: 15
 recognition:
   similarity_threshold: 0.65
   ambiguity_margin: 0.03
