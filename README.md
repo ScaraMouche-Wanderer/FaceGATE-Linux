@@ -2,6 +2,10 @@
 
 FaceGate-Linux is a secure, user-level application locker daemon and tray interface for Linux desktop environments. Designed to prevent unauthorized access to sensitive application windows (such as web browsers, terminal consoles, or system settings), FaceGate intercepts target launches and gates them behind fast, local biometric face recognition (powered by InsightFace) and liveness checking, with a secure password fallback.
 
+<p align="center">
+  <img src="assets/demo.gif" width="900" alt="FaceGate Demo">
+</p>
+
 ---
 
 ## Features
