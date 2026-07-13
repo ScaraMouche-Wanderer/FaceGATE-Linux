@@ -174,7 +174,7 @@ class FaceGateApplication(QObject):
         Authenticates using face recognition.
         If there are no enrolled faces (first setup), returns True immediately.
         """
-        from database.embedding_store import load_embeddings, EMBEDDING_FILE
+        from database.embedding_store import load_embeddings, EMBEDDING_FILE, get_cached_key
         import os
         try:
             enrolled = load_embeddings()
@@ -678,7 +678,7 @@ def main():
             else:
                 # Fallback to local AuthDialog
                 logging.info("FaceGate daemon is not active on D-Bus. Running local verification.")
-                mode = "face" if (has_enrolled or os.path.exists(EMBEDDING_FILE)) else "password"
+                mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
                 timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
                 dialog = AuthDialog("Settings Access", mode=mode, timeout_seconds=timeout_sec)
                 result = dialog.exec()

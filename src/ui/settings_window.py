@@ -962,14 +962,40 @@ class SettingsWindow(QDialog):
         self.lock_settings_check.setChecked(self.config.get("security.lock_settings_window", True))
 
         # 6. Load enrolled users list dynamically
-        from database.embedding_store import load_embeddings
+        usernames = []
         try:
-            enrolled = load_embeddings()
-            usernames = list(enrolled.keys())
-        except Exception:
-            usernames = []
+            from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected():
+                interface = QDBusInterface(
+                    "org.facegate.FaceGate",
+                    "/org/facegate/FaceGate",
+                    "org.facegate.FaceGate",
+                    bus
+                )
+                if interface.isValid():
+                    raw_reply = interface.call("GetEnrolledUsers")
+                    reply = QDBusReply(raw_reply)
+                    if reply.isValid():
+                        users_str = reply.value()
+                        if users_str:
+                            usernames = [u for u in users_str.split(",") if u]
+        except Exception as e:
+            logging.error(f"Failed to load enrolled users list via D-Bus: {e}")
+
+        if not usernames:
+            from database.embedding_store import load_embeddings
+            try:
+                enrolled = load_embeddings()
+                usernames = list(enrolled.keys())
+            except Exception:
+                usernames = []
+
         if usernames:
             self.enrolled_users_list.setText(", ".join(usernames))
+            from ui.theme import get_colors
+            c = get_colors()
+            self.enrolled_users_list.setStyleSheet(f"color: {c['ACCENT_PURPLE']}; font-size: 14px; font-weight: bold; border: none;")
         else:
             self.enrolled_users_list.setText("No enrolled faces (setup required)")
             self.enrolled_users_list.setStyleSheet("color: #ef4444; font-size: 13px; font-style: italic; border: none;")
@@ -1235,20 +1261,43 @@ class SettingsWindow(QDialog):
         self.apply_theme_dynamically()
         self.show_restart_banner()
 
+    def verify_settings_action(self, reason: str) -> bool:
+        # Try D-Bus verification first to leverage daemon's cached key and face recognition
+        try:
+            from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected():
+                interface = QDBusInterface(
+                    "org.facegate.FaceGate",
+                    "/org/facegate/FaceGate",
+                    "org.facegate.FaceGate",
+                    bus
+                )
+                if interface.isValid():
+                    raw_reply = interface.call("RequestAuth", reason)
+                    reply = QDBusReply(raw_reply)
+                    if reply.isValid():
+                        return reply.value()
+        except Exception as e:
+            logging.error(f"Failed to verify settings action '{reason}' via D-Bus: {e}")
+            
+        # Fallback to local AuthDialog
+        from database.embedding_store import load_embeddings
+        try:
+            enrolled = load_embeddings()
+        except Exception:
+            enrolled = {}
+        from ui.auth_dialog import AuthDialog
+        mode = "face" if enrolled else "password"
+        dialog = AuthDialog(reason, mode=mode, parent=self)
+        res = dialog.exec()
+        return res == QDialog.DialogCode.Accepted
+
     def handle_protection_clicked(self, checked):
         # Disabling protection requires auth
         if not checked:
             logging.info("Request to disable App Deletion Protection. Requiring verification.")
-            from ui.auth_dialog import AuthDialog
-            from database.embedding_store import load_embeddings
-            try:
-                enrolled = load_embeddings()
-            except Exception:
-                enrolled = {}
-            mode = "face" if enrolled else "password"
-            dialog = AuthDialog("Disable Deletion Protection", mode=mode, parent=self)
-            res = dialog.exec()
-            if res != QDialog.DialogCode.Accepted:
+            if not self.verify_settings_action("Disable Deletion Protection"):
                 self.protection_check.setChecked(True)
                 QMessageBox.warning(self, "Verification Failed", "Authentication failed. App Deletion Protection remains active.")
             else:
@@ -1265,17 +1314,7 @@ class SettingsWindow(QDialog):
     
     def save_and_close(self):
         # Prompt for verification before saving changes
-        from database.embedding_store import load_embeddings
-        try:
-            enrolled = load_embeddings()
-        except Exception:
-            enrolled = {}
-            
-        from ui.auth_dialog import AuthDialog
-        mode = "face" if enrolled else "password"
-        dialog = AuthDialog("Save Settings", mode=mode, parent=self)
-        res = dialog.exec()
-        if res != QDialog.DialogCode.Accepted:
+        if not self.verify_settings_action("Save Settings"):
             logging.info("Save settings cancelled due to verification failure.")
             return
 

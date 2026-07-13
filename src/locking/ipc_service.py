@@ -171,6 +171,14 @@ class FaceGateService(QObject):
         if self.main_app:
             self.main_app.relock_all()
 
+    def get_enrolled_users_internal(self) -> str:
+        from database.embedding_store import load_embeddings
+        try:
+            enrolled = load_embeddings()
+            return ",".join(enrolled.keys())
+        except Exception:
+            return ""
+
 @ClassInfo({"D-Bus Interface": "org.facegate.FaceGate"})
 class FaceGateAdaptor(QDBusAbstractAdaptor):
     def __init__(self, parent: FaceGateService):
@@ -180,6 +188,10 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
     @Slot(str, result=bool)
     def RequestAuth(self, app_identifier: str) -> bool:
         return self.service.request_auth_internal(app_identifier)
+
+    @Slot(result=str)
+    def GetEnrolledUsers(self) -> str:
+        return self.service.get_enrolled_users_internal()
 
     @Slot()
     def EmergencyKill(self):
