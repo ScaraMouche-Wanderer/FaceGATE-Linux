@@ -59,36 +59,27 @@ class FaceGateService(QObject):
             logging.info(f"Recognition subprocess exited with code {exit_code}")
             
             success = (exit_code == 0)
-            score = None
-            matched_user = None
-            returned_key = None
             method = "face"
+            username = None
             
-            if stdout_data:
-                for line in stdout_data.splitlines():
-                    line = line.strip()
-                    if line.startswith("FACEGATE_SCORE:"):
-                        try:
-                            score = float(line.split(":")[1])
-                        except ValueError:
-                            pass
-                    elif line.startswith("FACEGATE_USER:"):
-                        matched_user = line.split(":")[1]
-                    elif len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
-                        try:
-                            returned_key = bytes.fromhex(line)
-                        except Exception:
-                            pass
-
             if success:
-                if returned_key and len(returned_key) == 32:
-                    set_cached_key(returned_key)
-                    logging.info("Successfully cached key returned from recognition subprocess.")
-                    method = "password"
+                # If subprocess returned a key (hex string on stdout), cache it in daemon!
+                if stdout_data:
+                    for line in stdout_data.splitlines():
+                        line = line.strip()
+                        if len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
+                            try:
+                                key_bytes = bytes.fromhex(line)
+                                if len(key_bytes) == 32:
+                                    set_cached_key(key_bytes)
+                                    logging.info("Successfully cached key returned from recognition subprocess.")
+                                    method = "password"
+                            except Exception as ex:
+                                logging.error(f"Failed to parse key returned from subprocess: {ex}")
             
             # Write to SQLite audit log
             from database.audit_log import log_auth_attempt
-            log_auth_attempt(app_identifier, method, "success" if success else "fail", score, matched_user)
+            log_auth_attempt(app_identifier, method, "success" if success else "fail", None, username)
             
             if success and self.main_app:
                 self.main_app.authorize_app(app_identifier)

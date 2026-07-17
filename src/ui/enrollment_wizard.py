@@ -16,6 +16,7 @@ from ui.auth_dialog import convert_cv_to_pixmap
 class EnrollmentWizard(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.theme_mode = "light"
         self.detector = None
         self.camera_worker = None
         
@@ -49,8 +50,8 @@ class EnrollmentWizard(QDialog):
 
         # Apply global theme stylesheet
         from ui.theme import get_theme_qss, get_colors, CustomTitleBar
-        c = get_colors()
-        self.setStyleSheet(get_theme_qss())
+        c = get_colors(self.theme_mode)
+        self.setStyleSheet(get_theme_qss(self.theme_mode))
         
         self.setWindowFlags(Qt.WindowType.Dialog)
         
@@ -456,8 +457,8 @@ class EnrollmentWizard(QDialog):
 
     def apply_theme_dynamically(self):
         from ui.theme import get_theme_qss, get_colors
-        c = get_colors()
-        self.setStyleSheet(get_theme_qss() + f"""
+        c = get_colors(self.theme_mode)
+        self.setStyleSheet(get_theme_qss(self.theme_mode) + f"""
             QLabel#wizardHeader {{
                 font-size: 20px;
                 font-weight: bold;

@@ -88,6 +88,7 @@ class AuthDialog(QDialog):
         self.mode = mode
         self.timeout_seconds = timeout_seconds
         
+        self.theme_mode = "light"
         self.authenticated = False
         self.fallback_to_password = False
         self.camera_error = False
@@ -109,8 +110,12 @@ class AuthDialog(QDialog):
         
         self.init_ui()
         
-        # Show fallback button only after grace period
-        QTimer.singleShot(self.grace_period_ms, lambda: self.pwd_fallback_btn.setVisible(True))
+        # Show fallback button only after grace period, or immediately if key is not cached
+        from database.embedding_store import get_cached_key
+        if get_cached_key() is None:
+            self.pwd_fallback_btn.setVisible(True)
+        else:
+            QTimer.singleShot(self.grace_period_ms, lambda: self.pwd_fallback_btn.setVisible(True))
 
     def init_ui(self):
         self.setWindowTitle("FaceGate Authentication")
@@ -144,8 +149,8 @@ class AuthDialog(QDialog):
                 self.setMinimumSize(360, 265)
         
         from ui.theme import get_theme_qss, get_colors, CustomTitleBar
-        c = get_colors()
-        self.setStyleSheet(get_theme_qss() + f"""
+        c = get_colors(self.theme_mode)
+        self.setStyleSheet(get_theme_qss(self.theme_mode) + f"""
             QPushButton#pwdFallbackBtn {{
                 background-color: transparent;
                 color: {c["ACCENT_PURPLE"]};
@@ -331,8 +336,8 @@ class AuthDialog(QDialog):
 
     def apply_theme_dynamically(self):
         from ui.theme import get_theme_qss, get_colors
-        c = get_colors()
-        self.setStyleSheet(get_theme_qss() + f"""
+        c = get_colors(self.theme_mode)
+        self.setStyleSheet(get_theme_qss(self.theme_mode) + f"""
             QLabel#headerLabel {{
                 font-size: 16px;
                 font-weight: 500;

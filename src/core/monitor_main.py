@@ -723,8 +723,7 @@ def main():
             else:
                 # Fallback to local AuthDialog
                 logging.info("FaceGate daemon is not active on D-Bus. Running local verification.")
-                from database.embedding_store import get_cached_key
-                mode = "face" if (os.path.exists(EMBEDDING_FILE) and get_cached_key() is not None) else "password"
+                mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
                 timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
                 dialog = AuthDialog("Settings Access", mode=mode, timeout_seconds=timeout_sec)
                 result = dialog.exec()
@@ -761,10 +760,9 @@ def main():
                 
         timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
         
-        # Run dialog in password mode directly if database key is not cached (locked state)
-        from database.embedding_store import get_cached_key, EMBEDDING_FILE
-        has_key = get_cached_key() is not None
-        mode = "face" if (os.path.exists(EMBEDDING_FILE) and has_key) else "password"
+        # Run dialog in face mode if database exists, falling back to password inside dialog if key is not cached
+        from database.embedding_store import EMBEDDING_FILE
+        mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
         
         dialog = AuthDialog(app_name, mode=mode, timeout_seconds=timeout_sec)
         result = dialog.exec()

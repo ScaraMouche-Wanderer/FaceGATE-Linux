@@ -952,7 +952,7 @@ class SettingsWindow(QDialog):
         self.delay_spin.setValue(self.config.get("behavior.startup_delay_seconds", 0))
         
         self.theme_combo.blockSignals(True)
-        theme_val = self.config.get("behavior.theme", "light")
+        theme_val = self.config.get("behavior.theme", "system")
         theme_idx = self.theme_combo.findData(theme_val)
         if theme_idx >= 0:
             self.theme_combo.setCurrentIndex(theme_idx)

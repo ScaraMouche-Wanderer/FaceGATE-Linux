@@ -29,13 +29,15 @@ def is_system_dark_mode() -> bool:
         pass
     return False
 
-def get_colors() -> dict:
-    from utils.config_loader import get_config
-    try:
-        config = get_config()
-        theme = config.get("behavior.theme", "light")
-    except Exception:
-        theme = "light"
+def get_colors(theme_override: str = None) -> dict:
+    theme = theme_override
+    if not theme:
+        from utils.config_loader import get_config
+        try:
+            config = get_config()
+            theme = config.get("behavior.theme", "system")
+        except Exception:
+            theme = "system"
         
     is_dark = False
     if theme == "dark":
@@ -86,9 +88,9 @@ def get_colors() -> dict:
             "WARNING_AMBER": "#fbbf24"
         }
 
-def refresh_theme_colors():
+def refresh_theme_colors(theme_override: str = None):
     global BG_NEUTRAL, CARD_NEUTRAL, BORDER_NEUTRAL, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT_PURPLE, ACCENT_PURPLE_HOVER, ACCENT_PURPLE_PRESSED
-    c = get_colors()
+    c = get_colors(theme_override)
     BG_NEUTRAL = c["BG_NEUTRAL"]
     CARD_NEUTRAL = c["CARD_NEUTRAL"]
     BORDER_NEUTRAL = c["BORDER_NEUTRAL"]
@@ -144,9 +146,9 @@ def get_sidebar_qss(c: dict) -> str:
         }}
     """
 
-def get_theme_qss() -> str:
-    refresh_theme_colors()
-    c = get_colors()
+def get_theme_qss(theme_override: str = None) -> str:
+    refresh_theme_colors(theme_override)
+    c = get_colors(theme_override)
     
     return f"""
         QDialog, QMainWindow {{
@@ -591,7 +593,8 @@ class CustomTitleBar(QWidget):
         
     def apply_theme_dynamically(self):
         from ui.theme import get_colors, FONT_FAMILY
-        c = get_colors()
+        theme_mode = getattr(self.parent, "theme_mode", None)
+        c = get_colors(theme_mode)
         self.title_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {c['TEXT_PRIMARY']}; font-family: {FONT_FAMILY};")
         
         disabled_bg = "#2c2a38" if c.get("IS_DARK") else "#e2e8f0"
@@ -613,35 +616,39 @@ class CustomTitleBar(QWidget):
             """)
 
     def on_theme_toggled(self, new_theme):
-        from utils.config_loader import get_config
-        config = get_config()
-        config.set("behavior.theme", new_theme)
-        config.save()
-        
-        # Apply theme dynamically to the parent window
-        if hasattr(self.parent, "apply_theme_dynamically"):
+        if hasattr(self.parent, "theme_mode"):
+            self.parent.theme_mode = new_theme
             self.parent.apply_theme_dynamically()
-            # If parent is Settings window and has theme_combo, sync it
-            if hasattr(self.parent, "theme_combo") and self.parent.theme_combo is not None:
-                self.parent.theme_combo.blockSignals(True)
-                idx = self.parent.theme_combo.findData(new_theme)
-                if idx >= 0:
-                    self.parent.theme_combo.setCurrentIndex(idx)
-                self.parent.theme_combo.blockSignals(False)
         else:
-            from ui.theme import get_theme_qss
-            self.parent.setStyleSheet(get_theme_qss())
-            self.apply_theme_dynamically()
-            if hasattr(self.parent, "main_container"):
-                from ui.theme import get_colors
-                c = get_colors()
-                self.parent.main_container.setStyleSheet(f"""
-                    QWidget#mainContainer {{
-                        background-color: {c["BG_NEUTRAL"]};
-                        border: 1px solid {c["BORDER_NEUTRAL"]};
-                        border-radius: 12px;
-                    }}
-                """)
+            from utils.config_loader import get_config
+            config = get_config()
+            config.set("behavior.theme", new_theme)
+            config.save()
+            
+            # Apply theme dynamically to the parent window
+            if hasattr(self.parent, "apply_theme_dynamically"):
+                self.parent.apply_theme_dynamically()
+                # If parent is Settings window and has theme_combo, sync it
+                if hasattr(self.parent, "theme_combo") and self.parent.theme_combo is not None:
+                    self.parent.theme_combo.blockSignals(True)
+                    idx = self.parent.theme_combo.findData(new_theme)
+                    if idx >= 0:
+                        self.parent.theme_combo.setCurrentIndex(idx)
+                    self.parent.theme_combo.blockSignals(False)
+            else:
+                from ui.theme import get_theme_qss
+                self.parent.setStyleSheet(get_theme_qss())
+                self.apply_theme_dynamically()
+                if hasattr(self.parent, "main_container"):
+                    from ui.theme import get_colors
+                    c = get_colors()
+                    self.parent.main_container.setStyleSheet(f"""
+                        QWidget#mainContainer {{
+                            background-color: {c["BG_NEUTRAL"]};
+                            border: 1px solid {c["BORDER_NEUTRAL"]};
+                            border-radius: 12px;
+                        }}
+                    """)
         
     def mousePressEvent(self, event):
         pass
@@ -662,17 +669,22 @@ class SlidingThemeToggle(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.parent_bar = parent
         self.setFixedSize(50, 24)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip("Switch Theme (Light / Dark)")
         
         # Load initial theme state
-        from utils.config_loader import get_config
-        try:
-            config = get_config()
-            self.theme_mode = config.get("behavior.theme", "light")
-        except Exception:
-            self.theme_mode = "light"
+        theme_mode = getattr(self.parent_bar.parent if self.parent_bar else None, "theme_mode", None)
+        if theme_mode is not None:
+            self.theme_mode = theme_mode
+        else:
+            from utils.config_loader import get_config
+            try:
+                config = get_config()
+                self.theme_mode = config.get("behavior.theme", "system")
+            except Exception:
+                self.theme_mode = "system"
             
         from ui.theme import is_system_dark_mode
         is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
@@ -690,12 +702,16 @@ class SlidingThemeToggle(QWidget):
         self.update()
         
     def update_toggle_state(self):
-        from utils.config_loader import get_config
-        try:
-            config = get_config()
-            self.theme_mode = config.get("behavior.theme", "light")
-        except Exception:
-            self.theme_mode = "light"
+        theme_mode = getattr(self.parent_bar.parent if self.parent_bar else None, "theme_mode", None)
+        if theme_mode is not None:
+            self.theme_mode = theme_mode
+        else:
+            from utils.config_loader import get_config
+            try:
+                config = get_config()
+                self.theme_mode = config.get("behavior.theme", "system")
+            except Exception:
+                self.theme_mode = "system"
             
         from ui.theme import is_system_dark_mode
         is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
@@ -713,11 +729,21 @@ class SlidingThemeToggle(QWidget):
         
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            from ui.theme import is_system_dark_mode
-            current_is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
-            
-            target_theme = "light" if current_is_dark else "dark"
-            self.theme_mode = target_theme
+            if self.parent_bar and hasattr(self.parent_bar.parent, "theme_mode"):
+                current_theme = self.parent_bar.parent.theme_mode
+                target_theme = "light" if current_theme == "dark" else "dark"
+                self.parent_bar.parent.theme_mode = target_theme
+                self.theme_mode = target_theme
+            else:
+                from ui.theme import is_system_dark_mode
+                current_is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
+                target_theme = "light" if current_is_dark else "dark"
+                self.theme_mode = target_theme
+                
+                from utils.config_loader import get_config
+                config = get_config()
+                config.set("behavior.theme", target_theme)
+                config.save()
             
             target_pos = 1.0 if target_theme == "dark" else 0.0
             
@@ -739,7 +765,8 @@ class SlidingThemeToggle(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         from ui.theme import get_colors
-        c = get_colors()
+        theme_mode = getattr(self.parent_bar.parent if self.parent_bar else None, "theme_mode", None)
+        c = get_colors(theme_mode)
         
         # Smooth color transition based on knob position
         r = int(124 + (168 - 124) * self._knob_position)
