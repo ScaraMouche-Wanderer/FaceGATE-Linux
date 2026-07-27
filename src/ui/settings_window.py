@@ -2227,19 +2227,18 @@ class SettingsWindow(QDialog):
             card_layout.addWidget(img_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
 
             # App Name Label
-            from ui.theme import get_colors as _gc_int
-            _c_int = _gc_int()
-            app_text_color = _c_int.get("TEXT_PRIMARY", "#f8fafc")
-            sec_text_color = _c_int.get("TEXT_SECONDARY", "#94a3b8")
+            from ui.theme import style_themed_label
             app_lbl = QLabel(f"<b>Attempted:</b> {app_name}")
-            app_lbl.setStyleSheet(f"font-size: 12px; color: {app_text_color}; border: none; background: transparent;")
+            style_themed_label(app_lbl, "TEXT_PRIMARY", "font-size: 12px; border: none; background: transparent;")
             app_lbl.setWordWrap(True)
+            self._themed_labels.append((app_lbl, "TEXT_PRIMARY"))
             card_layout.addWidget(app_lbl)
 
             # Time Label
             time_lbl = QLabel(formatted_time)
-            time_lbl.setStyleSheet(f"font-size: 11px; color: {sec_text_color}; border: none; background: transparent;")
+            style_themed_label(time_lbl, "TEXT_SECONDARY", "font-size: 11px; border: none; background: transparent;")
             time_lbl.setProperty("secondary", True)
+            self._themed_labels.append((time_lbl, "TEXT_SECONDARY"))
             card_layout.addWidget(time_lbl)
 
             # Delete Button

@@ -72,17 +72,17 @@ def get_colors(theme_override: str = None) -> dict:
     else:
         return {
             "IS_DARK": False,
-            "BG_NEUTRAL": "#f8f7ff",
+            "BG_NEUTRAL": "#f1f5f9",
             "BG_SECONDARY": "#ffffff",
             "CARD_NEUTRAL": "#ffffff",
-            "BORDER_NEUTRAL": "#e2e8f0",
+            "BORDER_NEUTRAL": "#cbd5e1",
             "TEXT_PRIMARY": "#0f172a",
-            "TEXT_SECONDARY": "#64748b",
+            "TEXT_SECONDARY": "#475569",
             "HEADER_TEXT": "#6b21a8",
             "ACCENT_PURPLE": "#7c3aed",
             "ACCENT_PURPLE_HOVER": "#6d28d9",
             "ACCENT_PURPLE_PRESSED": "#5b21b6",
-            "WIDGET_BG": "#f8fafc",
+            "WIDGET_BG": "#ffffff",
             "LIST_ITEM_HOVER": "#f1f5f9",
             "HOVER_NEUTRAL": "#f1f5f9",
             "CANCEL_BTN_BG": "#f1f5f9",
@@ -319,6 +319,22 @@ def get_theme_qss(theme_override: str = None) -> str:
         }}
         QComboBox:focus {{
             border: 1px solid {c["ACCENT_PURPLE"]};
+        }}
+        QComboBox::drop-down {{
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 24px;
+            border-left: none;
+        }}
+        QComboBox::down-arrow {{
+            image: none;
+            border: none;
+            width: 0;
+            height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid {c["TEXT_PRIMARY"]};
+            margin-right: 6px;
         }}
         QComboBox QAbstractItemView {{
             background-color: {c["CARD_NEUTRAL"]};
