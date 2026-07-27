@@ -309,12 +309,22 @@ def delete_embedding(name: str):
             if embeddings:
                 next_admin = list(embeddings.keys())[0]
                 config.set("security.admin_user", next_admin)
-                logging.info(f"Admin user '{name}' deleted. Promoted '{next_admin}' to Primary Admin.")
             else:
                 config.set("security.admin_user", None)
             config.save()
+
+        # Notify running daemon via D-Bus session bus
+        try:
+            from PySide6.QtDBus import QDBusConnection, QDBusInterface
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected():
+                interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
+                if interface.isValid():
+                    interface.call("RemoveEnrolledUser", name)
+        except Exception as ex:
+            logging.warning(f"Could not sync embedding deletion with daemon over D-Bus: {ex}")
     except Exception as e:
-        logging.error(f"Error deleting embedding: {e}")
+        logging.error(f"Error deleting encrypted embedding: {e}")
         raise
 
 def check_and_perform_migration(password_str: str = None) -> bool:

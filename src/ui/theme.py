@@ -184,7 +184,7 @@ def get_theme_qss(theme_override: str = None) -> str:
         }}
         QPushButton {{
             background-color: {c["ACCENT_PURPLE"]};
-            color: white;
+            color: #ffffff;
             border: none;
             border-radius: 6px;
             padding: 8px 16px;
@@ -198,17 +198,21 @@ def get_theme_qss(theme_override: str = None) -> str:
         QPushButton:pressed {{
             background-color: {c["ACCENT_PURPLE_PRESSED"]};
         }}
-        QPushButton#cancelBtn {{
+        QPushButton#cancelBtn, QPushButton#changePwdBtn, QPushButton#testFaceBtn {{
             background-color: {c["CANCEL_BTN_BG"]};
             color: {c["TEXT_PRIMARY"]};
             border: 1px solid {c["BORDER_NEUTRAL"]};
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-weight: bold;
+            font-size: 13px;
         }}
-        QPushButton#cancelBtn:hover {{
+        QPushButton#cancelBtn:hover, QPushButton#changePwdBtn:hover, QPushButton#testFaceBtn:hover {{
             background-color: {c["CANCEL_BTN_HOVER"]};
         }}
         QPushButton#removeSelectedBtn, QPushButton#clearIntrudersBtn {{
             background-color: #ef4444;
-            color: white;
+            color: #ffffff;
             border: none;
             font-weight: bold;
             border-radius: 6px;
@@ -220,15 +224,17 @@ def get_theme_qss(theme_override: str = None) -> str:
         QPushButton#removeSelectedBtn:pressed, QPushButton#clearIntrudersBtn:pressed {{
             background-color: #b91c1c;
         }}
-        QPushButton#enrollBtn {{
-            background-color: {SUCCESS_GREEN};
-            color: white;
+        QPushButton#enrollBtn, QPushButton#enrollNewBtn {{
+            background-color: {c["ACCENT_PURPLE"]};
+            color: #ffffff;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-weight: bold;
+            font-size: 13px;
         }}
-        QPushButton#enrollBtn:hover {{
-            background-color: #16a34a;
-        }}
-        QPushButton#enrollBtn:pressed {{
-            background-color: #15803d;
+        QPushButton#enrollBtn:hover, QPushButton#enrollNewBtn:hover {{
+            background-color: {c["ACCENT_PURPLE_HOVER"]};
         }}
         QPushButton#dismissBtn {{
             background-color: transparent;

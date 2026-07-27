@@ -836,6 +836,7 @@ class SettingsWindow(QDialog):
         c1_layout.addWidget(lbl2)
 
         self.change_pwd_btn = QPushButton("Change Master Password...")
+        self.change_pwd_btn.setObjectName("changePwdBtn")
         self.change_pwd_btn.clicked.connect(self.trigger_password_change)
         
         self.enroll_btn = QPushButton("Enroll New Face (GUI)...")
@@ -894,7 +895,7 @@ class SettingsWindow(QDialog):
         self.test_face_btn.clicked.connect(self.run_face_verification_test)
 
         self.enroll_new_btn = QPushButton("➕ Enroll New Face")
-        self.enroll_new_btn.setObjectName("enrollBtn")
+        self.enroll_new_btn.setObjectName("enrollNewBtn")
         self.enroll_new_btn.clicked.connect(self.open_enrollment_wizard)
 
         enrolled_btn_layout.addWidget(self.test_face_btn)
