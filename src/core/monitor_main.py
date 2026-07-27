@@ -160,6 +160,24 @@ class FaceGateApplication(QObject):
         logging.info("All applications re-locked.")
 
     @Slot()
+    def reload_config(self) -> bool:
+        """Hot-reloads configuration settings live without restarting the application or daemon."""
+        try:
+            self.config.reload()
+            apply_substitution(self.get_protected_apps())
+            poll_interval = float(self.config.get("app_monitor.poll_interval_seconds", 1.5))
+            if hasattr(self, 'monitor') and self.monitor:
+                self.monitor.poll_interval = poll_interval
+                self.monitor.clear_seen_pids()
+            if hasattr(self, 'tray') and self.tray:
+                self.tray.update_tray_state()
+            logging.info("FaceGateApplication: Configuration hot-reloaded successfully live.")
+            return True
+        except Exception as e:
+            logging.error(f"Error hot-reloading configuration: {e}")
+            return False
+
+    @Slot()
     def resume(self):
         self.disabled_timer.stop()
         self.disabled_until = None

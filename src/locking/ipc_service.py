@@ -180,11 +180,21 @@ class FaceGateService(QObject):
             logging.error(f"Failed to update cached key via D-Bus: {e}")
         return False
 
+    def reload_config_internal(self) -> bool:
+        logging.info("D-Bus request received: ReloadConfig")
+        if self.main_app and hasattr(self.main_app, 'reload_config'):
+            return self.main_app.reload_config()
+        return False
+
 @ClassInfo({"D-Bus Interface": "org.facegate.FaceGate"})
 class FaceGateAdaptor(QDBusAbstractAdaptor):
     def __init__(self, parent: FaceGateService):
         super().__init__(parent)
         self.service = parent
+
+    @Slot(result=bool)
+    def ReloadConfig(self) -> bool:
+        return self.service.reload_config_internal()
 
     @Slot(str, result=bool)
     def RequestAuth(self, app_identifier: str) -> bool:

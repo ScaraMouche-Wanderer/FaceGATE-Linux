@@ -698,7 +698,6 @@ class SettingsWindow(QDialog):
         if self._loading:
             return
         self._has_pending_changes = True
-        self.restart_banner.show()
 
     def restart_daemon(self):
         import psutil
@@ -2096,23 +2095,34 @@ class SettingsWindow(QDialog):
         
         # Write config back to file
         if self.config.save():
+            # Hot-reload configuration in running daemon via D-Bus session bus
+            try:
+                from PySide6.QtDBus import QDBusConnection, QDBusInterface
+                bus = QDBusConnection.sessionBus()
+                if bus.isConnected():
+                    interface = QDBusInterface(
+                        "org.facegate.FaceGate",
+                        "/org/facegate/FaceGate",
+                        "org.facegate.FaceGate",
+                        bus
+                    )
+                    if interface.isValid():
+                        interface.call("ReloadConfig")
+                        logging.info("Sent D-Bus ReloadConfig signal to running daemon.")
+            except Exception as ex:
+                logging.warning(f"Could not signal D-Bus daemon of config reload: {ex}")
+
             from ui.theme import get_colors
             c = get_colors()
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("Settings Saved")
-            msg_box.setText("Settings have been saved successfully.\n\n"
-                            "Would you like to restart the FaceGate daemon now to apply these changes?")
-            msg_box.setIcon(QMessageBox.Icon.Question)
+            msg_box.setText("Settings have been saved and applied immediately in real-time!")
+            msg_box.setIcon(QMessageBox.Icon.Information)
             
-            yes_btn = msg_box.addButton(QMessageBox.StandardButton.Yes)
-            no_btn = msg_box.addButton(QMessageBox.StandardButton.No)
-            
-            yes_btn.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 6px; border: none;")
-            no_btn.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 6px;")
+            ok_btn = msg_box.addButton(QMessageBox.StandardButton.Ok)
+            ok_btn.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: white; padding: 6px 20px; min-width: 80px; font-weight: bold; border-radius: 6px; border: none;")
             
             msg_box.exec()
-            if msg_box.clickedButton() == yes_btn:
-                self.restart_daemon()
             self.accept()
         else:
             QMessageBox.critical(self, "Save Failed", "Failed to save configuration parameters.")
