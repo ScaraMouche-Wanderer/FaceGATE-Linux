@@ -42,6 +42,7 @@ def test_app_monitor_negative_cache():
 
     with patch("psutil.process_iter", return_value=[mock_proc]), \
          patch("psutil.pids", return_value=[99999]), \
+         patch("locking.app_monitor.shutil.which", return_value="/usr/bin/kitty"), \
          patch("locking.app_monitor.calculate_sha256", side_effect=mock_calc_hash_func) as mock_calc_hash, \
          patch("os.stat") as mock_stat:
          

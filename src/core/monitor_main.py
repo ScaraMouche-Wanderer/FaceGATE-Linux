@@ -310,16 +310,17 @@ class FaceGateApplication(QObject):
             return max(0.0, self.disabled_until - time.time())
         return 0.0
 
-    def check_tray_and_start(self, attempts: int):
+    def check_tray_and_start(self, attempts: int = 0):
+        if self.tray is not None:
+            return
         if QSystemTrayIcon.isSystemTrayAvailable():
             logging.info("System tray is available. Initializing Tray Icon.")
             self.tray = FaceGateTray(self)
             self.tray.show()
-        elif attempts < 20:  # 20 * 500ms = 10s
-            logging.info(f"System tray not available yet. Retrying in 500ms... (Attempt {attempts + 1}/20)")
-            QTimer.singleShot(500, lambda: self.check_tray_and_start(attempts + 1))
         else:
-            logging.error("System tray could not be initialized after 10s. Running in headless mode.")
+            if attempts % 5 == 0:
+                logging.info(f"System tray not available yet. Retrying... (Attempt {attempts + 1})")
+            QTimer.singleShot(1000, lambda: self.check_tray_and_start(attempts + 1))
 
     @Slot(str, int)
     def handle_monitor_auth(self, desktop_name: str, pid: int):
@@ -476,6 +477,7 @@ class FaceGateApplication(QObject):
         if not hasattr(self, "_settings_window") or self._settings_window is None:
             self._settings_window = SettingsWindow(self.config, parent=None)
             self._settings_window.finished.connect(self.cleanup_settings_window)
+        self._settings_window.setWindowState(Qt.WindowState.WindowActive)
         self._settings_window.show()
         self._settings_window.raise_()
         self._settings_window.activateWindow()
@@ -495,6 +497,7 @@ class FaceGateApplication(QObject):
         if not hasattr(self, "_enrollment_wizard") or self._enrollment_wizard is None:
             self._enrollment_wizard = EnrollmentWizard(parent=None)
             self._enrollment_wizard.finished.connect(self.cleanup_enrollment_wizard)
+        self._enrollment_wizard.setWindowState(Qt.WindowState.WindowActive)
         self._enrollment_wizard.show()
         self._enrollment_wizard.raise_()
         self._enrollment_wizard.activateWindow()
@@ -713,6 +716,19 @@ def main():
                     reply = QDBusReply(raw_reply)
                     if reply.isValid():
                         dbus_success = reply.value()
+                        if dbus_success:
+                            # Transfer cached encryption key from daemon to settings process
+                            key_reply = interface.call("GetCachedKey")
+                            q_key_reply = QDBusReply(key_reply)
+                            if q_key_reply.isValid() and q_key_reply.value():
+                                try:
+                                    key_bytes = bytes.fromhex(q_key_reply.value())
+                                    if len(key_bytes) == 32:
+                                        from database.embedding_store import set_cached_key
+                                        set_cached_key(key_bytes)
+                                        logging.info("Successfully received encryption key from daemon via D-Bus.")
+                                except Exception as ex:
+                                    logging.error(f"Failed to parse key from daemon D-Bus response: {ex}")
                     else:
                         logging.error(f"D-Bus auth call failed: {reply.error().message()}")
             
@@ -734,6 +750,9 @@ def main():
                     sys.exit(1)
                 
         dialog = SettingsWindow()
+        dialog.setWindowState(Qt.WindowState.WindowActive)
+        dialog.raise_()
+        dialog.activateWindow()
         dialog.exec()
         sys.exit(0)
         
@@ -760,9 +779,10 @@ def main():
                 
         timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
         
-        # Run dialog in face mode if database exists, falling back to password inside dialog if key is not cached
-        from database.embedding_store import EMBEDDING_FILE
-        mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
+        # Always launch in face mode if database exists, so camera window pops up first.
+        from database.embedding_store import EMBEDDING_FILE, OLD_EMBEDDING_FILE
+        mode = "face" if (os.path.exists(EMBEDDING_FILE) or os.path.exists(OLD_EMBEDDING_FILE)) else "password"
+        logging.info(f"Recognition subprocess launching in '{mode}' mode (Face Recognition first).")
         
         dialog = AuthDialog(app_name, mode=mode, timeout_seconds=timeout_sec)
         result = dialog.exec()
@@ -835,7 +855,7 @@ def main():
         # Setup graceful signal handlers
         def signal_handler(signum, frame):
             logging.info(f"Received terminal signal ({signum}). Queuing graceful exit.")
-            QMetaObject.invokeMethod(fg_app, "quit_app", Qt.ConnectionType.QueuedConnection)
+            QTimer.singleShot(0, lambda: fg_app.quit_app(bypass_protection=True))
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)

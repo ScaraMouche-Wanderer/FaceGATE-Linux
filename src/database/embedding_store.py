@@ -10,31 +10,72 @@ OLD_EMBEDDING_FILE = os.path.expanduser("~/.config/facegate/embeddings.json")
 
 _cached_key = None
 
+def _get_ram_key_file() -> str:
+    uid = os.getuid()
+    run_dir = f"/run/user/{uid}"
+    if os.path.exists(run_dir):
+        return os.path.join(run_dir, "facegate.key")
+    # Fallback to tempdir if /run/user/{uid} is not available
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), f".facegate_{uid}.key")
+
 def set_cached_key(key: bytes):
     """
-    Caches the derived key in memory for this process's life cycle.
-    Converts to bytearray so it can be securely zeroed on shutdown.
+    Caches the derived key in process memory and user RAM tmpfs (/run/user/{uid}/facegate.key).
     """
     global _cached_key
     _cached_key = bytearray(key) if isinstance(key, bytes) else key
 
+    # Write key to user-private RAM-backed tmpfs file (0600 permissions)
+    try:
+        ram_file = _get_ram_key_file()
+        key_bytes = bytes(key) if isinstance(key, (bytes, bytearray)) else key
+        with open(ram_file, 'wb') as f:
+            f.write(key_bytes)
+        os.chmod(ram_file, 0o600)
+    except Exception as e:
+        logging.warning(f"Could not persist RAM key file: {e}")
+
 def get_cached_key() -> bytes:
     """
-    Retrieves the cached key from memory.
+    Retrieves the cached key from process memory or user RAM tmpfs.
     """
     global _cached_key
-    return bytes(_cached_key) if _cached_key else None
+    if _cached_key:
+        return bytes(_cached_key)
+
+    # Check RAM tmpfs file
+    try:
+        ram_file = _get_ram_key_file()
+        if os.path.exists(ram_file):
+            with open(ram_file, 'rb') as f:
+                data = f.read()
+                if len(data) == 32:
+                    _cached_key = bytearray(data)
+                    return bytes(_cached_key)
+    except Exception as e:
+        logging.error(f"Error reading RAM key file: {e}")
+
+    return None
 
 def clear_cached_key():
     """
-    Securely zeroes and removes the cached key from memory.
-    Call on daemon shutdown.
+    Securely zeroes and removes the cached key from memory and RAM tmpfs.
     """
     global _cached_key
     if _cached_key is not None:
         for i in range(len(_cached_key)):
             _cached_key[i] = 0
         _cached_key = None
+
+    try:
+        ram_file = _get_ram_key_file()
+        if os.path.exists(ram_file):
+            with open(ram_file, 'wb') as f:
+                f.write(b'\x00' * 32)
+            os.remove(ram_file)
+    except Exception:
+        pass
 
 def read_envelope_file() -> dict:
     """
@@ -179,6 +220,103 @@ def save_embedding(name: str, embedding: np.ndarray):
     except Exception as e:
         logging.error(f"Error saving encrypted embedding: {e}")
 
+def get_admin_user() -> str | None:
+    """
+    Returns the designated Admin User username.
+    If explicitly configured in security.admin_user, returns that user.
+    Otherwise, defaults to the first enrolled user in the store.
+    """
+    from utils.config_loader import get_config
+    config = get_config()
+    admin_cfg = config.get("security.admin_user")
+    
+    embeddings = load_embeddings()
+    if not embeddings:
+        return None
+        
+    if admin_cfg and admin_cfg in embeddings:
+        return admin_cfg
+        
+    first_user = list(embeddings.keys())[0]
+    return first_user
+
+def set_admin_user(name: str):
+    """
+    Designates a specific enrolled user as the Primary Admin.
+    """
+    embeddings = load_embeddings()
+    if name not in embeddings:
+        raise ValueError(f"Cannot designate '{name}' as admin: User is not enrolled.")
+        
+    from utils.config_loader import get_config
+    config = get_config()
+    config.set("security.admin_user", name)
+    config.save()
+    logging.info(f"User '{name}' designated as Primary Admin.")
+
+def delete_embedding(name: str):
+    """
+    Removes a user embedding from the encrypted envelope.
+    Loads all embeddings, removes the specified user, re-encrypts, and saves.
+    Raises ValueError if the user is not found.
+    """
+    key = get_or_prompt_key()
+    if not key:
+        raise RuntimeError("Cannot delete embedding: no encryption key available.")
+    
+    embeddings = load_embeddings()
+    if name not in embeddings:
+        raise ValueError(f"User '{name}' is not enrolled in the database.")
+    
+    del embeddings[name]
+    
+    # Re-serialize and re-encrypt
+    serialized = {k: v.tolist() for k, v in embeddings.items()}
+    plaintext_bytes = json.dumps(serialized).encode('utf-8')
+    
+    try:
+        from security.crypto_engine import encrypt
+        nonce, ciphertext = encrypt(plaintext_bytes, key)
+        
+        envelope = read_envelope_file()
+        if envelope:
+            iterations = envelope["iterations"]
+            salt = envelope["salt"]
+        else:
+            from utils.config_loader import get_config
+            config = get_config()
+            iterations = int(config.get("security.pbkdf2_iterations", 600000))
+            salt = os.urandom(16)
+            
+        new_envelope = {
+            "kdf": "pbkdf2_hmac_sha256",
+            "iterations": iterations,
+            "salt": base64.b64encode(salt).decode('utf-8') if isinstance(salt, bytes) else salt,
+            "nonce": base64.b64encode(nonce).decode('utf-8'),
+            "ciphertext": base64.b64encode(ciphertext).decode('utf-8')
+        }
+        
+        with open(EMBEDDING_FILE, 'w') as f:
+            json.dump(new_envelope, f, indent=4)
+            
+        os.chmod(EMBEDDING_FILE, 0o600)
+        logging.info(f"Deleted embedding for user '{name}' from {EMBEDDING_FILE}. {len(embeddings)} user(s) remaining.")
+
+        # Handle Admin User re-assignment if the deleted user was the admin
+        from utils.config_loader import get_config
+        config = get_config()
+        if config.get("security.admin_user") == name or get_admin_user() == name:
+            if embeddings:
+                next_admin = list(embeddings.keys())[0]
+                config.set("security.admin_user", next_admin)
+                logging.info(f"Admin user '{name}' deleted. Promoted '{next_admin}' to Primary Admin.")
+            else:
+                config.set("security.admin_user", None)
+            config.save()
+    except Exception as e:
+        logging.error(f"Error deleting embedding: {e}")
+        raise
+
 def check_and_perform_migration(password_str: str = None) -> bool:
     """
     Detects if plaintext embeddings.json exists.
@@ -262,7 +400,7 @@ def check_and_perform_migration(password_str: str = None) -> bool:
             
         # Verify embedding vectors are numerically identical
         for username in old_data.keys():
-            old_emb = np.array(old_data[username], dtype=np.float32)
+            old_emb = parsed_old[username]
             new_emb = np.array(decrypted_data[username], dtype=np.float32)
             if not np.array_equal(old_emb, new_emb):
                 raise ValueError(f"Numerical embedding mismatch for '{username}'")

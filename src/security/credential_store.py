@@ -58,7 +58,7 @@ def verify_password(password: str) -> bool:
         
         # Attempt to decrypt the embeddings.
         # This will raise cryptography.exceptions.InvalidTag on wrong key.
-        decrypted_bytes = decrypt(nonce, ciphertext, key)
+        decrypt(nonce, ciphertext, key)
         
         # Success! Cache the derived key
         set_cached_key(key)
@@ -66,7 +66,7 @@ def verify_password(password: str) -> bool:
         # Ensure we do not log the plaintext password, derived key, or embeddings
         logging.info("Credential check: SUCCESS")
         return True
-    except Exception as e:
+    except Exception:
         logging.warning("Credential check: FAILURE (Incorrect password or corrupted store)")
         return False
     finally:
@@ -132,6 +132,27 @@ def update_master_password(current_password: str | None, new_password: str) -> N
             json.dump(new_envelope, f, indent=4)
             
         os.chmod(EMBEDDING_FILE, 0o600)
+
+        # Update in-memory key cache to match newly encrypted envelope
+        set_cached_key(new_key)
+        logging.info("Updated in-memory encryption key cache after password change.")
+
+        # Sync new key with running daemon via D-Bus session bus
+        try:
+            from PySide6.QtDBus import QDBusConnection, QDBusInterface
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected():
+                interface = QDBusInterface(
+                    "org.facegate.FaceGate",
+                    "/org/facegate/FaceGate",
+                    "org.facegate.FaceGate",
+                    bus
+                )
+                if interface.isValid():
+                    interface.call("UpdateCachedKey", new_key.hex())
+                    logging.info("Synced new encryption key with FaceGate daemon over D-Bus.")
+        except Exception as ex:
+            logging.warning(f"Could not sync new key with daemon over D-Bus: {ex}")
     finally:
         for i in range(len(pwd_bytes)):
             pwd_bytes[i] = 0

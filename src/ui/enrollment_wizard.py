@@ -16,7 +16,17 @@ from ui.auth_dialog import convert_cv_to_pixmap
 class EnrollmentWizard(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.theme_mode = "light"
+        # Determine theme mode from config
+        from utils.config_loader import get_config
+        from ui.theme import is_system_dark_mode
+        try:
+            _cfg_theme = get_config().get("behavior.theme", "system")
+            if _cfg_theme == "system":
+                self.theme_mode = "dark" if is_system_dark_mode() else "light"
+            else:
+                self.theme_mode = _cfg_theme
+        except Exception:
+            self.theme_mode = "light"
         self.detector = None
         self.camera_worker = None
         
@@ -34,7 +44,7 @@ class EnrollmentWizard(QDialog):
         self.setModal(True)
 
         # Determine screen-based size
-        from PySide6.QtGui import QGuiApplication, QColor
+        from PySide6.QtGui import QGuiApplication
         screen = QGuiApplication.primaryScreen()
         if screen:
             screen_size = screen.size()

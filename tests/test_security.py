@@ -24,12 +24,10 @@ def temp_embedding_paths(tmp_path):
     old_path = str(tmp_path / "embeddings.json")
     with patch("database.embedding_store.EMBEDDING_FILE", enc_path), \
          patch("database.embedding_store.OLD_EMBEDDING_FILE", old_path):
-        # Reset the cached key between tests
-        from database.embedding_store import set_cached_key
-        set_cached_key.__wrapped__ = None  # not needed, just reset global
-        import database.embedding_store as es
-        es._cached_key = None
+        from database.embedding_store import clear_cached_key
+        clear_cached_key()
         yield {"enc": enc_path, "old": old_path, "dir": tmp_path}
+        clear_cached_key()
 
 
 class TestHardcodedPasswordRemoved:
@@ -220,11 +218,13 @@ class TestCredentialStorePasswordVerification:
 class TestAdminFaceVerification:
     """Tests for FaceGateApplication.verify_admin_face validation behavior (Item 1)."""
 
+    @patch('PySide6.QtWidgets.QSystemTrayIcon.isSystemTrayAvailable', return_value=False)
+    @patch('core.monitor_main.AppMonitor')
     @patch('core.monitor_main.register_dbus_service', return_value=True)
     @patch('ui.auth_dialog.AuthDialog')
     @patch('database.embedding_store.load_embeddings')
     @patch('os.path.exists')
-    def test_verify_admin_face_states(self, mock_exists, mock_load, mock_auth_dialog, mock_dbus):
+    def test_verify_admin_face_states(self, mock_exists, mock_load, mock_auth_dialog, mock_dbus, mock_app_monitor, mock_tray):
         from core.monitor_main import FaceGateApplication
         from utils.config_loader import Config
         from PySide6.QtWidgets import QDialog

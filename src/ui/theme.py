@@ -48,20 +48,23 @@ def get_colors(theme_override: str = None) -> dict:
     if is_dark:
         return {
             "IS_DARK": True,
-            "BG_NEUTRAL": "#0f0e15",
-            "CARD_NEUTRAL": "#181720",
-            "BORDER_NEUTRAL": "#2c2a38",
-            "TEXT_PRIMARY": "#e2e1e9",
-            "TEXT_SECONDARY": "#a5a3b4",
+            "BG_NEUTRAL": "#0b0a12",
+            "BG_SECONDARY": "#151322",
+            "CARD_NEUTRAL": "#181627",
+            "BORDER_NEUTRAL": "#322c4d",
+            "TEXT_PRIMARY": "#f8fafc",
+            "TEXT_SECONDARY": "#94a3b8",
+            "HEADER_TEXT": "#c084fc",
             "ACCENT_PURPLE": "#a855f7",
-            "ACCENT_PURPLE_HOVER": "#b56cf8",
-            "ACCENT_PURPLE_PRESSED": "#8b5cf6",
-            "WIDGET_BG": "#1f1d29",
-            "LIST_ITEM_HOVER": "#312e43",
-            "CANCEL_BTN_BG": "#2c2a38",
-            "CANCEL_BTN_HOVER": "#3d3b4e",
-            "SHADOW_COLOR": "rgba(0, 0, 0, 0.5)",
-            "STATUS_HEADER_BG": "#23212f",
+            "ACCENT_PURPLE_HOVER": "#c084fc",
+            "ACCENT_PURPLE_PRESSED": "#9333ea",
+            "WIDGET_BG": "#110f1c",
+            "LIST_ITEM_HOVER": "#2b2644",
+            "HOVER_NEUTRAL": "#2b2644",
+            "CANCEL_BTN_BG": "#25213b",
+            "CANCEL_BTN_HOVER": "#373154",
+            "SHADOW_COLOR": "rgba(0, 0, 0, 0.6)",
+            "STATUS_HEADER_BG": "#1f1a33",
             "SUCCESS_GREEN": "#10b981",
             "DANGER_RED": "#ef4444",
             "WARNING_AMBER": "#fbbf24"
@@ -69,23 +72,26 @@ def get_colors(theme_override: str = None) -> dict:
     else:
         return {
             "IS_DARK": False,
-            "BG_NEUTRAL": "#f5f3ff",
-            "CARD_NEUTRAL": "#faf9fc",
-            "BORDER_NEUTRAL": "#e9e7f1",
-            "TEXT_PRIMARY": "#1e1b4b",
-            "TEXT_SECONDARY": "#5c5770",
+            "BG_NEUTRAL": "#f8f7ff",
+            "BG_SECONDARY": "#ffffff",
+            "CARD_NEUTRAL": "#ffffff",
+            "BORDER_NEUTRAL": "#e2e8f0",
+            "TEXT_PRIMARY": "#0f172a",
+            "TEXT_SECONDARY": "#64748b",
+            "HEADER_TEXT": "#6b21a8",
             "ACCENT_PURPLE": "#7c3aed",
             "ACCENT_PURPLE_HOVER": "#6d28d9",
             "ACCENT_PURPLE_PRESSED": "#5b21b6",
-            "WIDGET_BG": "#ffffff",
-            "LIST_ITEM_HOVER": "#f3e8ff",
+            "WIDGET_BG": "#f8fafc",
+            "LIST_ITEM_HOVER": "#f1f5f9",
+            "HOVER_NEUTRAL": "#f1f5f9",
             "CANCEL_BTN_BG": "#f1f5f9",
             "CANCEL_BTN_HOVER": "#e2e8f0",
-            "SHADOW_COLOR": "rgba(124, 58, 237, 0.15)",
+            "SHADOW_COLOR": "rgba(124, 58, 237, 0.12)",
             "STATUS_HEADER_BG": "#f1f5f9",
             "SUCCESS_GREEN": "#10b981",
             "DANGER_RED": "#ef4444",
-            "WARNING_AMBER": "#fbbf24"
+            "WARNING_AMBER": "#f59e0b"
         }
 
 def refresh_theme_colors(theme_override: str = None):
@@ -102,9 +108,9 @@ def refresh_theme_colors(theme_override: str = None):
 
 def get_sidebar_qss(c: dict) -> str:
     is_dark = c.get("IS_DARK", False)
-    sidebar_bg = "#191624" if is_dark else "#ede9fe"
-    sidebar_color = "#a5a2b5" if is_dark else "#4c4664"
-    sidebar_hover_bg = "#252136" if is_dark else "#e5dbff"
+    sidebar_bg = "#110f1c" if is_dark else "#ede9fe"
+    sidebar_color = "#cbd5e1" if is_dark else "#4c4664"
+    sidebar_hover_bg = "#27223e" if is_dark else "#e5dbff"
     
     return f"""
         QListWidget#sidebar {{
@@ -130,6 +136,7 @@ def get_sidebar_qss(c: dict) -> str:
         QListWidget#sidebar::item:selected {{
             background-color: {c["ACCENT_PURPLE"]};
             color: #ffffff;
+            font-weight: bold;
         }}
         QPushButton#removeBtn {{
             background-color: transparent;
@@ -199,14 +206,18 @@ def get_theme_qss(theme_override: str = None) -> str:
         QPushButton#cancelBtn:hover {{
             background-color: {c["CANCEL_BTN_HOVER"]};
         }}
-        QPushButton#removeSelectedBtn {{
+        QPushButton#removeSelectedBtn, QPushButton#clearIntrudersBtn {{
             background-color: #ef4444;
             color: white;
+            border: none;
+            font-weight: bold;
+            border-radius: 6px;
+            padding: 8px 16px;
         }}
-        QPushButton#removeSelectedBtn:hover {{
+        QPushButton#removeSelectedBtn:hover, QPushButton#clearIntrudersBtn:hover {{
             background-color: #dc2626;
         }}
-        QPushButton#removeSelectedBtn:pressed {{
+        QPushButton#removeSelectedBtn:pressed, QPushButton#clearIntrudersBtn:pressed {{
             background-color: #b91c1c;
         }}
         QPushButton#enrollBtn {{
@@ -219,19 +230,9 @@ def get_theme_qss(theme_override: str = None) -> str:
         QPushButton#enrollBtn:pressed {{
             background-color: #15803d;
         }}
-        QPushButton#clearIntrudersBtn {{
-            background-color: #ef4444;
-            color: white;
-        }}
-        QPushButton#clearIntrudersBtn:hover {{
-            background-color: #dc2626;
-        }}
-        QPushButton#clearIntrudersBtn:pressed {{
-            background-color: #b91c1c;
-        }}
         QPushButton#dismissBtn {{
             background-color: transparent;
-            color: #a1a1aa;
+            color: {c["TEXT_SECONDARY"]};
             text-decoration: underline;
             border: none;
         }}
@@ -239,17 +240,16 @@ def get_theme_qss(theme_override: str = None) -> str:
             color: {c["TEXT_PRIMARY"]};
         }}
         QPushButton#deleteIntruderBtn {{
-            background-color: transparent;
-            color: #ef4444;
-            border: 1px solid #ef4444;
-            border-radius: 4px;
-            font-size: 11px;
-            padding: 4px;
+            background-color: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            padding: 6px 12px;
             font-weight: bold;
         }}
         QPushButton#deleteIntruderBtn:hover {{
-            background-color: #ef4444;
-            color: white;
+            background-color: #dc2626;
         }}
         QFrame#intruderCard {{
             border: 1px solid {c["BORDER_NEUTRAL"]};
@@ -320,6 +320,27 @@ def get_theme_qss(theme_override: str = None) -> str:
         QComboBox:focus {{
             border: 1px solid {c["ACCENT_PURPLE"]};
         }}
+        QComboBox QAbstractItemView {{
+            background-color: {c["CARD_NEUTRAL"]};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
+            color: {c["TEXT_PRIMARY"]};
+            selection-background-color: {c["ACCENT_PURPLE"]};
+            selection-color: #ffffff;
+            outline: none;
+            padding: 4px;
+            border-radius: 6px;
+        }}
+        QComboBox QAbstractItemView::item {{
+            background-color: {c["CARD_NEUTRAL"]};
+            color: {c["TEXT_PRIMARY"]};
+            padding: 8px 12px;
+            border-radius: 4px;
+            min-height: 24px;
+        }}
+        QComboBox QAbstractItemView::item:hover, QComboBox QAbstractItemView::item:selected {{
+            background-color: {c["ACCENT_PURPLE"]};
+            color: #ffffff;
+        }}
         QSpinBox {{
             background-color: {c["WIDGET_BG"]};
             border: 1px solid {c["BORDER_NEUTRAL"]};
@@ -375,9 +396,12 @@ def get_theme_qss(theme_override: str = None) -> str:
             padding: 6px;
             color: {c["TEXT_PRIMARY"]};
         }}
-        QScrollArea {{
+        QScrollArea, QScrollArea > QWidget, QAbstractScrollArea, QAbstractScrollArea > QWidget {{
             background-color: transparent;
             border: none;
+        }}
+        QWidget#qt_scrollarea_viewport {{
+            background-color: transparent;
         }}
         QStackedWidget, QStackedWidget > QWidget {{
             background-color: transparent;
@@ -397,25 +421,56 @@ def get_theme_qss(theme_override: str = None) -> str:
         }}
     """
 
-def get_card_qss(importance: str = "normal") -> str:
-    refresh_theme_colors()
+def get_card_qss(importance: str = "normal", colors: dict = None) -> str:
+    if colors is None:
+        colors = get_colors()
+    card_bg = colors["CARD_NEUTRAL"]
+    border_color = colors["BORDER_NEUTRAL"]
+    text_color = colors["TEXT_PRIMARY"]
+    text_sec = colors["TEXT_SECONDARY"]
+    header_color = colors.get("HEADER_TEXT", "#c084fc")
+    accent = colors["ACCENT_PURPLE"]
+    danger = colors.get("DANGER_RED", "#ef4444")
+    widget_bg = colors.get("WIDGET_BG", "#110f1c")
+    
     if importance == "danger":
-        border_qss = f"border-left: 4px solid {DANGER_RED}; border-top: 1px solid {BORDER_NEUTRAL}; border-right: 1px solid {BORDER_NEUTRAL}; border-bottom: 1px solid {BORDER_NEUTRAL};"
+        border_qss = f"border-left: 4px solid {danger}; border-top: 1px solid {border_color}; border-right: 1px solid {border_color}; border-bottom: 1px solid {border_color};"
     elif importance == "accent":
-        border_qss = f"border-left: 4px solid {ACCENT_PURPLE}; border-top: 1px solid {BORDER_NEUTRAL}; border-right: 1px solid {BORDER_NEUTRAL}; border-bottom: 1px solid {BORDER_NEUTRAL};"
+        border_qss = f"border-left: 4px solid {accent}; border-top: 1px solid {border_color}; border-right: 1px solid {border_color}; border-bottom: 1px solid {border_color};"
     else:
-        border_qss = f"border: 1px solid {BORDER_NEUTRAL};"
+        border_qss = f"border: 1px solid {border_color};"
         
     return f"""
         QWidget#card {{
-            background-color: {CARD_NEUTRAL};
+            background-color: {card_bg};
             {border_qss}
-            border-radius: 8px;
+            border-radius: 10px;
         }}
         QLabel {{
             border: none;
             background-color: transparent;
-            color: {TEXT_PRIMARY};
+            color: {text_color};
+        }}
+        QLabel[secondary="true"] {{
+            color: {text_sec};
+        }}
+        QLabel#cardHeader {{
+            color: {header_color};
+            font-size: 15px;
+            font-weight: bold;
+            border: none;
+            background-color: transparent;
+        }}
+        QLineEdit, QSpinBox, QComboBox {{
+            background-color: {widget_bg};
+            border: 1px solid {border_color};
+            border-radius: 6px;
+            padding: 6px 12px;
+            color: {text_color};
+            font-size: 13px;
+        }}
+        QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{
+            border: 1px solid {accent};
         }}
     """
 
@@ -763,10 +818,6 @@ class SlidingThemeToggle(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        from ui.theme import get_colors
-        theme_mode = getattr(self.parent_bar.parent if self.parent_bar else None, "theme_mode", None)
-        c = get_colors(theme_mode)
         
         # Smooth color transition based on knob position
         r = int(124 + (168 - 124) * self._knob_position)

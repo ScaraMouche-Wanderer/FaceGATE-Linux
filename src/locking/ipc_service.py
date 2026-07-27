@@ -1,7 +1,6 @@
 import logging
 from PySide6.QtCore import QObject, Slot, ClassInfo
 from PySide6.QtDBus import QDBusConnection, QDBusAbstractAdaptor
-from ui.auth_dialog import AuthDialog
 
 class FaceGateService(QObject):
     def __init__(self, main_app=None):
@@ -61,25 +60,34 @@ class FaceGateService(QObject):
             success = (exit_code == 0)
             method = "face"
             username = None
+            score = None
             
             if success:
-                # If subprocess returned a key (hex string on stdout), cache it in daemon!
+                # Parse subprocess output for metadata and key
                 if stdout_data:
                     for line in stdout_data.splitlines():
                         line = line.strip()
-                        if len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
+                        if line.startswith("FACEGATE_METHOD:"):
+                            method = line.split(":", 1)[1]
+                        elif line.startswith("FACEGATE_USER:"):
+                            username = line.split(":", 1)[1]
+                        elif line.startswith("FACEGATE_SCORE:"):
+                            try:
+                                score = float(line.split(":", 1)[1])
+                            except ValueError:
+                                pass
+                        elif len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
                             try:
                                 key_bytes = bytes.fromhex(line)
                                 if len(key_bytes) == 32:
                                     set_cached_key(key_bytes)
                                     logging.info("Successfully cached key returned from recognition subprocess.")
-                                    method = "password"
                             except Exception as ex:
                                 logging.error(f"Failed to parse key returned from subprocess: {ex}")
             
             # Write to SQLite audit log
             from database.audit_log import log_auth_attempt
-            log_auth_attempt(app_identifier, method, "success" if success else "fail", None, username)
+            log_auth_attempt(app_identifier, method, "success" if success else "fail", score, username)
             
             if success and self.main_app:
                 self.main_app.authorize_app(app_identifier)
@@ -128,6 +136,50 @@ class FaceGateService(QObject):
         except Exception:
             return ""
 
+    def remove_enrolled_user_internal(self, username: str) -> bool:
+        """Removes an enrolled user from the face database."""
+        logging.info(f"D-Bus request received: RemoveEnrolledUser for '{username}'")
+        from database.embedding_store import delete_embedding
+        try:
+            delete_embedding(username)
+            logging.info(f"Successfully removed enrolled user '{username}' via D-Bus.")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to remove enrolled user '{username}': {e}")
+            return False
+
+    def get_admin_user_internal(self) -> str:
+        from database.embedding_store import get_admin_user
+        try:
+            return get_admin_user() or ""
+        except Exception:
+            return ""
+
+    def set_admin_user_internal(self, username: str) -> bool:
+        from database.embedding_store import set_admin_user
+        try:
+            set_admin_user(username)
+            return True
+        except Exception:
+            return False
+
+    def get_cached_key_hex_internal(self) -> str:
+        from database.embedding_store import get_cached_key
+        key = get_cached_key()
+        return key.hex() if key else ""
+
+    def update_cached_key_internal(self, key_hex: str) -> bool:
+        try:
+            key_bytes = bytes.fromhex(key_hex)
+            if len(key_bytes) == 32:
+                from database.embedding_store import set_cached_key
+                set_cached_key(key_bytes)
+                logging.info("D-Bus service updated cached encryption key.")
+                return True
+        except Exception as e:
+            logging.error(f"Failed to update cached key via D-Bus: {e}")
+        return False
+
 @ClassInfo({"D-Bus Interface": "org.facegate.FaceGate"})
 class FaceGateAdaptor(QDBusAbstractAdaptor):
     def __init__(self, parent: FaceGateService):
@@ -139,8 +191,24 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
         return self.service.request_auth_internal(app_identifier)
 
     @Slot(result=str)
+    def GetCachedKey(self) -> str:
+        return self.service.get_cached_key_hex_internal()
+
+    @Slot(str, result=bool)
+    def UpdateCachedKey(self, key_hex: str) -> bool:
+        return self.service.update_cached_key_internal(key_hex)
+
+    @Slot(result=str)
     def GetEnrolledUsers(self) -> str:
         return self.service.get_enrolled_users_internal()
+
+    @Slot(result=str)
+    def GetAdminUser(self) -> str:
+        return self.service.get_admin_user_internal()
+
+    @Slot(str, result=bool)
+    def SetAdminUser(self, username: str) -> bool:
+        return self.service.set_admin_user_internal(username)
 
     @Slot()
     def EmergencyKill(self):
@@ -149,6 +217,10 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
     @Slot()
     def RelockAll(self):
         self.service.relock_all_internal()
+
+    @Slot(str, result=bool)
+    def RemoveEnrolledUser(self, username: str) -> bool:
+        return self.service.remove_enrolled_user_internal(username)
 
 def register_dbus_service(service_obj) -> bool:
     bus = QDBusConnection.sessionBus()

@@ -184,12 +184,13 @@ class TestSettingsWindow(unittest.TestCase):
         mock_restart.assert_called_once()
         mock_info.assert_called_once()
 
+    @patch('core.monitor_main.AppMonitor')
     @patch('utils.systemd_manager.is_active', return_value=False)
     @patch('psutil.process_iter')
     @patch('subprocess.Popen')
     @patch('PySide6.QtWidgets.QMessageBox.information')
     @patch('utils.systemd_manager.is_enabled', return_value=True)
-    def test_restart_daemon_manual(self, mock_enabled, mock_info, mock_popen, mock_iter, mock_active):
+    def test_restart_daemon_manual(self, mock_enabled, mock_info, mock_popen, mock_iter, mock_active, mock_app_monitor):
         """If systemd is not active, restart_daemon should terminate manual processes and spawn new monitor."""
         from ui.settings_window import SettingsWindow
         from utils.config_loader import Config
@@ -239,8 +240,9 @@ class TestApplicationLifecycle(unittest.TestCase):
         if cls.app is None:
             cls.app = QApplication(sys.argv)
 
+    @patch('core.monitor_main.AppMonitor')
     @patch('core.monitor_main.register_dbus_service', return_value=True)
-    def test_sleep_relocks_all_apps(self, mock_dbus):
+    def test_sleep_relocks_all_apps(self, mock_dbus, mock_app_monitor):
         """PrepareForSleep(true) must relock all authorized apps."""
         from core.monitor_main import FaceGateApplication
         from utils.config_loader import Config
@@ -266,8 +268,9 @@ class TestApplicationLifecycle(unittest.TestCase):
         app.handle_prepare_for_sleep(True)
         self.assertFalse(app.authorized_apps.get("kitty", False))
 
+    @patch('core.monitor_main.AppMonitor')
     @patch('core.monitor_main.register_dbus_service', return_value=True)
-    def test_screensaver_relocks_all_apps(self, mock_dbus):
+    def test_screensaver_relocks_all_apps(self, mock_dbus, mock_app_monitor):
         """ScreenSaver ActiveChanged(true) must relock all authorized apps."""
         from core.monitor_main import FaceGateApplication
         from utils.config_loader import Config
@@ -293,8 +296,9 @@ class TestApplicationLifecycle(unittest.TestCase):
         app.handle_screensaver_active_changed(True)
         self.assertFalse(app.authorized_apps.get("kitty", False))
 
+    @patch('core.monitor_main.AppMonitor')
     @patch('core.monitor_main.register_dbus_service', return_value=True)
-    def test_quit_clears_cached_key(self, mock_dbus):
+    def test_quit_clears_cached_key(self, mock_dbus, mock_app_monitor):
         """quit_app() must clear the cached encryption key from memory."""
         from core.monitor_main import FaceGateApplication
         from utils.config_loader import Config
@@ -328,11 +332,12 @@ class TestEnrollmentFlow(unittest.TestCase):
         if cls.app is None:
             cls.app = QApplication(sys.argv)
 
+    @patch('core.monitor_main.AppMonitor')
     @patch('core.monitor_main.register_dbus_service', return_value=True)
     @patch('ui.auth_dialog.AuthDialog')
     @patch('database.embedding_store.load_embeddings',
            return_value={"test_user": np.zeros(512)})
-    def test_enrollment_requires_both_password_and_face(self, mock_load, mock_auth_dialog, mock_dbus):
+    def test_enrollment_requires_both_password_and_face(self, mock_load, mock_auth_dialog, mock_dbus, mock_app_monitor):
         """Enrollment must require face verification when users exist."""
         from core.monitor_main import FaceGateApplication
         from utils.config_loader import Config
@@ -356,11 +361,12 @@ class TestEnrollmentFlow(unittest.TestCase):
             self.assertEqual(kwargs.get("mode"), "face")
             mock_show.assert_called_once()
 
+    @patch('core.monitor_main.AppMonitor')
     @patch('core.monitor_main.register_dbus_service', return_value=True)
     @patch('ui.auth_dialog.AuthDialog')
     @patch('database.embedding_store.load_embeddings', return_value={})
     @patch('core.monitor_main.os.path.exists', return_value=False)
-    def test_enrollment_skips_face_when_no_users(self, mock_exists, mock_load, mock_auth_dialog, mock_dbus):
+    def test_enrollment_skips_face_when_no_users(self, mock_exists, mock_load, mock_auth_dialog, mock_dbus, mock_app_monitor):
         """Enrollment with no enrolled users must only require password (no face)."""
         from core.monitor_main import FaceGateApplication
         from utils.config_loader import Config
@@ -600,7 +606,7 @@ class TestThemeDynamicUpdating(unittest.TestCase):
         qss_dark = get_sidebar_qss(c_dark)
         qss_light = get_sidebar_qss(c_light)
         
-        self.assertIn("#191624", qss_dark)
+        self.assertIn("#110f1c", qss_dark)
         self.assertIn("#ede9fe", qss_light)
 
 

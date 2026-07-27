@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 )
@@ -88,7 +89,17 @@ class AuthDialog(QDialog):
         self.mode = mode
         self.timeout_seconds = timeout_seconds
         
-        self.theme_mode = "light"
+        # Determine theme mode from config
+        from utils.config_loader import get_config
+        from ui.theme import is_system_dark_mode
+        try:
+            _cfg_theme = get_config().get("behavior.theme", "system")
+            if _cfg_theme == "system":
+                self.theme_mode = "dark" if is_system_dark_mode() else "light"
+            else:
+                self.theme_mode = _cfg_theme
+        except Exception:
+            self.theme_mode = "light"
         self.authenticated = False
         self.fallback_to_password = False
         self.camera_error = False
@@ -126,7 +137,7 @@ class AuthDialog(QDialog):
         self.setModal(True)
         
         # Determine screen-based size
-        from PySide6.QtGui import QGuiApplication, QColor
+        from PySide6.QtGui import QGuiApplication
         screen = QGuiApplication.primaryScreen()
         if screen:
             screen_size = screen.size()
@@ -475,7 +486,7 @@ class AuthDialog(QDialog):
                 matched_face = face
             else:
                 color = (0, 0, 255) # Red in BGR
-                text = f"Unknown"
+                text = "Unknown"
                 if score > 0:
                     text += f" ({score:.2f})"
             
@@ -529,8 +540,11 @@ class AuthDialog(QDialog):
             self.matched_centroids.clear()
             if len(faces) > 0:
                 self.unknown_face_ticks += 1
-                if self.unknown_face_ticks >= 45: # ~1.5 - 2s of unknown face detection
-                    logging.info("Face recognition failed (unknown face threshold). Falling back to password.")
+                if not self.enrolled_embeddings:
+                    self.status_label.setText("Scanning face... Click 'Use Password Instead' if needed.")
+                    self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
+                if self.unknown_face_ticks >= 90: # ~3 seconds of continuous face scanning
+                    logging.info("Face recognition scan complete. Falling back to password.")
                     self.switch_to_password_mode()
                     return
 
