@@ -17,6 +17,8 @@ class AnimatedSidebar(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(190)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.anim = None
         self.max_anim = None
         self.setMouseTracking(True)
@@ -918,13 +920,15 @@ class SettingsWindow(QDialog):
 
         # Read-only attributes layout
         self.kdf_label = QLabel("KDF: PBKDF2-HMAC-SHA256 (600,000 iterations)")
-        self.kdf_label.setStyleSheet("font-size: 13px; border: none;")
-        self.kdf_label.setProperty("secondary", True)
+        style_themed_label(self.kdf_label, "TEXT_PRIMARY", "font-size: 13px; border: none;")
+        self.kdf_label.setProperty("extra_css", "font-size: 13px; border: none;")
+        self._themed_labels.append((self.kdf_label, "TEXT_PRIMARY"))
         c2_layout.addWidget(self.kdf_label)
 
         self.cipher_label = QLabel("Cipher: AES-256-GCM (Authenticated Encrypt-then-MAC)")
-        self.cipher_label.setStyleSheet("font-size: 13px; border: none;")
-        self.cipher_label.setProperty("secondary", True)
+        style_themed_label(self.cipher_label, "TEXT_PRIMARY", "font-size: 13px; border: none;")
+        self.cipher_label.setProperty("extra_css", "font-size: 13px; border: none;")
+        self._themed_labels.append((self.cipher_label, "TEXT_PRIMARY"))
         c2_layout.addWidget(self.cipher_label)
 
         # Load values dynamically from config
@@ -932,13 +936,15 @@ class SettingsWindow(QDialog):
         margin = self.config.get("recognition.ambiguity_margin", "0.03")
 
         self.thresh_label = QLabel(f"Similarity Threshold: {thresh} (Required matching score)")
-        self.thresh_label.setStyleSheet("font-size: 13px; border: none;")
-        self.thresh_label.setProperty("secondary", True)
+        style_themed_label(self.thresh_label, "TEXT_PRIMARY", "font-size: 13px; border: none;")
+        self.thresh_label.setProperty("extra_css", "font-size: 13px; border: none;")
+        self._themed_labels.append((self.thresh_label, "TEXT_PRIMARY"))
         c2_layout.addWidget(self.thresh_label)
 
         self.margin_label = QLabel(f"Ambiguity Margin: {margin} (Required margin between top candidates)")
-        self.margin_label.setStyleSheet("font-size: 13px; border: none;")
-        self.margin_label.setProperty("secondary", True)
+        style_themed_label(self.margin_label, "TEXT_PRIMARY", "font-size: 13px; border: none;")
+        self.margin_label.setProperty("extra_css", "font-size: 13px; border: none;")
+        self._themed_labels.append((self.margin_label, "TEXT_PRIMARY"))
         c2_layout.addWidget(self.margin_label)
 
         layout.addWidget(self.card_security_profiles)
@@ -1240,26 +1246,27 @@ class SettingsWindow(QDialog):
         self._themed_labels.append((logo, "ACCENT_PURPLE"))
         card_layout.addWidget(logo)
 
-        version = QLabel("Version: 0.1.0")
-        style_themed_label(version, "TEXT_SECONDARY", "font-size: 13px; border: none; font-weight: bold;")
+        version = QLabel("Version: 1.0.0 (Production Release)")
+        style_themed_label(version, "TEXT_PRIMARY", "font-size: 13px; border: none; font-weight: bold;")
         version.setProperty("extra_css", "font-size: 13px; border: none; font-weight: bold;")
-        self._themed_labels.append((version, "TEXT_SECONDARY"))
-        version.setProperty("secondary", True)
+        self._themed_labels.append((version, "TEXT_PRIMARY"))
         card_layout.addWidget(version)
 
         desc = QLabel("FaceGate-Linux is a lightweight security wrapper daemon that locks system application launches "
                       "using face recognition. It combines process scanning, SIGSTOP interception, D-Bus session controls, "
                       "and authenticated AES-256-GCM data storage.")
-        desc.setStyleSheet("font-size: 13px; border: none; line-height: 1.4;")
-        desc.setProperty("secondary", True)
+        style_themed_label(desc, "TEXT_SECONDARY", "font-size: 13px; border: none; line-height: 1.4;")
+        desc.setProperty("extra_css", "font-size: 13px; border: none; line-height: 1.4;")
         desc.setWordWrap(True)
+        self._themed_labels.append((desc, "TEXT_SECONDARY"))
         card_layout.addWidget(desc)
 
         card_layout.addSpacing(10)
         
         info = QLabel("Created by voidnode.")
-        info.setStyleSheet("font-size: 12px; border: none; font-style: italic;")
-        info.setProperty("secondary", True)
+        style_themed_label(info, "TEXT_SECONDARY", "font-size: 12px; border: none; font-style: italic;")
+        info.setProperty("extra_css", "font-size: 12px; border: none; font-style: italic;")
+        self._themed_labels.append((info, "TEXT_SECONDARY"))
         card_layout.addWidget(info)
 
         layout.addWidget(self.card_about)
@@ -2138,14 +2145,28 @@ class SettingsWindow(QDialog):
         layout.addLayout(btn_layout)
 
         # Scroll area for grid of captures
-        from PySide6.QtWidgets import QScrollArea, QGridLayout
+        from PySide6.QtWidgets import QScrollArea, QGridLayout, QFrame
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea, QScrollArea > QWidget, QAbstractScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QWidget#qt_scrollarea_viewport {
+                background: transparent;
+                border: none;
+            }
+        """)
+        if self.scroll_area.viewport():
+            self.scroll_area.viewport().setStyleSheet("background: transparent; border: none;")
         
         self.gallery_widget = QWidget()
+        self.gallery_widget.setStyleSheet("background: transparent; border: none;")
         self.gallery_layout = QGridLayout(self.gallery_widget)
         self.gallery_layout.setSpacing(16)
-        self.gallery_layout.setContentsMargins(16, 16, 16, 16)
+        self.gallery_layout.setContentsMargins(0, 0, 0, 0)
         
         self.scroll_area.setWidget(self.gallery_widget)
         layout.addWidget(self.scroll_area)
@@ -2164,6 +2185,9 @@ class SettingsWindow(QDialog):
         import datetime
         from PySide6.QtGui import QPixmap
         
+        # Remove old intruder labels from _themed_labels to prevent memory accumulation
+        self._themed_labels = [(lbl, key) for (lbl, key) in self._themed_labels if not (hasattr(lbl, 'objectName') and lbl.objectName().startswith('intruder_'))]
+
         # Clear existing layout items
         while self.gallery_layout.count():
             item = self.gallery_layout.takeAt(0)
@@ -2187,6 +2211,11 @@ class SettingsWindow(QDialog):
         self.intruders_empty_label.hide()
         self.scroll_area.show()
         self.clear_intruders_btn.show()
+
+        from ui.theme import get_colors, style_themed_label
+        _c_colors = get_colors()
+        app_text_color = _c_colors["TEXT_PRIMARY"]
+        sec_text_color = _c_colors["TEXT_SECONDARY"]
 
         columns = 3
         from PySide6.QtWidgets import QFrame
@@ -2227,16 +2256,17 @@ class SettingsWindow(QDialog):
             card_layout.addWidget(img_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
 
             # App Name Label
-            from ui.theme import style_themed_label
             app_lbl = QLabel(f"<b>Attempted:</b> {app_name}")
-            style_themed_label(app_lbl, "TEXT_PRIMARY", "font-size: 12px; border: none; background: transparent;")
+            app_lbl.setObjectName("intruder_app_lbl")
+            style_themed_label(app_lbl, "TEXT_PRIMARY", f"font-size: 12px; color: {app_text_color}; border: none; background: transparent;")
             app_lbl.setWordWrap(True)
             self._themed_labels.append((app_lbl, "TEXT_PRIMARY"))
             card_layout.addWidget(app_lbl)
 
             # Time Label
             time_lbl = QLabel(formatted_time)
-            style_themed_label(time_lbl, "TEXT_SECONDARY", "font-size: 11px; border: none; background: transparent;")
+            time_lbl.setObjectName("intruder_time_lbl")
+            style_themed_label(time_lbl, "TEXT_SECONDARY", f"font-size: 11px; color: {sec_text_color}; border: none; background: transparent;")
             time_lbl.setProperty("secondary", True)
             self._themed_labels.append((time_lbl, "TEXT_SECONDARY"))
             card_layout.addWidget(time_lbl)

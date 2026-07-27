@@ -1,6 +1,7 @@
 # FaceGate-Linux 🛡️👤
 
 <p align="center">
+  <img src="https://img.shields.io/badge/version-v1.0.0-blue?style=for-the-badge" alt="Version 1.0.0">
   <img src="https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge&logo=pytest" alt="Build Passing">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=for-the-badge&logo=python" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/crypto-AES--256--GCM-purple?style=for-the-badge" alt="AES-256-GCM">
