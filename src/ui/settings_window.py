@@ -1,4 +1,16 @@
 import os
+import ctypes
+
+# Preload libc and librt with RTLD_GLOBAL to resolve GLIBC symbol conflicts (__pointer_chk_guard) on Linux
+try:
+    ctypes.CDLL("libc.so.6", mode=ctypes.RTLD_GLOBAL)
+except Exception:
+    pass
+try:
+    ctypes.CDLL("librt.so.1", mode=ctypes.RTLD_GLOBAL)
+except Exception:
+    pass
+
 import subprocess
 import logging
 from PySide6.QtWidgets import (
@@ -12,6 +24,7 @@ from utils.config_loader import get_config
 from utils.systemd_manager import is_enabled, enable, disable
 from ui.app_picker_dialog import AppPickerDialog
 from locking.launcher_sub import apply_substitution, restore_substitution
+from ui.theme import AnimatedComboBox, AnimatedCheckBox, AnimatedSpinBox
 
 class AnimatedSidebar(QListWidget):
     def __init__(self, parent=None):
@@ -779,7 +792,8 @@ class SettingsWindow(QDialog):
         self.apps_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.apps_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.apps_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.apps_table.verticalHeader().setDefaultSectionSize(48)
+        self.apps_table.setWordWrap(True)
+        self.apps_table.verticalHeader().setDefaultSectionSize(56)
         self.apps_table.verticalHeader().setVisible(False)
         
         layout.addWidget(self.apps_table)
@@ -838,13 +852,8 @@ class SettingsWindow(QDialog):
         self.change_pwd_btn.setObjectName("changePwdBtn")
         self.change_pwd_btn.clicked.connect(self.trigger_password_change)
         
-        self.enroll_btn = QPushButton("Enroll New Face (GUI)...")
-        self.enroll_btn.setObjectName("enrollBtn")
-        self.enroll_btn.clicked.connect(self.open_enrollment_wizard)
-        
         h_btn_layout = QHBoxLayout()
         h_btn_layout.addWidget(self.change_pwd_btn)
-        h_btn_layout.addWidget(self.enroll_btn)
         h_btn_layout.addStretch()
         c1_layout.addLayout(h_btn_layout)
         
@@ -953,6 +962,10 @@ class SettingsWindow(QDialog):
         self.tab_stack.addWidget(self.wrap_in_scroll_area(page))
 
     def open_enrollment_wizard(self):
+        if not self.verify_settings_action("Enroll New Face"):
+            QMessageBox.warning(self, "Access Denied", "Admin verification failed. Enrollment cancelled.")
+            return
+
         from ui.enrollment_wizard import EnrollmentWizard
         dialog = EnrollmentWizard(self)
         dialog.exec()
@@ -988,7 +1001,7 @@ class SettingsWindow(QDialog):
         self._themed_labels.append((startup_lbl, "HEADER_TEXT"))
         startup_layout.addWidget(startup_lbl)
 
-        self.autostart_check = QCheckBox("Start FaceGate automatically when you log in")
+        self.autostart_check = AnimatedCheckBox("Start FaceGate automatically when you log in")
         startup_layout.addWidget(self.autostart_check)
 
         delay_layout = QHBoxLayout()
@@ -1007,9 +1020,7 @@ class SettingsWindow(QDialog):
         theme_lbl = QLabel("Application Theme Mode:")
         theme_lbl.setStyleSheet("font-size: 13px;")
         theme_lbl.setProperty("secondary", True)
-        from PySide6.QtWidgets import QListView
-        self.theme_combo = QComboBox()
-        self.theme_combo.setView(QListView())
+        self.theme_combo = AnimatedComboBox()
         self.theme_combo.addItem("System Default Theme", "system")
         self.theme_combo.addItem("Light Theme Mode", "light")
         self.theme_combo.addItem("Dark Theme Mode", "dark")
@@ -1039,8 +1050,7 @@ class SettingsWindow(QDialog):
         policy_form.setSpacing(10)
         policy_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
 
-        self.policy_combo = QComboBox()
-        self.policy_combo.setView(QListView())
+        self.policy_combo = AnimatedComboBox()
         self.policy_combo.addItem("Close and exit the locked application immediately (Recommended)", "kill")
         self.policy_combo.addItem("Freeze the application in the background", "keep_stopped")
         policy_form.addRow("If authentication is cancelled or fails:", self.policy_combo)
@@ -1065,7 +1075,7 @@ class SettingsWindow(QDialog):
         prot_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #ef4444;")
         prot_layout.addWidget(prot_lbl)
 
-        self.protection_check = QCheckBox("Enable anti-uninstall protection (Recommended)")
+        self.protection_check = AnimatedCheckBox("Enable anti-uninstall protection (Recommended)")
         self.protection_check.clicked.connect(self.handle_protection_clicked)
         prot_layout.addWidget(self.protection_check)
         
@@ -1124,10 +1134,10 @@ class SettingsWindow(QDialog):
         self._themed_labels.append((notif_lbl, "HEADER_TEXT"))
         notif_layout.addWidget(notif_lbl)
 
-        self.notify_check = QCheckBox("Show desktop notification banners on successful unlocks")
+        self.notify_check = AnimatedCheckBox("Show desktop notification banners on successful unlocks")
         notif_layout.addWidget(self.notify_check)
 
-        self.idle_check = QCheckBox("Automatically lock open applications when system becomes idle")
+        self.idle_check = AnimatedCheckBox("Automatically lock open applications when system becomes idle")
         notif_layout.addWidget(self.idle_check)
 
         idle_time_layout = QHBoxLayout()
@@ -1143,10 +1153,10 @@ class SettingsWindow(QDialog):
         idle_time_layout.addStretch()
         notif_layout.addLayout(idle_time_layout)
 
-        self.sleep_lock_check = QCheckBox("Automatically lock all open applications when the system sleeps or locks (Recommended)")
+        self.sleep_lock_check = AnimatedCheckBox("Automatically lock all open applications when the system sleeps or locks (Recommended)")
         notif_layout.addWidget(self.sleep_lock_check)
 
-        self.lock_settings_check = QCheckBox("Require face/password verification to open settings window (Recommended)")
+        self.lock_settings_check = AnimatedCheckBox("Require face/password verification to open settings window (Recommended)")
         notif_layout.addWidget(self.lock_settings_check)
 
         layout.addWidget(self.card_notifications)
@@ -1178,8 +1188,7 @@ class SettingsWindow(QDialog):
         filter_lbl.setStyleSheet("font-size: 13px; font-weight: 500;")
         filter_lbl.setProperty("secondary", True)
         
-        self.log_filter_combo = QComboBox()
-        self.log_filter_combo.setView(QListView())
+        self.log_filter_combo = AnimatedComboBox()
         self.log_filter_combo.addItems(["All Attempts", "Success", "Failed", "Timeout", "Bypass"])
         self.log_filter_combo.currentIndexChanged.connect(self.populate_logs_table)
         
@@ -1360,38 +1369,40 @@ class SettingsWindow(QDialog):
             if widget:
                 widget.deleteLater()
 
-        # Fetch enrolled usernames
+        # Fetch enrolled usernames (try database store first, fallback to D-Bus)
         usernames = []
         try:
-            from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply
-            bus = QDBusConnection.sessionBus()
-            if bus.isConnected():
-                interface = QDBusInterface(
-                    "org.facegate.FaceGate",
-                    "/org/facegate/FaceGate",
-                    "org.facegate.FaceGate",
-                    bus
-                )
-                if interface.isValid():
-                    raw_reply = interface.call("GetEnrolledUsers")
-                    reply = QDBusReply(raw_reply)
-                    if reply.isValid():
-                        users_str = reply.value()
-                        if users_str:
-                            usernames = [u for u in users_str.split(",") if u]
-        except Exception as e:
-            logging.error(f"Failed to load enrolled users list via D-Bus: {e}")
+            from database.embedding_store import load_embeddings
+            enrolled = load_embeddings()
+            if enrolled:
+                usernames = list(enrolled.keys())
+        except Exception:
+            usernames = []
 
         if not usernames:
-            from database.embedding_store import load_embeddings
             try:
-                enrolled = load_embeddings()
-                usernames = list(enrolled.keys())
-            except Exception:
-                usernames = []
+                from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply
+                bus = QDBusConnection.sessionBus()
+                if bus.isConnected():
+                    interface = QDBusInterface(
+                        "org.facegate.FaceGate",
+                        "/org/facegate/FaceGate",
+                        "org.facegate.FaceGate",
+                        bus
+                    )
+                    if interface.isValid():
+                        raw_reply = interface.call("GetEnrolledUsers")
+                        reply = QDBusReply(raw_reply)
+                        if reply.isValid():
+                            users_str = reply.value()
+                            if users_str:
+                                usernames = [u for u in users_str.split(",") if u]
+            except Exception as e:
+                logging.error(f"Failed to load enrolled users list via D-Bus: {e}")
 
         if not usernames:
             self.enrolled_empty_label.show()
+            self._update_sidebar_enrolled_count()
             return
 
         self.enrolled_empty_label.hide()
@@ -1471,9 +1482,10 @@ class SettingsWindow(QDialog):
                 row_layout.addWidget(make_admin_btn)
 
             reenroll_btn = QPushButton("Re-Enroll")
+            cancel_bg = c.get("CANCEL_BTN_BG", "#25213b")
             reenroll_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: transparent;
+                    background-color: {cancel_bg};
                     color: {text_p};
                     border: 1px solid {border_n};
                     border-radius: 6px;
@@ -1508,6 +1520,8 @@ class SettingsWindow(QDialog):
             row_layout.addWidget(delete_btn)
 
             self.enrolled_users_layout.addWidget(row_widget)
+
+        self._update_sidebar_enrolled_count()
 
     def _make_remove_enrolled_callback(self, username):
         return lambda: self._remove_enrolled_user(username)
@@ -1696,9 +1710,12 @@ class SettingsWindow(QDialog):
             QMessageBox.critical(self, "Failed", f"Could not set admin: {e}")
 
     def _reenroll_user(self, username):
+        if not self.verify_settings_action(f"Re-Enroll Face Profile for '{username}'"):
+            QMessageBox.warning(self, "Access Denied", "Admin verification failed. Re-enrollment cancelled.")
+            return
+
         from ui.enrollment_wizard import EnrollmentWizard
-        dialog = EnrollmentWizard(self)
-        dialog.username_input.setText(username)
+        dialog = EnrollmentWizard(self, target_username=username)
         dialog.exec()
         self.populate_enrolled_users()
 
@@ -1717,14 +1734,21 @@ class SettingsWindow(QDialog):
             icon_item.setIcon(icon)
             
             # Show executable path and desktop file info
-            details_text = f"{app.get('executable', '')}\n({app.get('desktop_name', '')})"
+            exec_name = app.get('executable', '')
+            desktop_name = app.get('desktop_name', '')
+            details_text = f"⚙️ Exec: {exec_name}"
+            if desktop_name:
+                details_text += f"\n📄 Desktop: {desktop_name}"
+                
             details_item = QTableWidgetItem(details_text)
             details_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+            details_item.setToolTip(f"Executable: {exec_name}\nDesktop File: {desktop_name or 'N/A'}\nApp ID: {app.get('id', '')}")
             
             # Checkbox for Show in Tray
             checkbox_widget = QWidget()
+            checkbox_widget.setStyleSheet("background: transparent;")
             checkbox_layout = QHBoxLayout(checkbox_widget)
-            checkbox = QCheckBox()
+            checkbox = AnimatedCheckBox()
             checkbox.setChecked(app.get("show_in_tray", True))
             checkbox.stateChanged.connect(lambda state, a_id=app["id"], cb=checkbox: self.handle_tray_toggle(a_id, state, cb))
             checkbox_layout.addWidget(checkbox)
@@ -1732,15 +1756,29 @@ class SettingsWindow(QDialog):
             checkbox_layout.setContentsMargins(0, 0, 0, 0)
             
             # Action Remove Button using app_id instead of row index to prevent indexing glitches
+            action_widget = QWidget()
+            action_widget.setStyleSheet("background: transparent;")
+            action_layout = QHBoxLayout(action_widget)
+            action_layout.setContentsMargins(4, 4, 4, 4)
             remove_btn = QPushButton("Remove")
             remove_btn.setObjectName("removeBtn")
             remove_btn.setStyleSheet("background-color: #ef4444; color: white; border: none; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
             remove_btn.clicked.connect(lambda checked=False, a_id=app["id"]: self.remove_app_by_id(a_id))
+            action_layout.addWidget(remove_btn)
+            action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             
+            # Set items with ItemIsSelectable flag removed for columns 2 and 3
+            item2 = QTableWidgetItem()
+            item2.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            item3 = QTableWidgetItem()
+            item3.setFlags(Qt.ItemFlag.ItemIsEnabled)
+
             self.apps_table.setItem(row, 0, icon_item)
             self.apps_table.setItem(row, 1, details_item)
+            self.apps_table.setItem(row, 2, item2)
+            self.apps_table.setItem(row, 3, item3)
             self.apps_table.setCellWidget(row, 2, checkbox_widget)
-            self.apps_table.setCellWidget(row, 3, remove_btn)
+            self.apps_table.setCellWidget(row, 3, action_widget)
 
     def handle_tray_toggle(self, app_id, state, checkbox):
         checked = (state == Qt.CheckState.Checked.value)
@@ -1943,7 +1981,9 @@ class SettingsWindow(QDialog):
 
     def handle_theme_changed(self):
         new_theme = self.theme_combo.itemData(self.theme_combo.currentIndex())
+        self.theme_mode = new_theme
         self.config.set("behavior.theme", new_theme)
+        self.config.set("ui.theme", new_theme)
         self.apply_theme_dynamically()
         self._loading = True  # Suppress restart banner during theme refresh
         self.populate_enrolled_users()
@@ -1956,36 +1996,45 @@ class SettingsWindow(QDialog):
         self.show_restart_banner()
 
     def verify_settings_action(self, reason: str) -> bool:
-        # Try D-Bus verification first to leverage daemon's cached key and face recognition
+        # Check if we are running directly inside the daemon process that owns org.facegate.FaceGate
         try:
             from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply
             bus = QDBusConnection.sessionBus()
+            is_self_daemon = False
             if bus.isConnected():
-                interface = QDBusInterface(
-                    "org.facegate.FaceGate",
-                    "/org/facegate/FaceGate",
-                    "org.facegate.FaceGate",
-                    bus
-                )
-                if interface.isValid():
-                    raw_reply = interface.call("RequestAuth", reason)
-                    reply = QDBusReply(raw_reply)
-                    if reply.isValid():
-                        success = reply.value()
-                        if success:
-                            from database.embedding_store import get_cached_key, set_cached_key
-                            if get_cached_key() is None:
-                                key_reply = interface.call("GetCachedKey")
-                                q_key_reply = QDBusReply(key_reply)
-                                if q_key_reply.isValid() and q_key_reply.value():
-                                    try:
-                                        key_bytes = bytes.fromhex(q_key_reply.value())
-                                        if len(key_bytes) == 32:
-                                            set_cached_key(key_bytes)
-                                            logging.info("Successfully synced encryption key from daemon in SettingsWindow.")
-                                    except Exception:
-                                        pass
-                        return success
+                try:
+                    owner_reply = bus.interface().serviceOwner("org.facegate.FaceGate")
+                    if owner_reply.isValid() and owner_reply.value() == bus.baseService():
+                        is_self_daemon = True
+                except Exception:
+                    pass
+
+            if is_self_daemon:
+                from database.embedding_store import get_cached_key
+                if get_cached_key():
+                    return True
+                from PySide6.QtWidgets import QApplication
+                app_inst = QApplication.instance()
+                if hasattr(app_inst, "verify_admin_face"):
+                    return app_inst.verify_admin_face(reason)
+            else:
+                if bus.isConnected():
+                    interface = QDBusInterface(
+                        "org.facegate.FaceGate",
+                        "/org/facegate/FaceGate",
+                        "org.facegate.FaceGate",
+                        bus
+                    )
+                    if interface.isValid():
+                        raw_reply = interface.call("RequestAuth", reason)
+                        reply = QDBusReply(raw_reply)
+                        if reply.isValid():
+                            success = reply.value()
+                            if success:
+                                from database.embedding_store import get_cached_key
+                                if get_cached_key():
+                                    logging.info("Encryption key loaded from RAM key file after daemon auth in SettingsWindow.")
+                            return success
         except Exception as e:
             logging.error(f"Failed to verify settings action '{reason}' via D-Bus: {e}")
             
@@ -2056,7 +2105,9 @@ class SettingsWindow(QDialog):
             except Exception as e:
                 logging.error(f"Error substituting launchers for added apps: {e}")
 
-        # 3. Save behavior options to config default.yaml
+        selected_theme = self.theme_combo.itemData(self.theme_combo.currentIndex())
+        self.config.set("behavior.theme", selected_theme)
+        self.config.set("ui.theme", selected_theme)
         self.config.set("behavior.launch_at_login", should_autostart)
         self.config.set("behavior.uninstall_protection", self.protection_check.isChecked())
         self.config.set("app_monitor.on_auth_failure", self.policy_combo.itemData(self.policy_combo.currentIndex()))
@@ -2095,22 +2146,8 @@ class SettingsWindow(QDialog):
         
         # Write config back to file
         if self.config.save():
-            # Hot-reload configuration in running daemon via D-Bus session bus
-            try:
-                from PySide6.QtDBus import QDBusConnection, QDBusInterface
-                bus = QDBusConnection.sessionBus()
-                if bus.isConnected():
-                    interface = QDBusInterface(
-                        "org.facegate.FaceGate",
-                        "/org/facegate/FaceGate",
-                        "org.facegate.FaceGate",
-                        bus
-                    )
-                    if interface.isValid():
-                        interface.call("ReloadConfig")
-                        logging.info("Sent D-Bus ReloadConfig signal to running daemon.")
-            except Exception as ex:
-                logging.warning(f"Could not signal D-Bus daemon of config reload: {ex}")
+            from database.embedding_store import notify_daemon_reload
+            notify_daemon_reload()
 
             from ui.theme import get_colors
             c = get_colors()

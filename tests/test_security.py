@@ -138,6 +138,14 @@ class TestEnvelopeRoundTrip:
         result = read_envelope_file()
         assert result is None
 
+    def test_save_embedding_raises_runtime_error_without_key(self, temp_embedding_paths):
+        """save_embedding() must raise RuntimeError if no encryption key is cached or available."""
+        from database.embedding_store import save_embedding, clear_cached_key
+        clear_cached_key()
+        test_embedding = np.random.randn(512).astype(np.float32)
+        with pytest.raises(RuntimeError, match="no encryption key available"):
+            save_embedding("test_user", test_embedding)
+
 
 class TestCredentialStorePasswordVerification:
     """Tests for verify_password() in the credential store."""
@@ -221,13 +229,12 @@ class TestAdminFaceVerification:
     @patch('PySide6.QtWidgets.QSystemTrayIcon.isSystemTrayAvailable', return_value=False)
     @patch('core.monitor_main.AppMonitor')
     @patch('core.monitor_main.register_dbus_service', return_value=True)
-    @patch('ui.auth_dialog.AuthDialog')
+    @patch('core.monitor_main.FaceGateApplication._run_recognition_subprocess', return_value=(True, "face", 0.9, "admin"))
     @patch('database.embedding_store.load_embeddings')
     @patch('os.path.exists')
-    def test_verify_admin_face_states(self, mock_exists, mock_load, mock_auth_dialog, mock_dbus, mock_app_monitor, mock_tray):
+    def test_verify_admin_face_states(self, mock_exists, mock_load, mock_run_sub, mock_dbus, mock_app_monitor, mock_tray):
         from core.monitor_main import FaceGateApplication
         from utils.config_loader import Config
-        from PySide6.QtWidgets import QDialog
 
         mock_config = Config()
         mock_config.settings = {
@@ -235,41 +242,213 @@ class TestAdminFaceVerification:
         }
         app = FaceGateApplication(config=mock_config)
 
-        # Mock the dialog instance to return Accepted
-        mock_instance = MagicMock()
-        mock_instance.exec.return_value = QDialog.DialogCode.Accepted
-        mock_instance.fallback_to_password = False
-        mock_instance.final_score = 0.9
-        mock_instance.matched_user = "admin"
-        mock_auth_dialog.return_value = mock_instance
-
         # State 1: Fresh boot / true first-run (no enrolled faces, no database exists)
         mock_load.return_value = {}
         mock_exists.return_value = False
 
         res = app.verify_admin_face("test_reason")
         assert res is True, "First-run should bypass and return True immediately"
-        mock_auth_dialog.assert_not_called()
+        mock_run_sub.assert_not_called()
 
         # State 2: Locked daemon with existing database (no cached key, so load_embeddings returns {}, but file exists)
         mock_load.return_value = {}
         mock_exists.return_value = True
-        mock_auth_dialog.reset_mock()
+        mock_run_sub.reset_mock()
 
         res = app.verify_admin_face("test_reason")
-        assert res is True, "Should require AuthDialog.exec() and return True when Accepted"
-        mock_auth_dialog.assert_called_once()
-        kwargs = mock_auth_dialog.call_args[1]
-        assert kwargs.get("mode") == "face", "Locked daemon with database should default to face mode first"
+        assert res is True, "Should require recognition subprocess and return True when Accepted"
+        mock_run_sub.assert_called_once_with("test_reason")
 
         # State 3: Unlocked daemon (key is cached, load_embeddings returns face templates, file exists)
         mock_load.return_value = {"admin": np.zeros(512)}
         mock_exists.return_value = True
-        mock_auth_dialog.reset_mock()
+        mock_run_sub.reset_mock()
 
         res = app.verify_admin_face("test_reason")
-        assert res is True, "Should require AuthDialog.exec() and return True when Accepted"
-        mock_auth_dialog.assert_called_once()
-        kwargs = mock_auth_dialog.call_args[1]
-        assert kwargs.get("mode") == "face", "Unlocked daemon must run in face mode"
+        assert res is True, "Should require recognition subprocess and return True when Accepted"
+        mock_run_sub.assert_called_once_with("test_reason")
+
+
+class TestDBusSecurityHardening:
+    """Tests for D-Bus interface security hardening (Audit §1.1, §1.2, §1.3)."""
+
+    def test_dbus_adaptor_does_not_expose_get_or_update_cached_key(self):
+        """GetCachedKey and UpdateCachedKey must NOT be exposed on FaceGateAdaptor."""
+        from locking.ipc_service import FaceGateAdaptor
+        assert not hasattr(FaceGateAdaptor, "GetCachedKey"), \
+            "CRITICAL: GetCachedKey must NOT be exposed on FaceGateAdaptor"
+        assert not hasattr(FaceGateAdaptor, "UpdateCachedKey"), \
+            "CRITICAL: UpdateCachedKey must NOT be exposed on FaceGateAdaptor"
+
+    def test_remove_enrolled_user_requires_admin_face_verification(self):
+        """RemoveEnrolledUser D-Bus call must require admin face verification."""
+        from locking.ipc_service import FaceGateService
+        mock_app = MagicMock()
+        mock_app.verify_admin_face.return_value = False
+        service = FaceGateService(main_app=mock_app)
+
+        result = service.remove_enrolled_user_internal("target_user")
+        assert result is False, "RemoveEnrolledUser must fail when admin face verification fails"
+        mock_app.verify_admin_face.assert_called_once()
+
+    def test_set_admin_user_requires_admin_face_verification(self):
+        """SetAdminUser D-Bus call must require admin face verification."""
+        from locking.ipc_service import FaceGateService
+        mock_app = MagicMock()
+        mock_app.verify_admin_face.return_value = False
+        service = FaceGateService(main_app=mock_app)
+
+        result = service.set_admin_user_internal("attacker")
+        assert result is False, "SetAdminUser must fail when admin face verification fails"
+        mock_app.verify_admin_face.assert_called_once()
+
+
+class TestCLIEnrollmentAuthentication:
+    """Tests for facegate --enroll CLI authentication gate."""
+
+    @patch("sys.exit", side_effect=SystemExit(1))
+    @patch("recognition.cli_enroll.enroll_user")
+    @patch("security.credential_store.verify_password", return_value=False)
+    @patch("sys.stdin.isatty", return_value=True)
+    @patch("getpass.getpass", return_value="wrong_password")
+    @patch("PySide6.QtDBus.QDBusConnection.sessionBus")
+    @patch("PySide6.QtDBus.QDBusInterface")
+    @patch("os.path.exists", return_value=True)
+    def test_cli_enroll_fails_on_incorrect_password(
+        self, mock_exists, mock_interface, mock_bus, mock_getpass, mock_isatty, mock_verify, mock_enroll, mock_exit
+    ):
+        """facegate --enroll must fail and exit if master password verification fails."""
+        mock_bus.return_value.isConnected.return_value = True
+        mock_iface_instance = MagicMock()
+        mock_iface_instance.isValid.return_value = False
+        mock_interface.return_value = mock_iface_instance
+        from core.monitor_main import main
+
+        test_args = ["facegate", "--enroll", "attacker"]
+        with patch.object(sys, "argv", test_args):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+        mock_enroll.assert_not_called()
+
+    @patch("sys.exit", side_effect=SystemExit(1))
+    @patch("recognition.cli_enroll.enroll_user")
+    @patch("PySide6.QtDBus.QDBusConnection.sessionBus")
+    @patch("PySide6.QtDBus.QDBusInterface")
+    @patch("PySide6.QtDBus.QDBusReply")
+    @patch("os.path.exists", return_value=True)
+    def test_cli_enroll_fails_when_dbus_auth_rejected(
+        self, mock_exists, mock_qdbus_reply, mock_interface, mock_bus, mock_enroll, mock_exit
+    ):
+        """facegate --enroll must fail if D-Bus daemon rejects authentication."""
+        mock_bus.return_value.isConnected.return_value = True
+        mock_iface_instance = MagicMock()
+        mock_iface_instance.isValid.return_value = True
+        mock_interface.return_value = mock_iface_instance
+
+        mock_reply_instance = MagicMock()
+        mock_reply_instance.isValid.return_value = True
+        mock_reply_instance.value.return_value = False  # Auth rejected by daemon
+        mock_qdbus_reply.return_value = mock_reply_instance
+
+        from core.monitor_main import main
+
+        test_args = ["facegate", "--enroll", "attacker"]
+        with patch.object(sys, "argv", test_args):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+        mock_enroll.assert_not_called()
+
+    @patch("sys.exit", side_effect=SystemExit(0))
+    @patch("recognition.cli_enroll.enroll_user")
+    @patch("PySide6.QtDBus.QDBusConnection.sessionBus")
+    @patch("PySide6.QtDBus.QDBusInterface")
+    @patch("PySide6.QtDBus.QDBusReply")
+    @patch("os.path.exists", return_value=True)
+    def test_cli_enroll_succeeds_when_dbus_auth_accepted(
+        self, mock_exists, mock_qdbus_reply, mock_interface, mock_bus, mock_enroll, mock_exit
+    ):
+        """facegate --enroll must proceed to enroll_user if D-Bus daemon accepts authentication."""
+        mock_bus.return_value.isConnected.return_value = True
+        mock_iface_instance = MagicMock()
+        mock_iface_instance.isValid.return_value = True
+        mock_interface.return_value = mock_iface_instance
+
+        mock_reply_instance = MagicMock()
+        mock_reply_instance.isValid.return_value = True
+        mock_reply_instance.value.return_value = True  # Auth accepted by daemon
+        mock_qdbus_reply.return_value = mock_reply_instance
+
+        from core.monitor_main import main
+
+        test_args = ["facegate", "--enroll", "valid_user"]
+        with patch.object(sys, "argv", test_args):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 0
+
+        mock_enroll.assert_called_once_with("valid_user")
+
+
+class TestPersistentLockoutManager:
+    """Tests for persistent cross-process brute-force lockout manager."""
+
+    @pytest.fixture(autouse=True)
+    def temp_lockout_file(self, tmp_path):
+        lockout_path = str(tmp_path / "lockout.json")
+        with patch("security.lockout_manager.LOCKOUT_FILE", lockout_path):
+            from security.lockout_manager import reset_lockout
+            reset_lockout()
+            yield lockout_path
+            reset_lockout()
+
+    def test_lockout_escalation_and_persistence(self, temp_lockout_file):
+        from security.lockout_manager import is_locked_out, record_failed_attempt, reset_lockout
+
+        app_name = "test_app"
+        locked, _ = is_locked_out(app_name)
+        assert not locked
+
+        # 1st attempt
+        record_failed_attempt(app_name)
+        locked, _ = is_locked_out(app_name)
+        assert not locked
+
+        # 2nd attempt
+        record_failed_attempt(app_name)
+        locked, _ = is_locked_out(app_name)
+        assert not locked
+
+        # 3rd attempt -> 2s lockout
+        attempts, lockout_until, remaining = record_failed_attempt(app_name)
+        assert attempts == 3
+        assert remaining > 0
+        locked, rem = is_locked_out(app_name)
+        assert locked
+        assert rem > 0
+        assert os.path.exists(temp_lockout_file)
+
+        # Reset
+        reset_lockout(app_name)
+        locked, _ = is_locked_out(app_name)
+        assert not locked
+
+    def test_ipc_service_blocks_locked_out_requests(self, temp_lockout_file):
+        from security.lockout_manager import record_failed_attempt
+        from locking.ipc_service import FaceGateService
+
+        app_name = "target_app"
+        # Trigger lockout (3 failed attempts)
+        for _ in range(3):
+            record_failed_attempt(app_name)
+
+        service = FaceGateService()
+        result = service.request_auth_internal(app_name)
+        assert result is False, "IPC service RequestAuth must return False when app is locked out"
+
+
+
 

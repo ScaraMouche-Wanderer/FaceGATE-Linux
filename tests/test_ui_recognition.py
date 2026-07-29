@@ -99,14 +99,16 @@ class TestAuthDialog(unittest.TestCase):
         self.assertIsNotNone(dialog.final_score)
 
     def test_password_mode_lockout_after_3_failures(self):
-        """Password dialog should impose lockout after 3 failed attempts."""
+        """Password dialog should impose lockout after 3 failed attempts (tracked per app)."""
         from ui.auth_dialog import AuthDialog
 
-        # Reset class-level state
-        AuthDialog.failed_attempts_count = 0
-        AuthDialog.lockout_until = 0.0
+        # Reset class-level lockout state for test app
+        app_name = "Test App"
+        AuthDialog.lockout_data.pop(app_name, None)
+        from security.lockout_manager import reset_lockout
+        reset_lockout(app_name)
 
-        dialog = AuthDialog("Test App", mode="password")
+        dialog = AuthDialog(app_name, mode="password")
 
         # Simulate 3 failed password attempts
         with patch('security.credential_store.verify_password', return_value=False):
@@ -114,12 +116,13 @@ class TestAuthDialog(unittest.TestCase):
                 dialog.password_input.setText("wrong")
                 dialog.handle_unlock()
 
-        self.assertEqual(AuthDialog.failed_attempts_count, 3)
-        self.assertGreater(AuthDialog.lockout_until, 0.0)
+        app_info = AuthDialog.lockout_data.get(app_name, {})
+        self.assertEqual(app_info.get("attempts"), 3)
+        self.assertGreater(app_info.get("lockout_until"), 0.0)
 
         # Clean up class state
-        AuthDialog.failed_attempts_count = 0
-        AuthDialog.lockout_until = 0.0
+        AuthDialog.lockout_data.pop(app_name, None)
+        reset_lockout(app_name)
 
 
 class TestSettingsWindow(unittest.TestCase):
@@ -161,7 +164,7 @@ class TestSettingsWindow(unittest.TestCase):
 
         self.assertEqual(dialog.apps_table.rowCount(), 1)
         self.assertEqual(dialog.apps_table.item(0, 0).text(), "Kitty Terminal")
-        self.assertEqual(dialog.apps_table.item(0, 1).text(), "kitty\n(kitty.desktop)")
+        self.assertEqual(dialog.apps_table.item(0, 1).text(), "⚙️ Exec: kitty\n📄 Desktop: kitty.desktop")
 
     @patch('utils.systemd_manager.is_active', return_value=True)
     @patch('utils.systemd_manager.restart', return_value=True)
@@ -334,10 +337,10 @@ class TestEnrollmentFlow(unittest.TestCase):
 
     @patch('core.monitor_main.AppMonitor')
     @patch('core.monitor_main.register_dbus_service', return_value=True)
-    @patch('ui.auth_dialog.AuthDialog')
+    @patch('core.monitor_main.FaceGateApplication._run_recognition_subprocess', return_value=(True, "face", 0.9, "admin"))
     @patch('database.embedding_store.load_embeddings',
            return_value={"test_user": np.zeros(512)})
-    def test_enrollment_requires_both_password_and_face(self, mock_load, mock_auth_dialog, mock_dbus, mock_app_monitor):
+    def test_enrollment_requires_both_password_and_face(self, mock_load, mock_run_sub, mock_dbus, mock_app_monitor):
         """Enrollment must require face verification when users exist."""
         from core.monitor_main import FaceGateApplication
         from utils.config_loader import Config
@@ -349,25 +352,19 @@ class TestEnrollmentFlow(unittest.TestCase):
             "behavior": {"uninstall_protection": False},
         }
 
-        mock_instance = MagicMock()
-        mock_instance.exec.return_value = QDialog.DialogCode.Accepted
-        mock_auth_dialog.return_value = mock_instance
-
         app = FaceGateApplication(config=mock_config)
         with patch('ui.enrollment_wizard.EnrollmentWizard.show') as mock_show:
             app.open_enrollment()
-            mock_auth_dialog.assert_called_once()
-            kwargs = mock_auth_dialog.call_args[1]
-            self.assertEqual(kwargs.get("mode"), "face")
+            mock_run_sub.assert_called_once_with("Enrollment Access")
             mock_show.assert_called_once()
 
     @patch('core.monitor_main.AppMonitor')
     @patch('core.monitor_main.register_dbus_service', return_value=True)
-    @patch('ui.auth_dialog.AuthDialog')
+    @patch('core.monitor_main.FaceGateApplication._run_recognition_subprocess', return_value=(True, "password", None, "admin"))
     @patch('database.embedding_store.load_embeddings', return_value={})
     @patch('core.monitor_main.os.path.exists', return_value=False)
-    def test_enrollment_skips_face_when_no_users(self, mock_exists, mock_load, mock_auth_dialog, mock_dbus, mock_app_monitor):
-        """Enrollment with no enrolled users must only require password (no face)."""
+    def test_enrollment_skips_face_when_no_users(self, mock_exists, mock_load, mock_run_sub, mock_dbus, mock_app_monitor):
+        """Enrollment with no enrolled users must skip verification on first run."""
         from core.monitor_main import FaceGateApplication
         from utils.config_loader import Config
 
@@ -378,16 +375,10 @@ class TestEnrollmentFlow(unittest.TestCase):
             "behavior": {"uninstall_protection": False},
         }
 
-        mock_instance = MagicMock()
-        mock_instance.exec.return_value = QDialog.DialogCode.Accepted
-        mock_auth_dialog.return_value = mock_instance
-
         app = FaceGateApplication(config=mock_config)
         with patch('ui.enrollment_wizard.EnrollmentWizard.show') as mock_show:
             app.open_enrollment()
-            mock_auth_dialog.assert_called_once()
-            kwargs = mock_auth_dialog.call_args[1]
-            self.assertEqual(kwargs.get("mode"), "password")
+            mock_run_sub.assert_not_called()
             mock_show.assert_called_once()
 
 
@@ -405,6 +396,19 @@ class TestEnrollmentWizard(unittest.TestCase):
         from ui.enrollment_wizard import EnrollmentWizard
         wizard = EnrollmentWizard()
         self.assertIsNotNone(wizard.stack)
+
+    @patch('database.embedding_store.get_cached_key', return_value=b'12345678901234567890123456789012')
+    @patch('ui.enrollment_wizard.get_cached_key', return_value=b'12345678901234567890123456789012')
+    @patch('ui.enrollment_wizard.load_embeddings', return_value={'ScaraMouche': np.zeros((512,))})
+    @patch('PySide6.QtWidgets.QMessageBox.warning')
+    def test_blocks_duplicate_username_enrollment(self, mock_warning, mock_load, mock_key_ui, mock_key_db):
+        """EnrollmentWizard must strictly block duplicate username enrollment when target_username is None."""
+        from ui.enrollment_wizard import EnrollmentWizard
+        wizard = EnrollmentWizard()
+        wizard.username_input.setText("scaramouche")  # Case-insensitive match for ScaraMouche
+        wizard.process_intro_next()
+        mock_warning.assert_called_once()
+        self.assertIn("already enrolled", mock_warning.call_args[0][2].lower())
 
 
 class TestIntruderSelfieGate(unittest.TestCase):

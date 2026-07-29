@@ -23,7 +23,7 @@
 - 🔒 **Biometric Application Locking**: Automatically detects target process launches and suspends them via `SIGSTOP` until authenticated.
 - 👤 **Primary Admin & Multi-User Access Control**: Gated settings access requiring Primary Admin face or Master Password verification. Admins can manage, test, re-enroll, or delete facial profiles.
 - ⚡ **Local & Private Face Recognition**: Powered by ONNX Runtime and the lightweight `buffalo_l` InsightFace model for 100% offline, private, real-time biometric verification.
-- 👁️ **Liveness Checking & Spoof Protection**: Head-pose variation and eye motion checks protect against photo and video bypass attempts.
+- 👁️ **Liveness Checking & Spoof Protection**: Bounding-box centroid micro-motion tracking protects against static photo bypass attempts.
 - 📸 **Intruder Selfie Gallery**: Automatically captures webcam photos of unauthorized access attempts and displays them in a high-contrast visual gallery.
 - 🔑 **RAM-Backed Session Key Vault**: Encryption keys are cached in user-private RAM `tmpfs` (`/run/user/{uid}/facegate.key`), enabling seamless face recognition across desktop sessions while maintaining AES-256-GCM encryption-at-rest.
 - 🎨 **Modern High-Contrast Dark & Light Design System**: Stunning PySide6 GUI with vibrant color palettes (`#c084fc` headers, slate cards, transparent viewports, custom `QComboBox` delegates).

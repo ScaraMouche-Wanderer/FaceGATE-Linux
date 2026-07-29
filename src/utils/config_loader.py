@@ -2,6 +2,8 @@ import os
 import yaml
 import logging
 
+DEFAULT_FILENAME = "default" + ".yaml"
+
 class Config:
     def __init__(self):
         self.settings = {}
@@ -34,6 +36,15 @@ class Config:
             except Exception as e:
                 logging.error(f"Error reading user config: {e}")
                 
+        # Synchronize theme values across behavior and ui namespaces
+        theme_val = self.get("behavior.theme") or self.get("ui.theme") or "system"
+        if "behavior" not in self.settings or not isinstance(self.settings["behavior"], dict):
+            self.settings["behavior"] = {}
+        if "ui" not in self.settings or not isinstance(self.settings["ui"], dict):
+            self.settings["ui"] = {}
+        self.settings["behavior"]["theme"] = theme_val
+        self.settings["ui"]["theme"] = theme_val
+
     def _deep_merge(self, base, overrides):
         for k, v in overrides.items():
             if isinstance(v, dict) and k in base and isinstance(base[k], dict):
@@ -51,6 +62,12 @@ class Config:
                 return default
         return val
 
+    def reload(self):
+        """Hot-reloads configuration from disk without creating a new Config instance."""
+        self.settings = {}
+        self.load()
+        logging.info("Configuration hot-reloaded from disk.")
+
     def set(self, key, value):
         parts = key.split('.')
         val = self.settings
@@ -60,14 +77,48 @@ class Config:
             val = val[part]
         val[parts[-1]] = value
 
+        if key in ("behavior.theme", "ui.theme"):
+            if "behavior" in self.settings and isinstance(self.settings["behavior"], dict):
+                self.settings["behavior"]["theme"] = value
+            if "ui" in self.settings and isinstance(self.settings["ui"], dict):
+                self.settings["ui"]["theme"] = value
+
+    def _diff_against_defaults(self, current: dict, defaults: dict) -> dict:
+        diff = {}
+        for k, v in current.items():
+            if k not in defaults:
+                diff[k] = v
+            elif isinstance(v, dict) and isinstance(defaults.get(k), dict):
+                sub_diff = self._diff_against_defaults(v, defaults[k])
+                if sub_diff:
+                    diff[k] = sub_diff
+            elif v != defaults.get(k):
+                diff[k] = v
+        return diff
+
     def save(self):
         user_config_path = os.path.expanduser("~/.config/facegate/config.yaml")
         try:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            default_config_path = os.path.abspath(
+                os.path.join(current_dir, "..", "..", "config", DEFAULT_FILENAME)
+            )
+            defaults = {}
+            if os.path.exists(default_config_path):
+                with open(default_config_path, 'r') as f:
+                    defaults = yaml.safe_load(f) or {}
+
+            diff_to_save = self._diff_against_defaults(self.settings, defaults)
+
             os.makedirs(os.path.dirname(user_config_path), exist_ok=True)
-            with open(user_config_path, 'w') as f:
-                yaml.safe_dump(self.settings, f, default_flow_style=False, sort_keys=False)
-            os.chmod(user_config_path, 0o600)
-            logging.info(f"Configuration saved successfully to {user_config_path}")
+            tmp_path = user_config_path + ".tmp"
+            with open(tmp_path, 'w') as f:
+                yaml.safe_dump(diff_to_save, f, default_flow_style=False, sort_keys=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, user_config_path)
+            logging.info(f"Configuration diff saved successfully to {user_config_path}")
             return True
         except Exception as e:
             logging.error(f"Error saving config to {user_config_path}: {e}")

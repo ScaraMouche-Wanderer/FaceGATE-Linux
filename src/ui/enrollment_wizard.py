@@ -14,8 +14,9 @@ from security.credential_store import verify_password
 from ui.auth_dialog import convert_cv_to_pixmap
 
 class EnrollmentWizard(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, target_username: str = ""):
         super().__init__(parent)
+        self.target_username = target_username
         # Determine theme mode from config
         from utils.config_loader import get_config
         from ui.theme import is_system_dark_mode
@@ -30,7 +31,7 @@ class EnrollmentWizard(QDialog):
         self.detector = None
         self.camera_worker = None
         
-        self.username = ""
+        self.username = target_username
         self.embeddings = []
         self.required_frames = 15
         self.processing_fps_limiter = 0.0 # Time threshold
@@ -124,11 +125,17 @@ class EnrollmentWizard(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
-        header = QLabel("Enrolled User Setup")
+        header_text = f"Re-Enroll User: {self.target_username}" if self.target_username else "Enrolled User Setup"
+        header = QLabel(header_text)
         header.setObjectName("wizardHeader")
         layout.addWidget(header)
 
-        desc = QLabel("Welcome to the guided FaceGate user enrollment. Enter the username you want to associate with your facial profile.")
+        desc_text = (
+            f"Re-enrolling face profile for user '{self.target_username}'. Click Next to start camera capture."
+            if self.target_username else
+            "Welcome to the guided FaceGate user enrollment. Enter the username you want to associate with your facial profile."
+        )
+        desc = QLabel(desc_text)
         desc.setObjectName("wizardDesc")
         desc.setWordWrap(True)
         layout.addWidget(desc)
@@ -140,6 +147,9 @@ class EnrollmentWizard(QDialog):
         u_lbl.setObjectName("boldLabel")
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("e.g. voidnode")
+        if self.target_username:
+            self.username_input.setText(self.target_username)
+            self.username_input.setReadOnly(True)
         u_layout.addWidget(u_lbl)
         u_layout.addWidget(self.username_input)
         layout.addLayout(u_layout)
@@ -264,6 +274,15 @@ class EnrollmentWizard(QDialog):
             QMessageBox.warning(self, "Invalid Username", "Username cannot be empty.")
             return
 
+        # Validate username format (security: prevent injection via special chars)
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]{1,32}$', username):
+            QMessageBox.warning(
+                self, "Invalid Username",
+                "Username must be 1-32 characters and contain only letters, numbers, underscores, and hyphens."
+            )
+            return
+
         # Handle password validation if key is not cached
         if get_cached_key() is None:
             password = self.pwd_input.text()
@@ -273,32 +292,48 @@ class EnrollmentWizard(QDialog):
             
             # Verify and cache key in memory
             if not verify_password(password):
-                QMessageBox.critical(self, "Verification Failed", "Incorrect master password. Access denied.")
-                return
-            
-            # Key successfully cached. Hide password input
-            self.pwd_container.hide()
+                from database.embedding_store import EMBEDDING_FILE, OLD_EMBEDDING_FILE
+                import os
+                if not os.path.exists(EMBEDDING_FILE) and not os.path.exists(OLD_EMBEDDING_FILE):
+                    if len(password) < 8:
+                        QMessageBox.warning(self, "Password Too Short", "Master password must be at least 8 characters long.")
+                        return
+                    from security.credential_store import update_master_password
+                    try:
+                        update_master_password(None, password)
+                        self.pwd_container.hide()
+                    except Exception as ex:
+                        QMessageBox.critical(self, "Setup Failed", f"Failed to initialize master password: {ex}")
+                        return
+                else:
+                    QMessageBox.critical(self, "Verification Failed", "Incorrect master password. Access denied.")
+                    return
+            else:
+                self.pwd_container.hide()
 
-        # Check if username already exists in database
+        # Check if username already exists in database (case-insensitive)
         try:
             embeddings = load_embeddings()
-            if username in embeddings:
-                from ui.theme import get_colors
-                c = get_colors()
-                msg_box = QMessageBox(self)
-                msg_box.setWindowTitle("Overwrite User?")
-                msg_box.setText(f"User '{username}' already exists in database.\n\n"
-                                "Do you want to overwrite their facial profile with the new capture?")
-                msg_box.setIcon(QMessageBox.Icon.Question)
-                
-                yes_btn = msg_box.addButton(QMessageBox.StandardButton.Yes)
-                no_btn = msg_box.addButton(QMessageBox.StandardButton.No)
-                
-                yes_btn.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: white; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px; border: none;")
-                no_btn.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 6px 16px; min-width: 80px; font-weight: bold; border-radius: 4px;")
-                
-                msg_box.exec()
-                if msg_box.clickedButton() != yes_btn:
+            existing_user_key = None
+            for key in embeddings.keys():
+                if key.lower() == username.lower():
+                    existing_user_key = key
+                    break
+
+            if existing_user_key:
+                if self.target_username:
+                    # In explicit re-enrollment mode: allow proceeding for the target user
+                    username = existing_user_key
+                else:
+                    # In 'Enroll New Face' mode: STRICTLY BLOCK duplicate username!
+                    self.username_input.setStyleSheet("QLineEdit { border: 1.5px solid #ef4444; }")
+                    self.username_input.setFocus()
+                    QMessageBox.warning(
+                        self, "User Already Enrolled",
+                        f"User '{existing_user_key}' is already enrolled in the system vault.\n\n"
+                        f"Duplicate usernames are not allowed. To update or re-enroll this user's facial profile, "
+                        f"please click the 'Re-Enroll' button next to their profile in Settings."
+                    )
                     return
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to check existing entries: {e}")

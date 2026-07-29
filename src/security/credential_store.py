@@ -56,9 +56,13 @@ def verify_password(password: str) -> bool:
         # Derive the AES key
         key = derive_key(pwd_bytes, salt, iterations)
         
-        # Attempt to decrypt the embeddings.
-        # This will raise cryptography.exceptions.InvalidTag on wrong key.
-        decrypt(nonce, ciphertext, key)
+        # Attempt to decrypt the embeddings with AAD binding.
+        from security.crypto_engine import build_aad
+        aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), iterations, salt)
+        try:
+            decrypt(nonce, ciphertext, key, aad)
+        except Exception:
+            decrypt(nonce, ciphertext, key, aad=None)
         
         # Success! Cache the derived key
         set_cached_key(key)
@@ -100,7 +104,12 @@ def update_master_password(current_password: str | None, new_password: str) -> N
             ciphertext = envelope["ciphertext"]
             
             key = derive_key(current_bytes, salt, iterations)
-            decrypted_bytes = decrypt(nonce, ciphertext, key)
+            from security.crypto_engine import build_aad
+            aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), iterations, salt)
+            try:
+                decrypted_bytes = decrypt(nonce, ciphertext, key, aad)
+            except Exception:
+                decrypted_bytes = decrypt(nonce, ciphertext, key, aad=None)
             existing_data = json.loads(decrypted_bytes.decode('utf-8'))
         except Exception:
             raise ValueError("Incorrect current master password.")
@@ -117,7 +126,9 @@ def update_master_password(current_password: str | None, new_password: str) -> N
         new_key = derive_key(pwd_bytes, salt, iterations)
         
         plaintext_bytes = json.dumps(existing_data).encode('utf-8')
-        nonce, ciphertext = encrypt(plaintext_bytes, new_key)
+        from security.crypto_engine import build_aad
+        aad = build_aad("pbkdf2_hmac_sha256", iterations, salt)
+        nonce, ciphertext = encrypt(plaintext_bytes, new_key, aad)
         
         new_envelope = {
             "kdf": "pbkdf2_hmac_sha256",
@@ -128,31 +139,24 @@ def update_master_password(current_password: str | None, new_password: str) -> N
         }
         
         os.makedirs(os.path.dirname(EMBEDDING_FILE), exist_ok=True)
-        with open(EMBEDDING_FILE, 'w') as f:
+        tmp_file = EMBEDDING_FILE + ".tmp"
+        with open(tmp_file, 'w') as f:
             json.dump(new_envelope, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
             
-        os.chmod(EMBEDDING_FILE, 0o600)
+        os.chmod(tmp_file, 0o600)
+        os.replace(tmp_file, EMBEDDING_FILE)
 
         # Update in-memory key cache to match newly encrypted envelope
         set_cached_key(new_key)
         logging.info("Updated in-memory encryption key cache after password change.")
 
-        # Sync new key with running daemon via D-Bus session bus
-        try:
-            from PySide6.QtDBus import QDBusConnection, QDBusInterface
-            bus = QDBusConnection.sessionBus()
-            if bus.isConnected():
-                interface = QDBusInterface(
-                    "org.facegate.FaceGate",
-                    "/org/facegate/FaceGate",
-                    "org.facegate.FaceGate",
-                    bus
-                )
-                if interface.isValid():
-                    interface.call("UpdateCachedKey", new_key.hex())
-                    logging.info("Synced new encryption key with FaceGate daemon over D-Bus.")
-        except Exception as ex:
-            logging.warning(f"Could not sync new key with daemon over D-Bus: {ex}")
+        # Notify daemon to reload config (key is shared via RAM tmpfs file).
+        # Removed UpdateCachedKey D-Bus call for security — see audit §1.2.
+        # The daemon's get_cached_key() will read the updated key from the RAM file.
+        from database.embedding_store import notify_daemon_reload
+        notify_daemon_reload()
     finally:
         for i in range(len(pwd_bytes)):
             pwd_bytes[i] = 0

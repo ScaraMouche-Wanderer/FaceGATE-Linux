@@ -63,8 +63,8 @@ def test_app_monitor_negative_cache():
             # Verify calculate_sha256 was called twice (once for cache init, once for suspicious process scan)
             assert mock_calc_hash.call_count == 2
             
-            # Verify the PID is in _not_suspicious_pids
-            assert 99999 in monitor._not_suspicious_pids
+            # Verify the PID is in _not_suspicious_pids (stored as (pid, create_time) tuple)
+            assert any(k[0] == 99999 for k in monitor._not_suspicious_pids)
             
             # Verify the executable is in the negative cache
             assert "/usr/bin/not_kitty" in monitor._negative_hash_cache

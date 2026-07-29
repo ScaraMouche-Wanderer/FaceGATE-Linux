@@ -1,7 +1,19 @@
 import os
+import sys
+import ctypes
+
+# Preload libc and librt with RTLD_GLOBAL to resolve GLIBC symbol conflicts (__pointer_chk_guard) on Linux
+try:
+    ctypes.CDLL("libc.so.6", mode=ctypes.RTLD_GLOBAL)
+except Exception:
+    pass
+try:
+    ctypes.CDLL("librt.so.1", mode=ctypes.RTLD_GLOBAL)
+except Exception:
+    pass
+
 import shutil
 import logging
-import sys
 from typing import List, Dict
 
 SYSTEM_DESKTOP_DIRS = [
@@ -14,15 +26,36 @@ SYSTEM_DESKTOP_DIRS = [
 USER_DESKTOP_DIR = os.path.expanduser("~/.local/share/applications")
 BACKUP_DIR = os.path.expanduser("~/.config/facegate/backups")
 
+FACEGATE_MARKER = "# Modified by FaceGate"
+
+def is_facegate_launcher(filepath: str) -> bool:
+    """Helper to check if a .desktop file was modified by FaceGate."""
+    if not os.path.exists(filepath):
+        return False
+    try:
+        with open(filepath, 'r') as f:
+            content = f.read(512)
+            return FACEGATE_MARKER in content
+    except Exception:
+        return False
+
 def get_facegate_executable() -> str:
     """
-    Resolves the absolute path of the facegate executable.
-    Prioritizes shutil.which within the Poetry environment.
+    Resolves absolute path of facegate executable cleanly using sys.executable or fixed locations.
     """
+    python_bin_dir = os.path.dirname(sys.executable)
+    fg_in_py = os.path.join(python_bin_dir, "facegate")
+    if os.path.exists(fg_in_py):
+        return os.path.abspath(fg_in_py)
+
+    user_bin = os.path.expanduser("~/.local/bin/facegate")
+    if os.path.exists(user_bin):
+        return user_bin
+
     facegate_bin = shutil.which("facegate")
     if facegate_bin:
-        return facegate_bin
-    
+        return os.path.abspath(facegate_bin)
+
     if sys.argv and sys.argv[0]:
         argv_abs = os.path.abspath(sys.argv[0])
         if os.path.exists(argv_abs) and os.path.basename(argv_abs) == "facegate":
@@ -32,13 +65,11 @@ def get_facegate_executable() -> str:
 
 def get_system_desktop_path(desktop_name: str) -> str:
     for directory in SYSTEM_DESKTOP_DIRS:
-        # Avoid checking the user directory if we are looking for the original system one
         if directory == USER_DESKTOP_DIR:
             continue
         path = os.path.join(directory, desktop_name)
         if os.path.exists(path):
             return path
-    # If not found in system dirs, check user dir (e.g. if it only exists in user dir)
     path = os.path.join(USER_DESKTOP_DIR, desktop_name)
     if os.path.exists(path):
         return path
@@ -54,7 +85,6 @@ def notify_permission_error(desktop_name: str, failing_path: str, error_msg: str
         return
 
     found_tray = None
-    # Look for an existing QSystemTrayIcon in the application hierarchy
     for obj in app.children():
         if isinstance(obj, QSystemTrayIcon):
             found_tray = obj
@@ -78,7 +108,7 @@ def notify_permission_error(desktop_name: str, failing_path: str, error_msg: str
 def apply_substitution(protected_apps: List[Dict]):
     """
     Substitutes system launchers for protected apps with a FaceGate wrapped command.
-    Files are written to user-level ~/.local/share/applications/ to shadow system ones.
+    Files are written atomically to user-level ~/.local/share/applications/ to shadow system ones.
     """
     try:
         os.makedirs(USER_DESKTOP_DIR, exist_ok=True)
@@ -102,31 +132,25 @@ def apply_substitution(protected_apps: List[Dict]):
         user_path = os.path.join(USER_DESKTOP_DIR, desktop_name)
         backup_path = os.path.join(BACKUP_DIR, desktop_name)
         
-        # Check if the user-level desktop file is already ours
-        is_already_substituted = False
-        if os.path.exists(user_path):
-            try:
-                with open(user_path, 'r') as f:
-                    content = f.read()
-                    if "# Modified by FaceGate" in content:
-                        is_already_substituted = True
-            except Exception as e:
-                logging.error(f"Error reading user desktop file '{desktop_name}': {e}")
+        is_already_substituted = is_facegate_launcher(user_path)
                     
         if is_already_substituted:
             logging.info(f"Launcher '{desktop_name}' is already substituted.")
-            # Ensure backup exists
-            if not os.path.exists(backup_path):
-                # Copy from system path to serve as backup
+            # Refresh backup if system launcher file was updated
+            if os.path.exists(system_path) and os.path.exists(backup_path):
+                if os.path.getmtime(system_path) > os.path.getmtime(backup_path):
+                    shutil.copy2(system_path, backup_path)
+                    logging.info(f"Refreshed backup launcher '{desktop_name}' due to system package update.")
+            elif not os.path.exists(backup_path) and os.path.exists(system_path):
                 shutil.copy2(system_path, backup_path)
             continue
             
         # Backup original content
         try:
-            if os.path.exists(user_path):
+            if os.path.exists(user_path) and not is_already_substituted:
                 shutil.copy2(user_path, backup_path)
                 logging.info(f"Backed up custom user launcher '{desktop_name}' to {backup_path}")
-            else:
+            elif os.path.exists(system_path):
                 shutil.copy2(system_path, backup_path)
                 logging.info(f"Backed up system launcher '{desktop_name}' to {backup_path}")
                 
@@ -134,7 +158,7 @@ def apply_substitution(protected_apps: List[Dict]):
             with open(backup_path, 'r') as f:
                 lines = f.readlines()
                 
-            new_lines = ["# Modified by FaceGate\n"]
+            new_lines = [f"{FACEGATE_MARKER}\n"]
             in_desktop_entry = False
             exec_modified = False
             
@@ -147,7 +171,6 @@ def apply_substitution(protected_apps: List[Dict]):
                     
                 if in_desktop_entry and stripped.startswith("Exec="):
                     orig_exec = stripped[5:]
-                    # Rewrite Exec line to run facegate --auth-launch with absolute binary path
                     facegate_bin = get_facegate_executable()
                     new_line = f"Exec={facegate_bin} --auth-launch {desktop_name} -- {orig_exec}\n"
                     new_lines.append(new_line)
@@ -162,9 +185,13 @@ def apply_substitution(protected_apps: List[Dict]):
                     os.remove(backup_path)
                 continue
                 
-            # Write out modified file
-            with open(user_path, 'w') as f:
+            # Write out modified file atomically
+            tmp_user_path = user_path + ".tmp"
+            with open(tmp_user_path, 'w') as f:
                 f.writelines(new_lines)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_user_path, user_path)
             logging.info(f"Successfully substituted launcher: {user_path}")
             
         except PermissionError as pe:
@@ -176,7 +203,7 @@ def apply_substitution(protected_apps: List[Dict]):
 
 def restore_substitution(protected_apps: List[Dict]):
     """
-    Restores launcher files to their exact pre-substitution state.
+    Restores launcher files to their exact pre-substitution state using unified marker check.
     """
     for app in protected_apps:
         desktop_name = app.get("desktop_name")
@@ -187,15 +214,7 @@ def restore_substitution(protected_apps: List[Dict]):
         backup_path = os.path.join(BACKUP_DIR, desktop_name)
         
         if os.path.exists(user_path):
-            was_modified = False
-            try:
-                with open(user_path, 'r') as f:
-                    first_line = f.readline()
-                    if "# Modified by FaceGate" in first_line:
-                        was_modified = True
-            except Exception as e:
-                logging.error(f"Error checking user launcher '{desktop_name}' status: {e}")
-                
+            was_modified = is_facegate_launcher(user_path)
             if was_modified:
                 if os.path.exists(backup_path):
                     try:

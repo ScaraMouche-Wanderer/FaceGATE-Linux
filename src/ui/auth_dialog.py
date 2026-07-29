@@ -1,5 +1,17 @@
 import logging
+import ctypes
 import numpy as np
+
+# Preload libc and librt with RTLD_GLOBAL to resolve GLIBC symbol conflicts (__pointer_chk_guard) on Linux
+try:
+    ctypes.CDLL("libc.so.6", mode=ctypes.RTLD_GLOBAL)
+except Exception:
+    pass
+try:
+    ctypes.CDLL("librt.so.1", mode=ctypes.RTLD_GLOBAL)
+except Exception:
+    pass
+
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 )
@@ -79,9 +91,9 @@ def convert_cv_to_pixmap(frame: "np.ndarray", width: int = 360, height: int = 27
     return QPixmap.fromImage(q_img.copy())
 
 class AuthDialog(QDialog):
-    # Class-level variables to track failed attempts and lockout across dialog instances in a single session
-    failed_attempts_count = 0
-    lockout_until = 0.0
+    # Class-level dictionary to track failed attempts and lockout per app_name across dialog instances
+    # Format: app_name -> {"attempts": int, "lockout_until": float}
+    lockout_data = {}
 
     def __init__(self, app_name: str, mode: str = "password", timeout_seconds: int = 0, parent=None):
         super().__init__(parent)
@@ -325,17 +337,15 @@ class AuthDialog(QDialog):
             self.stack.setCurrentIndex(1)
             QTimer.singleShot(50, self.password_input.setFocus)
 
-        # Setup lockout check on initialization
+        # Setup lockout check on initialization (per app_name)
         self.lockout_timer = QTimer(self)
         self.lockout_timer.timeout.connect(self.update_lockout_countdown)
         self.lockout_seconds_remaining = 0
         
-        import math
-        import time
-        if time.time() < AuthDialog.lockout_until:
-            remaining = int(math.ceil(AuthDialog.lockout_until - time.time()))
-            if remaining > 0:
-                QTimer.singleShot(50, lambda: self.start_lockout(remaining))
+        from security.lockout_manager import is_locked_out
+        is_locked, remaining = is_locked_out(self.app_name)
+        if is_locked and remaining > 0:
+            QTimer.singleShot(50, lambda: self.start_lockout(remaining))
 
         # Setup timeout timer if specified
         if self.timeout_seconds > 0:
@@ -442,13 +452,23 @@ class AuthDialog(QDialog):
     def handle_frame(self, frame: "np.ndarray"):
         if self.detector is None:
             return
-            
-        self.status_label.setText("Position your face in the camera view...")
-        
+
+        # Check for dark frame (e.g. physical camera privacy shutter closed or dim lighting)
+        if frame is not None and frame.mean() < 15.0:
+            from ui.theme import get_colors
+            c = get_colors()
+            self.status_label.setText("⚠️ Camera is dark — open camera cover or turn on light")
+            self.status_label.setStyleSheet(f"color: {c['WARNING_AMBER']}; font-size: 13px; font-weight: bold;")
+        else:
+            from ui.theme import get_colors
+            c = get_colors()
+            self.status_label.setText("Position your face in the camera view...")
+            self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
+
         # 1. Update camera preview in GUI immediately (buttery-smooth 30 FPS)
         pixmap = convert_cv_to_pixmap(frame, 360, 270)
         self.camera_label.setPixmap(pixmap)
-        
+
         # 2. Submit frame to background face detection thread
         if hasattr(self, "detector_worker") and self.detector_worker:
             self.detector_worker.submit_frame(frame)
@@ -457,7 +477,14 @@ class AuthDialog(QDialog):
     def handle_detection_result(self, faces, frame):
         import cv2
         from ui.theme import get_colors
+        from recognition.blur_checker import is_blurry
         c = get_colors()
+
+        # Skip detection evaluation on severely blurry frames to prevent false matches (audit §6.5)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if is_blurry(gray, threshold=12.0):
+            logging.debug("Skipping severely blurry camera frame during face recognition.")
+            return
         
         # Save camera frame to latest_frame. If a face is found, we always update it.
         # Otherwise, if no frame has been captured yet, save this frame as a fallback.
@@ -511,7 +538,7 @@ class AuthDialog(QDialog):
                 # Perform motion/liveness check
                 from utils.config_loader import get_config
                 config = get_config()
-                min_motion = float(config.get("recognition.liveness_min_motion", 0.5))
+                min_motion = float(config.get("recognition.liveness_min_motion", 0.05))
                 
                 total_dist = 0.0
                 if len(self.matched_centroids) >= 3:
@@ -521,13 +548,12 @@ class AuthDialog(QDialog):
                         c2 = self.matched_centroids[idx]
                         total_dist += math.hypot(c2[0] - c1[0], c2[1] - c1[1])
                 
+                # Require micro-motion (liveness) unconditionally for all face matches
                 if total_dist < min_motion:
-                    logging.warning(f"Liveness check failed: total motion {total_dist:.4f} < threshold {min_motion}")
-                    self.success_count = 0
-                    self.matched_centroids.clear()
-                    self.status_label.setText("Liveness verification failed. Retrying...")
+                    logging.info(f"Liveness motion check waiting: total motion {total_dist:.4f} < threshold {min_motion}")
+                    self.status_label.setText("Verifying... slight movement recommended")
                 else:
-                    logging.info(f"Subprocess Auth: Matched enrolled user '{matched_user}' (Similarity: {matched_score:.4f}, Liveness motion: {total_dist:.4f})")
+                    logging.info(f"Subprocess Auth: Matched enrolled user '{matched_user}' (Similarity: {matched_score:.4f}, Motion: {total_dist:.4f})")
                     self.authenticated = True
                     self.final_score = matched_score
                     self.matched_user = matched_user
@@ -601,16 +627,19 @@ class AuthDialog(QDialog):
 
     def handle_unlock(self):
         import time
+        from security.lockout_manager import record_failed_attempt, reset_lockout
         password = self.password_input.text()
+        
         if verify_password(password):
-            AuthDialog.failed_attempts_count = 0
-            AuthDialog.lockout_until = 0.0
+            reset_lockout(self.app_name)
+            AuthDialog.lockout_data.pop(self.app_name, None)
             self.authenticated = True
             import getpass
             self.matched_user = getpass.getuser()
             self.accept()
         else:
-            AuthDialog.failed_attempts_count += 1
+            attempts, lockout_until, remaining = record_failed_attempt(self.app_name)
+            AuthDialog.lockout_data[self.app_name] = {"attempts": attempts, "lockout_until": lockout_until}
             self.failed_pwd_attempts += 1
             self.password_input.selectAll()
             
@@ -629,21 +658,11 @@ class AuthDialog(QDialog):
                 }}
             """)
             
-            if AuthDialog.failed_attempts_count >= 3:
-                attempts = AuthDialog.failed_attempts_count
-                if attempts == 3:
-                    delay = 2
-                elif attempts == 4:
-                    delay = 5
-                elif attempts == 5:
-                    delay = 15
-                else:
-                    delay = 30
-                    
-                AuthDialog.lockout_until = time.time() + delay
-                self.start_lockout(delay)
+            if remaining > 0:
+                self.start_lockout(remaining)
             else:
-                self.error_label.setText(f"⚠️ Incorrect password. Try again. ({3 - AuthDialog.failed_attempts_count} attempts remaining)")
+                remaining_attempts = max(0, 3 - attempts)
+                self.error_label.setText(f"⚠️ Incorrect password. Try again. ({remaining_attempts} attempts remaining)")
                 QTimer.singleShot(1500, self.reset_input_style)
 
     def start_lockout(self, seconds):

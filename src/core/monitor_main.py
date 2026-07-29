@@ -63,9 +63,10 @@ class FaceGateApplication(QObject):
             )
             logging.info("Connected to systemd PrepareForSleep D-Bus signal.")
             
-        # Connect to GNOME Screensaver ActiveChanged signal on session bus
+        # Connect to GNOME, KDE, and Xfce Screensaver signals on session bus
         session_bus = QDBusConnection.sessionBus()
         if session_bus.isConnected():
+            # GNOME ScreenSaver
             session_bus.connect(
                 "org.gnome.ScreenSaver",
                 "/org/gnome/ScreenSaver",
@@ -73,7 +74,23 @@ class FaceGateApplication(QObject):
                 "ActiveChanged",
                 self, "handle_screensaver_active_changed"
             )
-            logging.info("Connected to GNOME ScreenSaver ActiveChanged D-Bus signal.")
+            # KDE / FreeDesktop ScreenSaver
+            session_bus.connect(
+                "org.freedesktop.ScreenSaver",
+                "/ScreenSaver",
+                "org.freedesktop.ScreenSaver",
+                "ActiveChanged",
+                self, "handle_screensaver_active_changed"
+            )
+            # Xfce ScreenSaver
+            session_bus.connect(
+                "org.xfce.ScreenSaver",
+                "/org/xfce/ScreenSaver",
+                "org.xfce.ScreenSaver",
+                "ActiveChanged",
+                self, "handle_screensaver_active_changed"
+            )
+            logging.info("Connected to ScreenSaver ActiveChanged D-Bus signals (GNOME/KDE/Xfce).")
 
         # Register D-Bus Service
         self.dbus_service = FaceGateService(self)
@@ -187,61 +204,13 @@ class FaceGateApplication(QObject):
             self.tray.update_tray_state()
         logging.info("FaceGate monitor is now ACTIVE.")
 
-    def verify_admin_face(self, reason: str) -> bool:
-        """
-        Authenticates using face recognition.
-        If there are no enrolled faces (first setup), returns True immediately.
-        """
-        from database.embedding_store import load_embeddings, EMBEDDING_FILE, get_cached_key, set_cached_key
-        import os
-        try:
-            enrolled = load_embeddings()
-        except Exception:
-            enrolled = {}
-
-        # Unit test compatibility check for enrollment flow
-        if "PYTEST_CURRENT_TEST" in os.environ and reason == "Enrollment Access":
-            from ui.auth_dialog import AuthDialog
-            from PySide6.QtWidgets import QDialog
-            timeout_sec = self.config.get("app_monitor.auth_timeout_seconds", 60)
-            mode = "face" if enrolled else "password"
-            dialog = AuthDialog(reason, mode=mode, timeout_seconds=timeout_sec)
-            result = dialog.exec()
-            success = (result == QDialog.DialogCode.Accepted)
-            
-            from database.audit_log import log_auth_attempt
-            method_used = "face" if (mode == "face" and not dialog.fallback_to_password) else "password"
-            log_auth_attempt(reason, method_used, "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
-            return success
-            
-        if not enrolled and not os.path.exists(EMBEDDING_FILE):
-            logging.info("Admin verification: No enrolled faces found and no database exists. Bypassing check.")
-            return True
-
-        # Unit test compatibility check for normal admin verification
-        if "PYTEST_CURRENT_TEST" in os.environ:
-            from ui.auth_dialog import AuthDialog
-            from PySide6.QtWidgets import QDialog
-            timeout_sec = self.config.get("app_monitor.auth_timeout_seconds", 60)
-            mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
-            dialog = AuthDialog(reason, mode=mode, timeout_seconds=timeout_sec)
-            result = dialog.exec()
-            success = (result == QDialog.DialogCode.Accepted)
-            
-            from database.audit_log import log_auth_attempt
-            method_used = "face" if (mode == "face" and not dialog.fallback_to_password) else "password"
-            log_auth_attempt(reason, method_used, "success" if success else "fail", getattr(dialog, "final_score", None), getattr(dialog, "matched_user", None) if success else None)
-            return success
-            
+    def _run_recognition_subprocess(self, reason: str) -> tuple[bool, str, float, str]:
+        """Spawns the isolated recognition subprocess for admin face verification."""
+        from database.embedding_store import get_cached_key, set_cached_key
         cached_key = get_cached_key()
 
-        # Spawn the subprocess so GUI runs outside the systemd daemon sandbox
         from locking.launcher_sub import get_facegate_executable
         facegate_bin = get_facegate_executable()
-        
-        import subprocess
-        from PySide6.QtWidgets import QApplication
-        import time
         
         cmd = [facegate_bin, "--recognize", reason]
         pass_fds = []
@@ -264,7 +233,6 @@ class FaceGateApplication(QObject):
                 finally:
                     os.close(w)
             
-            # Wait for subprocess while keeping event loop alive
             while proc.poll() is None:
                 QApplication.processEvents()
                 time.sleep(0.05)
@@ -272,12 +240,10 @@ class FaceGateApplication(QObject):
             stdout_data, _ = proc.communicate()
             success = (proc.returncode == 0)
             
-            method = "face"
-            actual_method = None
+            actual_method = "face"
             score = None
             matched_user = None
             if success and stdout_data:
-                # Search for key returned, method, score, and user
                 for line in stdout_data.splitlines():
                     line = line.strip()
                     if line.startswith("FACEGATE_METHOD:"):
@@ -303,13 +269,40 @@ class FaceGateApplication(QObject):
             else:
                 method = "password" if (success and "key_bytes" in locals() and len(key_bytes) == 32) else "face"
             
-            from database.audit_log import log_auth_attempt
-            log_auth_attempt(reason, method, "success" if success else "fail", score, matched_user if success else None)
-            
-            return success
+            return success, method, score, matched_user
         except Exception as e:
             logging.error(f"Failed to spawn recognition subprocess: {e}")
+            return False, "face", None, None
+
+    def verify_admin_face(self, reason: str) -> bool:
+        """
+        Authenticates using face recognition.
+        If there are no enrolled faces (first setup), returns True immediately.
+        """
+        from security.lockout_manager import is_locked_out
+        locked_out, remaining = is_locked_out(reason)
+        if locked_out:
+            logging.warning(f"Admin verification for '{reason}' REJECTED due to active lockout ({remaining}s remaining).")
+            from database.audit_log import log_auth_attempt
+            log_auth_attempt(reason, "lockout", "fail")
             return False
+
+        from database.embedding_store import load_embeddings, EMBEDDING_FILE
+        import os
+        try:
+            enrolled = load_embeddings()
+        except Exception:
+            enrolled = {}
+
+        if not enrolled and not os.path.exists(EMBEDDING_FILE):
+            logging.info("Admin verification: No enrolled faces found and no database exists. Bypassing check.")
+            return True
+
+        success, actual_method, score, matched_user = self._run_recognition_subprocess(reason)
+
+        from database.audit_log import log_auth_attempt
+        log_auth_attempt(reason, actual_method, "success" if success else "fail", score, matched_user)
+        return success
 
     def disable_for(self, minutes: int):
         if not self.verify_admin_face("Disable FaceGate"):
@@ -349,6 +342,21 @@ class FaceGateApplication(QObject):
             import psutil
             if not psutil.pid_exists(pid):
                 logging.warning(f"Process PID {pid} died before auth was shown.")
+                return
+
+            from security.lockout_manager import is_locked_out
+            locked_out, remaining = is_locked_out(desktop_name)
+            if locked_out:
+                logging.warning(f"Backstop recognition for '{desktop_name}' BLOCKED due to active brute-force lockout ({remaining}s remaining).")
+                policy = self.config.get("app_monitor.on_auth_failure", "kill")
+                if policy == "kill":
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                        logging.info(f"Killed process (PID: {pid}) due to active brute-force lockout.")
+                    except ProcessLookupError:
+                        pass
+                from database.audit_log import log_auth_attempt
+                log_auth_attempt(desktop_name, "lockout", "fail")
                 return
 
             from database.embedding_store import get_cached_key
@@ -613,7 +621,7 @@ def run_auth_launch(desktop_name: str, exec_args: list):
             sys.exit(1)
     else:
         logging.warning("Launcher: Auth rejected. Process execution blocked.")
-        sys.exit(0)
+        sys.exit(1)
 
 def main():
     setup_logging()
@@ -629,13 +637,15 @@ def main():
     except Exception as e:
         logging.warning(f"Could not disable core dumps: {e}")
 
-    # Fallback env variables for graphical execution compatibility (e.g. under systemd user manager)
-    if "DISPLAY" not in os.environ:
-        os.environ["DISPLAY"] = ":0"
-        logging.info("DISPLAY environment variable not found. Defaulting to :0 for systemd compatibility.")
-    if "XAUTHORITY" not in os.environ:
-        os.environ["XAUTHORITY"] = os.path.expanduser("~/.Xauthority")
-        logging.info("XAUTHORITY environment variable not found. Defaulting to ~/.Xauthority for systemd compatibility.")
+    # Fallback env variables for graphical execution compatibility (only when not running under pure Wayland)
+    if "WAYLAND_DISPLAY" not in os.environ and "QT_QPA_PLATFORM" not in os.environ:
+        if "DISPLAY" not in os.environ:
+            os.environ["DISPLAY"] = ":0"
+            logging.info("DISPLAY environment variable not found. Defaulting to :0 for systemd compatibility.")
+        xauth = os.path.expanduser("~/.Xauthority")
+        if "XAUTHORITY" not in os.environ and os.path.exists(xauth):
+            os.environ["XAUTHORITY"] = xauth
+            logging.info("XAUTHORITY environment variable not found. Defaulting to ~/.Xauthority.")
 
     parser = argparse.ArgumentParser(description="FaceGate-Linux lock system")
     parser.add_argument("--monitor", action="store_true", help="Start the main lock daemon and tray icon")
@@ -735,18 +745,13 @@ def main():
                     if reply.isValid():
                         dbus_success = reply.value()
                         if dbus_success:
-                            # Transfer cached encryption key from daemon to settings process
-                            key_reply = interface.call("GetCachedKey")
-                            q_key_reply = QDBusReply(key_reply)
-                            if q_key_reply.isValid() and q_key_reply.value():
-                                try:
-                                    key_bytes = bytes.fromhex(q_key_reply.value())
-                                    if len(key_bytes) == 32:
-                                        from database.embedding_store import set_cached_key
-                                        set_cached_key(key_bytes)
-                                        logging.info("Successfully received encryption key from daemon via D-Bus.")
-                                except Exception as ex:
-                                    logging.error(f"Failed to parse key from daemon D-Bus response: {ex}")
+                            # Key transfer: the daemon shares the encryption key via
+                            # the RAM tmpfs file (/run/user/{uid}/facegate.key) which
+                            # get_cached_key() reads automatically. No D-Bus key
+                            # transfer needed (removed for security — see audit §1.1).
+                            from database.embedding_store import get_cached_key
+                            if get_cached_key():
+                                logging.info("Encryption key loaded from RAM key file after daemon auth.")
                     else:
                         logging.error(f"D-Bus auth call failed: {reply.error().message()}")
             
@@ -775,7 +780,71 @@ def main():
         sys.exit(0)
         
     elif args.enroll:
-        # CLI Enrollment mode
+        # CLI Enrollment mode - Requires Admin Authentication
+        from database.embedding_store import load_embeddings, EMBEDDING_FILE, get_cached_key
+        from security.credential_store import verify_password, set_master_password_cli
+        import getpass
+
+        has_enrolled = False
+        try:
+            enrolled = load_embeddings()
+            has_enrolled = len(enrolled) > 0
+        except Exception:
+            has_enrolled = os.path.exists(EMBEDDING_FILE)
+
+        if has_enrolled or os.path.exists(EMBEDDING_FILE):
+            # Check if FaceGate daemon is active on session D-Bus
+            dbus_success = False
+            dbus_active = False
+
+            from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected():
+                interface = QDBusInterface(
+                    "org.facegate.FaceGate",
+                    "/org/facegate/FaceGate",
+                    "org.facegate.FaceGate",
+                    bus
+                )
+                if interface.isValid():
+                    dbus_active = True
+                    logging.info("Requesting Enrollment Access authorization via running FaceGate daemon...")
+                    raw_reply = interface.call("RequestAuth", "Enrollment Access")
+                    reply = QDBusReply(raw_reply)
+                    if reply.isValid():
+                        dbus_success = reply.value()
+
+            if dbus_active:
+                if not dbus_success:
+                    print("Error: Enrollment Access verification failed via daemon. Access denied.", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                # Daemon is not active: require master password verification
+                if sys.stdin.isatty():
+                    try:
+                        pwd = getpass.getpass("Enter master password to authorize enrollment: ")
+                    except (EOFError, KeyboardInterrupt):
+                        print("\nEnrollment cancelled.", file=sys.stderr)
+                        sys.exit(1)
+                    if not verify_password(pwd):
+                        print("Error: Incorrect master password. Enrollment access denied.", file=sys.stderr)
+                        sys.exit(1)
+                else:
+                    print("Error: Master password required to authorize enrollment in non-interactive mode.", file=sys.stderr)
+                    sys.exit(1)
+        else:
+            # First-run setup: no master password set yet
+            if get_cached_key() is None:
+                if sys.stdin.isatty():
+                    print("No master password configured. Setting up master password first...")
+                    set_master_password_cli()
+                    if get_cached_key() is None:
+                        print("Error: Master password configuration failed.", file=sys.stderr)
+                        sys.exit(1)
+                else:
+                    print("Error: No master password configured. Run 'facegate --set-master-password' first.", file=sys.stderr)
+                    sys.exit(1)
+
         from recognition.cli_enroll import enroll_user
         enroll_user(args.enroll)
         sys.exit(0)
@@ -812,10 +881,6 @@ def main():
                 print(f"FACEGATE_SCORE:{dialog.final_score}")
             if hasattr(dialog, "matched_user") and dialog.matched_user is not None:
                 print(f"FACEGATE_USER:{dialog.matched_user}")
-            from database.embedding_store import get_cached_key
-            k = get_cached_key()
-            if k:
-                print(k.hex())
             sys.stdout.flush()
             sys.exit(0)
         else:

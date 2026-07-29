@@ -1,13 +1,14 @@
 import sqlite3
 import os
 import logging
+import hashlib
 
 DB_PATH = os.path.expanduser("~/.config/facegate/audit.db")
 
 def init_audit_db():
     """
     Initializes the SQLite database schema if not present.
-    Performs safe migration to add 'username' column if missing.
+    Performs safe migration to add 'username' and 'prev_hash' columns if missing.
     """
     try:
         db_dir = os.path.dirname(DB_PATH)
@@ -24,33 +25,42 @@ def init_audit_db():
                     confidence_score REAL
                 )
             """)
-            # Check for column existence and perform alter table migration
             cursor = conn.cursor()
             cursor.execute("PRAGMA table_info(audit_log)")
             columns = [info[1] for info in cursor.fetchall()]
             if "username" not in columns:
                 conn.execute("ALTER TABLE audit_log ADD COLUMN username TEXT")
+            if "prev_hash" not in columns:
+                conn.execute("ALTER TABLE audit_log ADD COLUMN prev_hash TEXT")
             conn.commit()
     except Exception as e:
         logging.error(f"Failed to initialize audit database: {e}")
 
 def log_auth_attempt(app_identifier: str, method: str, result: str, confidence_score: float = None, username: str = None):
     """
-    Logs an authentication attempt and prunes rows beyond the 1000 limit.
-    Confidence score and username are nullable.
+    Logs an authentication attempt with hash chaining and prunes rows beyond 2000 limit.
     """
     try:
         init_audit_db()
         with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT prev_hash, id FROM audit_log ORDER BY id DESC LIMIT 1")
+            last_row = cursor.fetchone()
+            last_hash = last_row[0] if (last_row and last_row[0]) else "GENESIS"
+
+            # Compute tamper-evident hash of new log entry chained to previous hash
+            entry_data = f"{last_hash}:{app_identifier}:{method}:{result}:{confidence_score}:{username}"
+            current_hash = hashlib.sha256(entry_data.encode('utf-8')).hexdigest()
+
             conn.execute(
-                "INSERT INTO audit_log (app_identifier, method, result, confidence_score, username) VALUES (?, ?, ?, ?, ?)",
-                (app_identifier, method, result, confidence_score, username)
+                "INSERT INTO audit_log (app_identifier, method, result, confidence_score, username, prev_hash) VALUES (?, ?, ?, ?, ?, ?)",
+                (app_identifier, method, result, confidence_score, username, current_hash)
             )
-            # Prune to keep only the latest 200 entries
+            # Prune to keep latest 2000 entries
             conn.execute("""
                 DELETE FROM audit_log 
                 WHERE id NOT IN (
-                    SELECT id FROM audit_log ORDER BY id DESC LIMIT 200
+                    SELECT id FROM audit_log ORDER BY id DESC LIMIT 2000
                 )
             """)
             conn.commit()

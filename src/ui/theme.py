@@ -1,8 +1,8 @@
 import os
 import subprocess
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
-from PySide6.QtCore import Qt, QRect, QVariantAnimation, QEasingCurve, QAbstractAnimation, QPointF, Property, QPropertyAnimation
-from PySide6.QtWidgets import QSpinBox
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QBrush, QPainterPath, QFont
+from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSize, QVariantAnimation, QEasingCurve, QAbstractAnimation, Property, QPropertyAnimation, QModelIndex
+from PySide6.QtWidgets import QSpinBox, QComboBox, QCheckBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QListView, QFrame
 
 # Global constants initialized to default light mode
 BG_NEUTRAL = "#f5f3ff"
@@ -318,7 +318,7 @@ def get_theme_qss(theme_override: str = None) -> str:
             background-color: {c["WIDGET_BG"]};
             border: 1px solid {c["BORDER_NEUTRAL"]};
             border-radius: 6px;
-            padding: 6px 12px;
+            padding: 6px 32px 6px 12px;
             color: {c["TEXT_PRIMARY"]};
             font-family: {FONT_FAMILY};
             font-size: 13px;
@@ -329,18 +329,16 @@ def get_theme_qss(theme_override: str = None) -> str:
         QComboBox::drop-down {{
             subcontrol-origin: padding;
             subcontrol-position: top right;
-            width: 24px;
+            width: 28px;
             border-left: none;
+            background: transparent;
         }}
         QComboBox::down-arrow {{
             image: none;
             border: none;
-            width: 0;
-            height: 0;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 5px solid {c["TEXT_PRIMARY"]};
-            margin-right: 6px;
+            width: 0px;
+            height: 0px;
+            background: transparent;
         }}
         QComboBox QAbstractItemView {{
             background-color: {c["CARD_NEUTRAL"]};
@@ -350,14 +348,14 @@ def get_theme_qss(theme_override: str = None) -> str:
             selection-color: #ffffff;
             outline: none;
             padding: 4px;
-            border-radius: 6px;
+            border-radius: 8px;
         }}
         QComboBox QAbstractItemView::item {{
             background-color: {c["CARD_NEUTRAL"]};
             color: {c["TEXT_PRIMARY"]};
             padding: 8px 12px;
-            border-radius: 4px;
-            min-height: 24px;
+            border-radius: 6px;
+            min-height: 28px;
         }}
         QComboBox QAbstractItemView::item:hover, QComboBox QAbstractItemView::item:selected {{
             background-color: {c["ACCENT_PURPLE"]};
@@ -382,15 +380,12 @@ def get_theme_qss(theme_override: str = None) -> str:
             font-size: 13px;
         }}
         QCheckBox::indicator {{
-            width: 18px;
-            height: 18px;
-            border: 1px solid {c["BORDER_NEUTRAL"]};
-            border-radius: 4px;
-            background-color: {c["WIDGET_BG"]};
-        }}
-        QCheckBox::indicator:checked {{
-            background-color: {c["ACCENT_PURPLE"]};
-            border: 1px solid {c["ACCENT_PURPLE"]};
+            width: 0px;
+            height: 0px;
+            border: none;
+            background: transparent;
+            margin: 0px;
+            padding: 0px;
         }}
         QProgressBar {{
             border: 1px solid {c["BORDER_NEUTRAL"]};
@@ -559,6 +554,235 @@ class AnimatedSpinBox(QSpinBox):
         self.anim.valueChanged.connect(lambda val: self.setValue(int(val)))
         self.anim.start()
 
+class AnimatedItemDelegate(QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        from ui.theme import get_colors
+        c = get_colors()
+        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        is_hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+
+        rect = option.rect
+        padded_rect = rect.adjusted(4, 2, -4, -2)
+
+        if is_selected:
+            bg_color = QColor(c["ACCENT_PURPLE"])
+            text_color = QColor("#ffffff")
+        elif is_hovered:
+            bg_color = QColor(c["LIST_ITEM_HOVER"])
+            text_color = QColor(c["TEXT_PRIMARY"])
+        else:
+            bg_color = QColor(c["CARD_NEUTRAL"])
+            text_color = QColor(c["TEXT_PRIMARY"])
+
+        painter.setBrush(QBrush(bg_color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(padded_rect, 6, 6)
+
+        text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        painter.setFont(option.font)
+        painter.setPen(text_color)
+        text_rect = padded_rect.adjusted(12, 0, -32, 0)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+
+        if is_selected:
+            painter.setPen(QPen(QColor("#ffffff"), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            chk_x = padded_rect.right() - 20
+            chk_y = padded_rect.center().y()
+            path = QPainterPath()
+            path.moveTo(chk_x, chk_y - 1)
+            path.lineTo(chk_x + 4, chk_y + 4)
+            path.lineTo(chk_x + 10, chk_y - 4)
+            painter.drawPath(path)
+
+        painter.restore()
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex):
+        size = super().sizeHint(option, index)
+        size.setHeight(max(36, size.height()))
+        return size
+
+
+class AnimatedComboBox(QComboBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._arrow_rotation = 0.0
+        self.anim = None
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        view = QListView(self)
+        view.setItemDelegate(AnimatedItemDelegate(view))
+        view.setFrameShape(QFrame.Shape.NoFrame)
+        self.setView(view)
+
+    @Property(float)
+    def arrow_rotation(self):
+        return self._arrow_rotation
+
+    @arrow_rotation.setter
+    def arrow_rotation(self, val):
+        self._arrow_rotation = val
+        self.update()
+
+    def showPopup(self):
+        if self.anim:
+            self.anim.stop()
+        self.anim = QPropertyAnimation(self, b"arrow_rotation")
+        self.anim.setDuration(220)
+        self.anim.setStartValue(self._arrow_rotation)
+        self.anim.setEndValue(180.0)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.anim.start()
+        super().showPopup()
+
+    def hidePopup(self):
+        if self.anim:
+            self.anim.stop()
+        self.anim = QPropertyAnimation(self, b"arrow_rotation")
+        self.anim.setDuration(220)
+        self.anim.setStartValue(self._arrow_rotation)
+        self.anim.setEndValue(0.0)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.anim.start()
+        super().hidePopup()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        from ui.theme import get_colors
+        c = get_colors()
+        arrow_color = QColor(c["ACCENT_PURPLE"]) if self._arrow_rotation > 45 else QColor(c["TEXT_PRIMARY"])
+
+        arrow_center_x = self.width() - 16
+        arrow_center_y = self.height() / 2.0
+
+        painter.save()
+        painter.translate(arrow_center_x, arrow_center_y)
+        painter.rotate(self._arrow_rotation)
+
+        pen = QPen(arrow_color, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+
+        path = QPainterPath()
+        path.moveTo(-4, -2)
+        path.lineTo(0, 2)
+        path.lineTo(4, -2)
+        painter.drawPath(path)
+
+        painter.restore()
+
+
+class AnimatedCheckBox(QCheckBox):
+    def __init__(self, text="", parent=None):
+        if isinstance(text, QWidget) and parent is None:
+            parent = text
+            text = ""
+        super().__init__(text, parent)
+        self._check_progress = 1.0 if self.isChecked() else 0.0
+        self.anim = None
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggled.connect(self._on_toggled)
+
+    @Property(float)
+    def check_progress(self):
+        return self._check_progress
+
+    @check_progress.setter
+    def check_progress(self, val):
+        self._check_progress = val
+        self.update()
+
+    def setChecked(self, checked: bool):
+        super().setChecked(checked)
+        self._check_progress = 1.0 if checked else 0.0
+        self.update()
+
+    def _on_toggled(self, checked: bool):
+        target = 1.0 if checked else 0.0
+        if self.anim:
+            self.anim.stop()
+        self.anim = QPropertyAnimation(self, b"check_progress")
+        self.anim.setDuration(220)
+        self.anim.setStartValue(self._check_progress)
+        self.anim.setEndValue(target)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutBack if checked else QEasingCurve.Type.OutCubic)
+        self.anim.start()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        from ui.theme import get_colors
+        c = get_colors()
+
+        box_size = 18
+        box_y = (self.height() - box_size) / 2.0
+        box_rect = QRectF(0, box_y, box_size, box_size)
+
+        bg_inactive = QColor(c.get("WIDGET_BG", "#110f1c"))
+        bg_active = QColor(c.get("ACCENT_PURPLE", "#a855f7"))
+        
+        border_inactive = QColor(c.get("BORDER_NEUTRAL", "#322c4d"))
+        border_active = QColor(c.get("ACCENT_PURPLE", "#a855f7"))
+
+        p = max(0.0, min(1.0, self._check_progress))
+
+        bg_r = int(bg_inactive.red() + (bg_active.red() - bg_inactive.red()) * p)
+        bg_g = int(bg_inactive.green() + (bg_active.green() - bg_inactive.green()) * p)
+        bg_b = int(bg_inactive.blue() + (bg_active.blue() - bg_inactive.blue()) * p)
+        current_bg = QColor(bg_r, bg_g, bg_b)
+
+        b_r = int(border_inactive.red() + (border_active.red() - border_inactive.red()) * p)
+        b_g = int(border_inactive.green() + (border_active.green() - border_inactive.green()) * p)
+        b_b = int(border_inactive.blue() + (border_active.blue() - border_inactive.blue()) * p)
+        current_border = QColor(b_r, b_g, b_b)
+
+        painter.setBrush(QBrush(current_bg))
+        painter.setPen(QPen(current_border, 1.5))
+        painter.drawRoundedRect(box_rect, 5, 5)
+
+        if p > 0.05:
+            painter.save()
+            painter.setPen(QPen(QColor("#ffffff"), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+
+            cx = box_rect.center().x()
+            cy = box_rect.center().y()
+
+            scale = max(0.1, p)
+            painter.translate(cx, cy)
+            painter.scale(scale, scale)
+            painter.translate(-cx, -cy)
+
+            path = QPainterPath()
+            path.moveTo(box_rect.x() + 4.5, cy)
+            path.lineTo(box_rect.x() + 7.5, cy + 3.5)
+            path.lineTo(box_rect.x() + 13.5, cy - 3.5)
+            painter.drawPath(path)
+
+            painter.restore()
+
+        text = self.text()
+        if text:
+            painter.setPen(QColor(c["TEXT_PRIMARY"]))
+            font = self.font()
+            painter.setFont(font)
+            text_rect = QRectF(box_size + 10, 0, self.width() - box_size - 10, self.height())
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+
+    def sizeHint(self):
+        font_metrics = self.fontMetrics()
+        text_w = font_metrics.horizontalAdvance(self.text()) if self.text() else 0
+        w = 18 + (10 if text_w > 0 else 0) + text_w + 12
+        h = max(24, font_metrics.height() + 6)
+        return QSize(w, h)
+
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import QPoint
 
@@ -693,39 +917,37 @@ class CustomTitleBar(QWidget):
             """)
 
     def on_theme_toggled(self, new_theme):
+        from utils.config_loader import get_config
+        config = get_config()
+        config.set("behavior.theme", new_theme)
+        config.set("ui.theme", new_theme)
+        
         if hasattr(self.parent, "theme_mode"):
             self.parent.theme_mode = new_theme
+
+        if hasattr(self.parent, "theme_combo") and self.parent.theme_combo is not None:
+            self.parent.theme_combo.blockSignals(True)
+            idx = self.parent.theme_combo.findData(new_theme)
+            if idx >= 0:
+                self.parent.theme_combo.setCurrentIndex(idx)
+            self.parent.theme_combo.blockSignals(False)
+
+        if hasattr(self.parent, "apply_theme_dynamically"):
             self.parent.apply_theme_dynamically()
         else:
-            from utils.config_loader import get_config
-            config = get_config()
-            config.set("behavior.theme", new_theme)
-            config.save()
-            
-            # Apply theme dynamically to the parent window
-            if hasattr(self.parent, "apply_theme_dynamically"):
-                self.parent.apply_theme_dynamically()
-                # If parent is Settings window and has theme_combo, sync it
-                if hasattr(self.parent, "theme_combo") and self.parent.theme_combo is not None:
-                    self.parent.theme_combo.blockSignals(True)
-                    idx = self.parent.theme_combo.findData(new_theme)
-                    if idx >= 0:
-                        self.parent.theme_combo.setCurrentIndex(idx)
-                    self.parent.theme_combo.blockSignals(False)
-            else:
-                from ui.theme import get_theme_qss
-                self.parent.setStyleSheet(get_theme_qss())
-                self.apply_theme_dynamically()
-                if hasattr(self.parent, "main_container"):
-                    from ui.theme import get_colors
-                    c = get_colors()
-                    self.parent.main_container.setStyleSheet(f"""
-                        QWidget#mainContainer {{
-                            background-color: {c["BG_NEUTRAL"]};
-                            border: 1px solid {c["BORDER_NEUTRAL"]};
-                            border-radius: 12px;
-                        }}
-                    """)
+            from ui.theme import get_theme_qss
+            self.parent.setStyleSheet(get_theme_qss())
+            self.apply_theme_dynamically()
+            if hasattr(self.parent, "main_container"):
+                from ui.theme import get_colors
+                c = get_colors()
+                self.parent.main_container.setStyleSheet(f"""
+                    QWidget#mainContainer {{
+                        background-color: {c["BG_NEUTRAL"]};
+                        border: 1px solid {c["BORDER_NEUTRAL"]};
+                        border-radius: 12px;
+                    }}
+                """)
         
     def mousePressEvent(self, event):
         pass

@@ -31,8 +31,8 @@ class AppMonitor:
         self.signals = AppMonitorSignals()
         self.running = False
         self.thread = None
-        self._seen_pids = set()  # Tracks PIDs that have been processed
-        self._not_suspicious_pids = set()  # Tracks non-matching PIDs to avoid re-evaluating heuristics
+        self._seen_pids = set()  # Tracks (pid, create_time) tuples that have been processed
+        self._not_suspicious_pids = set()  # Tracks (pid, create_time) tuples to avoid re-evaluating heuristics
         self._negative_hash_cache = {}  # real_exe -> (mtime, size, last_checked_time)
         
         self._cached_apps = None
@@ -100,28 +100,36 @@ class AppMonitor:
                         # Skip ourselves
                         if pid == os.getpid():
                             continue
-                            
-                        # If we already processed this pid, skip
-                        if pid in self._seen_pids:
+
+                        # Use (pid, create_time) as key to handle PID recycling
+                        try:
+                            proc_key = (pid, proc.create_time())
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
                             continue
                             
-                        # If we know this PID is not suspicious, skip
-                        if pid in self._not_suspicious_pids:
+                        # If we already processed this (pid, create_time), skip
+                        if proc_key in self._seen_pids:
+                            continue
+                            
+                        # If we know this (pid, create_time) is not suspicious, skip
+                        if proc_key in self._not_suspicious_pids:
                             continue
                             
                         if not proc.is_running():
                             continue
 
-                        # Skip background services like --gapplication-service or background daemon mode
+                        # Skip D-Bus-activated background services (e.g. GNOME gapplication)
+                        # NOTE: Only --gapplication-service is skipped. Generic --background
+                        # flags are NOT skipped as they can be trivially faked (audit §2.4).
                         cmdline = proc.info.get('cmdline') or []
                         is_background_service = False
                         for arg in cmdline:
-                            if "--gapplication-service" in arg or "--background" in arg:
+                            if "--gapplication-service" in arg:
                                 is_background_service = True
                                 break
                                 
                         if is_background_service:
-                            self._not_suspicious_pids.add(pid)
+                            self._not_suspicious_pids.add(proc_key)
                             continue
 
                         name = proc.info['name']
@@ -135,22 +143,8 @@ class AppMonitor:
                             if real_exe in self._canonical_map:
                                 match_app = self._canonical_map[real_exe]
                             else:
-                                # 2. Match by content hash if the process name is suspicious
-                                name_lower = name.lower() if name else ""
-                                exe_base = os.path.basename(real_exe).lower()
-                                
-                                is_suspicious = False
-                                target_hash = None
-                                target_app = None
-                                
-                                for target_name, app_cfg, h in self._heuristics:
-                                    if target_name in name_lower or target_name in exe_base:
-                                        is_suspicious = True
-                                        target_hash = h
-                                        target_app = app_cfg
-                                        break
-                                
-                                if is_suspicious and target_hash and target_app:
+                                # 2. Match by content SHA-256 hash (detects renamed binaries regardless of process name)
+                                if self._hash_map:
                                     cooldown_seconds = 5.0
                                     use_cached_negative = False
                                     try:
@@ -166,15 +160,12 @@ class AppMonitor:
                                         if cached_mtime == mtime and cached_size == size and (time.time() - cached_time < cooldown_seconds):
                                             use_cached_negative = True
                                             
-                                    if use_cached_negative:
-                                        proc_hash = None
-                                    else:
+                                    if not use_cached_negative:
                                         proc_hash = calculate_sha256(real_exe)
-                                        if proc_hash != target_hash:
+                                        if proc_hash and proc_hash in self._hash_map:
+                                            match_app = self._hash_map[proc_hash]
+                                        else:
                                             self._negative_hash_cache[real_exe] = (mtime, size, time.time())
-                                            
-                                    if proc_hash == target_hash:
-                                        match_app = target_app
 
                         if match_app:
                             app_id = match_app.get("id")
@@ -187,10 +178,9 @@ class AppMonitor:
                                 if timeout > 0 and (time.time() - auth_time) > timeout:
                                     logging.info(f"AppMonitor: Session timeout elapsed for '{app_id}' (PID: {pid}). Relocking app.")
                                     self.main_app.relock_app(app_id)
-                                    if pid in self._seen_pids:
-                                        self._seen_pids.remove(pid)
+                                    self._seen_pids.discard(proc_key)
                                 else:
-                                    self._seen_pids.add(pid)
+                                    self._seen_pids.add(proc_key)
                                     continue
 
                             logging.info(f"AppMonitor: Detected target process '{name}' (PID: {pid}). Suspending via SIGSTOP.")
@@ -199,21 +189,21 @@ class AppMonitor:
                             os.kill(pid, signal.SIGSTOP)
                             
                             # Mark as seen so we don't suspend it repeatedly
-                            self._seen_pids.add(pid)
+                            self._seen_pids.add(proc_key)
                             
                             # Request authorization (emitted to main GUI thread)
                             self.signals.request_auth.emit(desktop_name, pid)
                         else:
-                            # Not a protected app, mark PID as non-suspicious to skip next iterations
-                            self._not_suspicious_pids.add(pid)
+                            # Not a protected app, mark as non-suspicious to skip next iterations
+                            self._not_suspicious_pids.add(proc_key)
 
                     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         continue
 
-                # Housekeep seen and non-suspicious PIDs
+                # Housekeep seen and non-suspicious (pid, create_time) sets
                 active_pids = set(psutil.pids())
-                self._seen_pids &= active_pids
-                self._not_suspicious_pids &= active_pids
+                self._seen_pids = {k for k in self._seen_pids if k[0] in active_pids}
+                self._not_suspicious_pids = {k for k in self._not_suspicious_pids if k[0] in active_pids}
 
             except Exception as e:
                 logging.error(f"Error in AppMonitor loop: {e}", exc_info=True)

@@ -3,13 +3,14 @@ Description=FaceGate-Linux background lock daemon
 
 [Service]
 ExecStart=%h/.local/bin/facegate --monitor
-Restart=on-failure
-RestartSec=2
+Restart=always
+RestartSec=3
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=%h/.config/facegate %h/.local/share/facegate %h/.local/share/applications
+RuntimeDirectory=facegate
+ReadWritePaths=%t/facegate %t %h/.config/facegate %h/.local/share/facegate %h/.local/share/applications
 RestrictNamespaces=true
 RestrictSUIDSGID=true
 

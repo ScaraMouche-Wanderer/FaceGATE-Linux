@@ -1,4 +1,16 @@
 import os
+import ctypes
+
+# Preload libc and librt with RTLD_GLOBAL to resolve GLIBC symbol conflicts (__pointer_chk_guard) on Linux
+try:
+    ctypes.CDLL("libc.so.6", mode=ctypes.RTLD_GLOBAL)
+except Exception:
+    pass
+try:
+    ctypes.CDLL("librt.so.1", mode=ctypes.RTLD_GLOBAL)
+except Exception:
+    pass
+
 # Limit ONNX Runtime and math library threads to prevent CPU spikes and thermal throttling
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"

@@ -10,15 +10,9 @@ auth: {}
 authentication:
   password_fallback_grace_seconds: 15
 recognition:
-  similarity_threshold: 0.65
+  similarity_threshold: 0.60
   ambiguity_margin: 0.03
-  active_challenge: random
-  ear_blink_threshold: 0.2
-  ear_consecutive_frames: 3
-  liveness_strictness: medium
-  pitch_threshold_degrees: 15.0
-  yaw_threshold_degrees: 15.0
-  liveness_min_motion: 0.5
+  liveness_min_motion: 0.05
 security:
   session_timeout_seconds: 300
   pbkdf2_iterations: 600000
@@ -48,5 +42,5 @@ ui:
   developer_mode: false
   fps_counter: true
   logging_enabled: true
-  theme: light
+  theme: system
 

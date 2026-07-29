@@ -103,6 +103,11 @@ class CameraWorker:
 
     def stop(self):
         self.running = False
+        if self.thread and self.thread.is_alive():
+            try:
+                self.thread.join(timeout=1.0)
+            except Exception:
+                pass
         logging.info("CameraWorker thread stop signaled.")
 
     def _run(self):

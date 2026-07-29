@@ -17,6 +17,15 @@ class FaceGateService(QObject):
             logging.info("FaceGate is inactive/disabled. Auto-authorizing.")
             return True
 
+        # Check for persistent brute-force lockout
+        from security.lockout_manager import is_locked_out
+        locked_out, remaining = is_locked_out(app_identifier)
+        if locked_out:
+            logging.warning(f"RequestAuth for '{app_identifier}' REJECTED due to active brute-force lockout ({remaining}s remaining).")
+            from database.audit_log import log_auth_attempt
+            log_auth_attempt(app_identifier, "lockout", "fail")
+            return False
+
         import subprocess
         import os
         from database.embedding_store import get_cached_key, set_cached_key
@@ -137,8 +146,15 @@ class FaceGateService(QObject):
             return ""
 
     def remove_enrolled_user_internal(self, username: str) -> bool:
-        """Removes an enrolled user from the face database."""
+        """Removes an enrolled user from the face database. Requires admin face verification."""
         logging.info(f"D-Bus request received: RemoveEnrolledUser for '{username}'")
+
+        # Security: require admin face verification before allowing user deletion
+        if self.main_app:
+            if not self.main_app.verify_admin_face(f"Delete User '{username}'"):
+                logging.warning(f"RemoveEnrolledUser DENIED for '{username}': verification failed.")
+                return False
+
         from database.embedding_store import delete_embedding
         try:
             delete_embedding(username)
@@ -156,6 +172,15 @@ class FaceGateService(QObject):
             return ""
 
     def set_admin_user_internal(self, username: str) -> bool:
+        """Sets the admin user. Requires admin face verification."""
+        logging.info(f"D-Bus request received: SetAdminUser for '{username}'")
+
+        # Security: require admin face verification before allowing admin change
+        if self.main_app:
+            if not self.main_app.verify_admin_face(f"Set Admin to '{username}'"):
+                logging.warning(f"SetAdminUser DENIED for '{username}': verification failed.")
+                return False
+
         from database.embedding_store import set_admin_user
         try:
             set_admin_user(username)
@@ -164,20 +189,24 @@ class FaceGateService(QObject):
             return False
 
     def get_cached_key_hex_internal(self) -> str:
+        """Internal-only method for key transfer via --key-fd pipes.
+        NOT exposed on the D-Bus interface to prevent session-bus key exfiltration."""
         from database.embedding_store import get_cached_key
         key = get_cached_key()
         return key.hex() if key else ""
 
     def update_cached_key_internal(self, key_hex: str) -> bool:
+        """Internal-only method for key sync.
+        NOT exposed on the D-Bus interface to prevent unauthenticated key injection."""
         try:
             key_bytes = bytes.fromhex(key_hex)
             if len(key_bytes) == 32:
                 from database.embedding_store import set_cached_key
                 set_cached_key(key_bytes)
-                logging.info("D-Bus service updated cached encryption key.")
+                logging.info("Internal key cache updated (not via D-Bus).")
                 return True
         except Exception as e:
-            logging.error(f"Failed to update cached key via D-Bus: {e}")
+            logging.error(f"Failed to update cached key: {e}")
         return False
 
     def reload_config_internal(self) -> bool:
@@ -198,15 +227,33 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
 
     @Slot(str, result=bool)
     def RequestAuth(self, app_identifier: str) -> bool:
+        # Peer credential verification: check caller UID matches daemon owner
+        msg = self.message()
+        if msg.isValid():
+            caller_service = msg.service()
+            from PySide6.QtDBus import QDBusConnection, QDBusInterface
+            import os
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected():
+                dbus_iface = QDBusInterface(
+                    "org.freedesktop.DBus",
+                    "/org/freedesktop/DBus",
+                    "org.freedesktop.DBus",
+                    bus
+                )
+                if dbus_iface.isValid():
+                    reply = dbus_iface.call("GetConnectionUnixUser", caller_service)
+                    if reply.isValid() and len(reply.arguments()) > 0:
+                        caller_uid = int(reply.arguments()[0])
+                        if caller_uid != os.getuid():
+                            logging.warning(f"D-Bus RequestAuth REJECTED: Caller UID {caller_uid} != process UID {os.getuid()}")
+                            return False
         return self.service.request_auth_internal(app_identifier)
 
-    @Slot(result=str)
-    def GetCachedKey(self) -> str:
-        return self.service.get_cached_key_hex_internal()
-
-    @Slot(str, result=bool)
-    def UpdateCachedKey(self, key_hex: str) -> bool:
-        return self.service.update_cached_key_internal(key_hex)
+    # NOTE: GetCachedKey and UpdateCachedKey have been deliberately REMOVED from
+    # the D-Bus interface. Exposing the raw AES-256 key on the session bus allowed
+    # any unprivileged process to exfiltrate or inject the encryption key.
+    # Key transfer between processes now uses --key-fd pipe passing only.
 
     @Slot(result=str)
     def GetEnrolledUsers(self) -> str:

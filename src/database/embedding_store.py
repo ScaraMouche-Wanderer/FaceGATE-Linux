@@ -8,23 +8,28 @@ import numpy as np
 EMBEDDING_FILE = os.path.expanduser("~/.config/facegate/embeddings.enc")
 OLD_EMBEDDING_FILE = os.path.expanduser("~/.config/facegate/embeddings.json")
 
+import threading
 _cached_key = None
+_cached_key_lock = threading.Lock()
 
 def _get_ram_key_file() -> str:
     uid = os.getuid()
     run_dir = f"/run/user/{uid}"
     if os.path.exists(run_dir):
         return os.path.join(run_dir, "facegate.key")
-    # Fallback to tempdir if /run/user/{uid} is not available
-    import tempfile
-    return os.path.join(tempfile.gettempdir(), f".facegate_{uid}.key")
+    # Fallback to private 0700 user directory instead of world-writable /tmp
+    fallback_dir = os.path.expanduser("~/.config/facegate/.runtime")
+    os.makedirs(fallback_dir, mode=0o700, exist_ok=True)
+    os.chmod(fallback_dir, 0o700)
+    return os.path.join(fallback_dir, "facegate.key")
 
 def set_cached_key(key: bytes):
     """
     Caches the derived key in process memory and user RAM tmpfs (/run/user/{uid}/facegate.key).
     """
     global _cached_key
-    _cached_key = bytearray(key) if isinstance(key, bytes) else key
+    with _cached_key_lock:
+        _cached_key = bytearray(key) if isinstance(key, bytes) else key
 
     # Write key to user-private RAM-backed tmpfs file (0600 permissions)
     try:
@@ -41,8 +46,9 @@ def get_cached_key() -> bytes:
     Retrieves the cached key from process memory or user RAM tmpfs.
     """
     global _cached_key
-    if _cached_key:
-        return bytes(_cached_key)
+    with _cached_key_lock:
+        if _cached_key:
+            return bytes(_cached_key)
 
     # Check RAM tmpfs file
     try:
@@ -51,8 +57,9 @@ def get_cached_key() -> bytes:
             with open(ram_file, 'rb') as f:
                 data = f.read()
                 if len(data) == 32:
-                    _cached_key = bytearray(data)
-                    return bytes(_cached_key)
+                    with _cached_key_lock:
+                        _cached_key = bytearray(data)
+                    return bytes(data)
     except Exception as e:
         logging.error(f"Error reading RAM key file: {e}")
 
@@ -63,10 +70,11 @@ def clear_cached_key():
     Securely zeroes and removes the cached key from memory and RAM tmpfs.
     """
     global _cached_key
-    if _cached_key is not None:
-        for i in range(len(_cached_key)):
-            _cached_key[i] = 0
-        _cached_key = None
+    with _cached_key_lock:
+        if _cached_key is not None:
+            for i in range(len(_cached_key)):
+                _cached_key[i] = 0
+            _cached_key = None
 
     try:
         ram_file = _get_ram_key_file()
@@ -159,8 +167,12 @@ def load_embeddings() -> dict:
         return {}
         
     try:
-        from security.crypto_engine import decrypt
-        decrypted_bytes = decrypt(envelope["nonce"], envelope["ciphertext"], key)
+        from security.crypto_engine import decrypt, build_aad
+        aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), envelope.get("iterations", 600000), envelope.get("salt", ""))
+        try:
+            decrypted_bytes = decrypt(envelope["nonce"], envelope["ciphertext"], key, aad)
+        except Exception:
+            decrypted_bytes = decrypt(envelope["nonce"], envelope["ciphertext"], key, aad=None)
         data = json.loads(decrypted_bytes.decode('utf-8'))
         
         # Convert lists back to numpy arrays
@@ -178,7 +190,7 @@ def save_embedding(name: str, embedding: np.ndarray):
     key = get_or_prompt_key()
     if not key:
         logging.error("Cannot save embedding: no encryption key available.")
-        return
+        raise RuntimeError("Cannot save embedding: no encryption key available.")
         
     # Load current embeddings (uses cached key)
     embeddings = load_embeddings()
@@ -189,36 +201,112 @@ def save_embedding(name: str, embedding: np.ndarray):
     plaintext_bytes = json.dumps(serialized).encode('utf-8')
     
     try:
-        from security.crypto_engine import encrypt
-        nonce, ciphertext = encrypt(plaintext_bytes, key)
-        
         # Keep KDF params from the existing envelope, or generate a fresh default salt
         envelope = read_envelope_file()
         if envelope:
             iterations = envelope["iterations"]
             salt = envelope["salt"]
+            kdf_name = envelope.get("kdf", "pbkdf2_hmac_sha256")
         else:
             from utils.config_loader import get_config
             config = get_config()
             iterations = int(config.get("security.pbkdf2_iterations", 600000))
             salt = os.urandom(16)
+            kdf_name = "pbkdf2_hmac_sha256"
+
+        from security.crypto_engine import encrypt, build_aad
+        aad = build_aad(kdf_name, iterations, salt)
+        nonce, ciphertext = encrypt(plaintext_bytes, key, aad)
             
         new_envelope = {
-            "kdf": "pbkdf2_hmac_sha256",
+            "kdf": kdf_name,
             "iterations": iterations,
             "salt": base64.b64encode(salt).decode('utf-8') if isinstance(salt, bytes) else salt,
             "nonce": base64.b64encode(nonce).decode('utf-8'),
             "ciphertext": base64.b64encode(ciphertext).decode('utf-8')
         }
         
-        with open(EMBEDDING_FILE, 'w') as f:
+        tmp_file = EMBEDDING_FILE + ".tmp"
+        with open(tmp_file, 'w') as f:
             json.dump(new_envelope, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
             
-        # Ensure correct file permissions
-        os.chmod(EMBEDDING_FILE, 0o600)
+        # Ensure correct file permissions atomically
+        os.chmod(tmp_file, 0o600)
+        os.replace(tmp_file, EMBEDDING_FILE)
         logging.info(f"Saved encrypted embedding for user '{name}' to {EMBEDDING_FILE}")
+
+        # Ensure Primary Admin is configured
+        from utils.config_loader import get_config
+        config = get_config()
+        if not config.get("security.admin_user"):
+            config.set("security.admin_user", name)
+            config.save()
+
+        # Signal running daemon to reload user embeddings safely
+        notify_daemon_reload()
     except Exception as e:
         logging.error(f"Error saving encrypted embedding: {e}")
+        raise RuntimeError(f"Error saving encrypted embedding: {e}")
+
+def notify_daemon_reload():
+    """
+    Safely notifies the FaceGate daemon to reload configuration.
+    If running inside the daemon process itself, reloads in-process without D-Bus IPC.
+    Otherwise, sends an asynchronous D-Bus signal cross-process.
+    """
+    try:
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtDBus import QDBusConnection, QDBusInterface
+        
+        bus = QDBusConnection.sessionBus()
+        if not bus.isConnected():
+            return
+            
+        try:
+            owner_reply = bus.interface().serviceOwner("org.facegate.FaceGate")
+            if owner_reply.isValid() and owner_reply.value() == bus.baseService():
+                app_inst = QApplication.instance()
+                if hasattr(app_inst, "reload_config"):
+                    app_inst.reload_config()
+                return
+        except Exception:
+            pass
+
+        interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
+        if interface.isValid():
+            interface.asyncCall("ReloadConfig")
+    except Exception as e:
+        logging.warning(f"Could not notify daemon of config reload: {e}")
+
+def notify_daemon_user_removed(name: str):
+    """
+    Safely notifies the FaceGate daemon of an enrolled user deletion.
+    """
+    try:
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtDBus import QDBusConnection, QDBusInterface
+        
+        bus = QDBusConnection.sessionBus()
+        if not bus.isConnected():
+            return
+            
+        try:
+            owner_reply = bus.interface().serviceOwner("org.facegate.FaceGate")
+            if owner_reply.isValid() and owner_reply.value() == bus.baseService():
+                app_inst = QApplication.instance()
+                if hasattr(app_inst, "reload_config"):
+                    app_inst.reload_config()
+                return
+        except Exception:
+            pass
+
+        interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
+        if interface.isValid():
+            interface.asyncCall("RemoveEnrolledUser", name)
+    except Exception as e:
+        logging.warning(f"Could not sync embedding deletion with daemon over D-Bus: {e}")
 
 def get_admin_user() -> str | None:
     """
@@ -313,16 +401,8 @@ def delete_embedding(name: str):
                 config.set("security.admin_user", None)
             config.save()
 
-        # Notify running daemon via D-Bus session bus
-        try:
-            from PySide6.QtDBus import QDBusConnection, QDBusInterface
-            bus = QDBusConnection.sessionBus()
-            if bus.isConnected():
-                interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
-                if interface.isValid():
-                    interface.call("RemoveEnrolledUser", name)
-        except Exception as ex:
-            logging.warning(f"Could not sync embedding deletion with daemon over D-Bus: {ex}")
+        # Notify running daemon via D-Bus session bus or in-process
+        notify_daemon_user_removed(name)
     except Exception as e:
         logging.error(f"Error deleting encrypted embedding: {e}")
         raise

@@ -1,0 +1,14 @@
+{
+  "include": [
+    "src",
+    "tests"
+  ],
+  "extraPaths": [
+    "src",
+    "/home/voidnode/venv/lib/python3.14/site-packages",
+    "/home/voidnode/.cache/pypoetry/virtualenvs/facegate-TNgRoHjR-py3.14/lib/python3.14/site-packages"
+  ],
+  "venvPath": "/home/voidnode/.cache/pypoetry/virtualenvs",
+  "venv": "facegate-TNgRoHjR-py3.14",
+  "pythonVersion": "3.14"
+}
