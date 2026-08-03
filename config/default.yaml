@@ -13,9 +13,14 @@ recognition:
   ambiguity_margin: 0.03
   # liveness_min_motion: minimum cumulative bounding-box centroid movement (in
   # pixels, summed across the confirmation frames) required before a
-  # high-confidence face match is allowed to authenticate.
-  # Set to 0.0 to disable motion checking (default).
-  liveness_min_motion: 0.0
+  # high-confidence face match is allowed to authenticate. This is the primary
+  # defense against a printed photo or a phone/tablet held up to the camera.
+  # A value of 0.5 tolerates normal head/hand micro-jitter while still
+  # rejecting a rigidly-held static image. To explicitly disable this check
+  # (NOT recommended - see SECURITY.md), set this to -1. Do NOT set this to
+  # 0 - auth_dialog.py treats 0/missing as "use the safe floor" specifically
+  # so this can't be silently disabled by a blank/zeroed config value.
+  liveness_min_motion: 0.5
 security:
   session_timeout_seconds: 300
   pbkdf2_iterations: 600000

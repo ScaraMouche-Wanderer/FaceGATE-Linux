@@ -563,14 +563,26 @@ class AuthDialog(QDialog):
             
             # High-confidence match (score >= threshold + 0.12) authenticates immediately
             if self.success_count >= 2 or matched_score >= (threshold + 0.12):
-                raw_min_motion = config.get("recognition.liveness_min_motion", 0.0)
+                # Fail-safe default: liveness/anti-spoofing is ON unless the operator
+                # *explicitly* opts out with a negative value. A missing key, a zero,
+                # or a malformed config value must never silently disable this check -
+                # that would allow a static photo/screen to authenticate. See SECURITY.md
+                # "Liveness Verification (Anti-Spoofing)".
+                _SAFE_MIN_MOTION_FLOOR = 0.5
+                raw_min_motion = config.get("recognition.liveness_min_motion", _SAFE_MIN_MOTION_FLOOR)
                 try:
                     min_motion = float(raw_min_motion)
                 except (TypeError, ValueError):
-                    min_motion = 0.0
-                liveness_disabled = min_motion <= 0.0
+                    min_motion = _SAFE_MIN_MOTION_FLOOR
+                if min_motion == 0.0:
+                    min_motion = _SAFE_MIN_MOTION_FLOOR
+                liveness_disabled = min_motion < 0.0
                 if liveness_disabled:
-                    logging.debug("Liveness motion check is disabled (recognition.liveness_min_motion <= 0).")
+                    logging.warning(
+                        "Liveness/anti-spoofing check is explicitly DISABLED via config "
+                        "(recognition.liveness_min_motion < 0). Static photo/screen "
+                        "presentation attacks are not mitigated while this is set."
+                    )
 
                 total_dist = 0.0
                 if len(self.matched_centroids) >= 2:
