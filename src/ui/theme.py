@@ -1306,3 +1306,103 @@ class WindowDragResizeFilter(QObject):
             geo.setTop(self.window_start_geo.bottom() - new_h)
 
         self.window.setGeometry(geo)
+
+
+class PulsingStatusDot(QWidget):
+    """
+    A smooth pulsing status dot widget that breathes/pulses softly when active or warning.
+    """
+    def __init__(self, color_hex: str = "#10b981", parent=None):
+        super().__init__(parent)
+        self.setFixedSize(16, 16)
+        self._color_hex = color_hex
+        self._pulse_opacity = 0.4
+        
+        self.anim = QPropertyAnimation(self, b"pulse_opacity")
+        self.anim.setDuration(1200)
+        self.anim.setStartValue(0.3)
+        self.anim.setEndValue(1.0)
+        self.anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self.anim.setLoopCount(-1)  # Infinite loop breathing
+        self.anim.start()
+
+    @Property(float)
+    def pulse_opacity(self):
+        return self._pulse_opacity
+
+    @pulse_opacity.setter
+    def pulse_opacity(self, val):
+        self._pulse_opacity = val
+        self.update()
+
+    def set_color(self, color_hex: str):
+        self._color_hex = color_hex
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        center = QPointF(self.width() / 2.0, self.height() / 2.0)
+        base_color = QColor(self._color_hex)
+        
+        # Outer glow ring
+        glow_color = QColor(base_color)
+        glow_color.setAlphaF(self._pulse_opacity * 0.45)
+        painter.setBrush(QBrush(glow_color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        glow_radius = 5.0 + (2.5 * self._pulse_opacity)
+        painter.drawEllipse(center, glow_radius, glow_radius)
+
+        # Core dot
+        core_color = QColor(base_color)
+        core_color.setAlphaF(0.95)
+        painter.setBrush(QBrush(core_color))
+        painter.drawEllipse(center, 3.5, 3.5)
+
+
+class AnimatedButton(QPushButton):
+    """
+    A premium button subclass with smooth hover scaling and spring-click press feedback.
+    """
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._scale = 1.0
+        self.anim = None
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    @Property(float)
+    def button_scale(self):
+        return self._scale
+
+    @button_scale.setter
+    def button_scale(self, val):
+        self._scale = val
+        self.update()
+
+    def enterEvent(self, event):
+        self._animate_scale(1.025)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._animate_scale(1.0)
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        self._animate_scale(0.97)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._animate_scale(1.025 if self.underMouse() else 1.0)
+        super().mouseReleaseEvent(event)
+
+    def _animate_scale(self, target):
+        if self.anim:
+            self.anim.stop()
+        self.anim = QPropertyAnimation(self, b"button_scale")
+        self.anim.setDuration(160)
+        self.anim.setStartValue(self._scale)
+        self.anim.setEndValue(target)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        self.anim.start()
+
