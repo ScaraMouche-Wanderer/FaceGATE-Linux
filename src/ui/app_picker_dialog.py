@@ -33,6 +33,7 @@ class AppPickerDialog(QDialog):
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search applications...")
         self.search_input.textChanged.connect(self.filter_applications)
+        self.search_input.returnPressed.connect(self.accept_selection)
         layout.addWidget(self.search_input)
 
         # List Widget
@@ -50,6 +51,7 @@ class AppPickerDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         
         self.ok_btn = QPushButton("Add Protection")
+        self.ok_btn.setDefault(True)
         self.ok_btn.clicked.connect(self.accept_selection)
         
         btn_layout.addWidget(self.cancel_btn)
@@ -57,6 +59,21 @@ class AppPickerDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self.setLayout(layout)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.accept_selection()
+            event.accept()
+        elif event.key() == Qt.Key.Key_Escape:
+            self.reject()
+            event.accept()
+        elif event.key() == Qt.Key.Key_Down and self.search_input.hasFocus():
+            self.list_widget.setFocus()
+            if self.list_widget.count() > 0 and self.list_widget.currentRow() < 0:
+                self.list_widget.setCurrentRow(0)
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def load_applications(self):
         self.all_apps = get_installed_desktop_entries()
