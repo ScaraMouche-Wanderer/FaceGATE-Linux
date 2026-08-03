@@ -11,7 +11,7 @@ from camera.camera_worker import CameraWorker
 from recognition.blur_checker import is_blurry
 from database.embedding_store import save_embedding, load_embeddings, get_cached_key
 from security.credential_store import verify_password
-from ui.auth_dialog import convert_cv_to_pixmap
+from ui.auth_dialog import convert_cv_to_pixmap, FaceDetectorWorker
 
 class EnrollmentWizard(QDialog):
     def __init__(self, parent=None, target_username: str = ""):
@@ -37,6 +37,8 @@ class EnrollmentWizard(QDialog):
         self.processing_fps_limiter = 0.0 # Time threshold
         self.last_frame_processed_time = 0.0
         self.avg_embedding = None
+        self.duplicate_user = None
+        self.duplicate_similarity = 0.0
         
         self.init_ui()
 
@@ -148,6 +150,7 @@ class EnrollmentWizard(QDialog):
         u_lbl.setObjectName("boldLabel")
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("e.g. voidnode")
+        self.username_input.returnPressed.connect(self.process_intro_next)
         if self.target_username:
             self.username_input.setText(self.target_username)
             self.username_input.setReadOnly(True)
@@ -165,6 +168,7 @@ class EnrollmentWizard(QDialog):
         pwd_lbl.setObjectName("warningLabel")
         self.pwd_input = QLineEdit()
         self.pwd_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.pwd_input.returnPressed.connect(self.process_intro_next)
         pwd_layout.addWidget(pwd_lbl)
         pwd_layout.addWidget(self.pwd_input)
         layout.addWidget(self.pwd_container)
@@ -378,6 +382,11 @@ class EnrollmentWizard(QDialog):
 
     def start_camera_worker(self):
         self.instruction_lbl.setText("Initializing camera capture...")
+        if hasattr(self, "detector") and self.detector:
+            self.detector_worker = FaceDetectorWorker(self.detector)
+            self.detector_worker.detected.connect(self.on_detection_result)
+            self.detector_worker.start()
+
         self.camera_worker = CameraWorker()
         self.camera_worker.signals.frame_ready.connect(self.on_frame_received, Qt.ConnectionType.QueuedConnection)
         self.camera_worker.signals.error.connect(self.on_camera_error, Qt.ConnectionType.QueuedConnection)
@@ -392,16 +401,18 @@ class EnrollmentWizard(QDialog):
 
     @Slot(object)
     def on_frame_received(self, frame):
-        # 1. Update live preview label
+        # 1. Update live preview label on UI thread immediately (buttery smooth FPS)
         pixmap = convert_cv_to_pixmap(frame, 360, 270)
         self.camera_label.setPixmap(pixmap)
-        
-        # 2. Limit extraction rate (e.g. process max 10 frames per second to avoid UI lag)
-        current_time = time.time()
-        if current_time - self.last_frame_processed_time < 0.1:
+
+        # 2. Submit frame to background face detection thread
+        if hasattr(self, "detector_worker") and self.detector_worker:
+            self.detector_worker.submit_frame(frame)
+
+    @Slot(list, object)
+    def on_detection_result(self, faces, frame):
+        if len(self.embeddings) >= self.required_frames:
             return
-        
-        self.last_frame_processed_time = current_time
 
         # Update Guided instructions
         current_count = len(self.embeddings)
@@ -411,38 +422,50 @@ class EnrollmentWizard(QDialog):
             self.instruction_lbl.setText("🟡 Turn your head slightly to the LEFT")
         elif current_count < 15:
             self.instruction_lbl.setText("🔵 Turn your head slightly to the RIGHT")
-            
-        # 3. Check Blurriness
+
+        # Check Blurriness
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         if is_blurry(gray):
-            # Do not display error to avoid distracting user, just skip frame
             return
 
-        # 4. Detect face and extract embedding
-        try:
-            faces = self.detector.detect_faces(frame)
-            # RAW FRAMES DISCARDED IMMEDIATELY AFTER extraction (no local writes)
-            
-            if not faces:
-                return
-            if len(faces) > 1:
-                self.instruction_lbl.setText("⚠️ Multiple faces detected! Make sure only one person is visible.")
-                return
-                
-            emb = faces[0]['embedding']
-            self.embeddings.append(emb)
-            self.progress_bar.setValue(len(self.embeddings))
-            
-            # Check if capture finished
-            if len(self.embeddings) >= self.required_frames:
-                self.cleanup_camera()
-                mean_emb = np.mean(self.embeddings, axis=0)
-                norm = np.linalg.norm(mean_emb)
-                self.avg_embedding = mean_emb / norm if norm > 0 else mean_emb
-                self.show_success_page()
-                
-        except Exception as e:
-            logging.error(f"Error extracting face embedding: {e}")
+        if not faces:
+            return
+        if len(faces) > 1:
+            self.instruction_lbl.setText("⚠️ Multiple faces detected! Make sure only one person is visible.")
+            return
+
+        emb = faces[0]['embedding']
+        self.embeddings.append(emb)
+        self.progress_bar.setValue(len(self.embeddings))
+
+        # Check if capture finished
+        if len(self.embeddings) >= self.required_frames:
+            self.cleanup_camera()
+            mean_emb = np.mean(self.embeddings, axis=0)
+            norm = np.linalg.norm(mean_emb)
+            self.avg_embedding = mean_emb / norm if norm > 0 else mean_emb
+
+            # Check duplicate face vector against existing database entries
+            self.duplicate_user = None
+            self.duplicate_similarity = 0.0
+            try:
+                existing_embeddings = load_embeddings()
+                from recognition.matcher import cosine_similarity
+                from utils.config_loader import get_config
+                thresh = float(get_config().get("recognition.similarity_threshold", 0.52))
+
+                for uname, emb_vector in existing_embeddings.items():
+                    if uname.lower() == self.username.lower():
+                        continue
+                    sim = cosine_similarity(self.avg_embedding, emb_vector)
+                    if sim > self.duplicate_similarity:
+                        self.duplicate_similarity = sim
+                        if sim >= thresh:
+                            self.duplicate_user = uname
+            except Exception as e:
+                logging.error(f"Error checking duplicate face embedding: {e}")
+
+            self.show_success_page()
 
     @Slot(str)
     def on_camera_error(self, err_msg):
@@ -454,13 +477,23 @@ class EnrollmentWizard(QDialog):
         self.username_input.setFocus()
 
     def show_success_page(self):
-        self.success_msg_lbl.setText(
-            f"Guided capture succeeded!\n\n"
-            f"Successfully captured {self.required_frames} face frames for user '{self.username}'. "
-            f"The frames have been averaged to generate a high-quality facial template. "
-            f"No raw images or frames have been saved to disk, keeping your biometric data private.\n\n"
-            f"Click 'Save Face Profile' below to encrypt and save the profile."
-        )
+        if getattr(self, "duplicate_user", None):
+            self.success_msg_lbl.setText(
+                f"⚠️ <b>Duplicate Face Profile Detected</b>\n\n"
+                f"Successfully captured {self.required_frames} face frames for '{self.username}', but this face "
+                f"matches an existing enrolled profile in the vault: <b>'{self.duplicate_user}'</b> "
+                f"(Similarity Score: {self.duplicate_similarity * 100:.1f}%).\n\n"
+                f"Enrolling identical faces under different usernames will cause authentication ambiguity conflicts.\n\n"
+                f"Click 'Save Face Profile' below to proceed, or Cancel to update existing profile instead."
+            )
+        else:
+            self.success_msg_lbl.setText(
+                f"Guided capture succeeded!\n\n"
+                f"Successfully captured {self.required_frames} face frames for user '{self.username}'. "
+                f"The frames have been averaged to generate a high-quality facial template. "
+                f"No raw images or frames have been saved to disk, keeping your biometric data private.\n\n"
+                f"Click 'Save Face Profile' below to encrypt and save the profile."
+            )
         self.stack.setCurrentIndex(2)
         self.save_btn.setDefault(True)
         self.save_btn.setFocus()
@@ -470,7 +503,7 @@ class EnrollmentWizard(QDialog):
             QMessageBox.critical(self, "Save Error", "No embedding model is active.")
             self.reject()
             return
-            
+
         try:
             save_embedding(self.username, self.avg_embedding)
             QMessageBox.information(self, "Success", f"Facial profile saved successfully for '{self.username}'.")
@@ -480,8 +513,15 @@ class EnrollmentWizard(QDialog):
             self.reject()
 
     # ------------------ Cleanup ------------------
-    
+
     def cleanup_camera(self):
+        if hasattr(self, "detector_worker") and self.detector_worker:
+            try:
+                self.detector_worker.stop()
+            except Exception:
+                pass
+            self.detector_worker = None
+
         if self.camera_worker:
             try:
                 self.camera_worker.signals.frame_ready.disconnect(self.on_frame_received)
@@ -493,7 +533,7 @@ class EnrollmentWizard(QDialog):
             except Exception:
                 pass
             self.camera_worker = None
-            
+
         # Clear preview box
         self.camera_label.clear()
 
@@ -555,3 +595,17 @@ class EnrollmentWizard(QDialog):
             self.camera_label.setStyleSheet(f"background-color: {c['CARD_NEUTRAL']}; border: 1px solid {c['BORDER_NEUTRAL']}; border-radius: 8px;")
         if hasattr(self, "title_bar") and self.title_bar:
             self.title_bar.apply_theme_dynamically()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            idx = self.stack.currentIndex()
+            if idx == 0:
+                self.process_intro_next()
+            elif idx == 2:
+                self.save_enrollment()
+            event.accept()
+        elif event.key() == Qt.Key.Key_Escape:
+            self.reject()
+            event.accept()
+        else:
+            super().keyPressEvent(event)

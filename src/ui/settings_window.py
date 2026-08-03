@@ -80,6 +80,17 @@ class AnimatedSidebar(QListWidget):
         self.max_anim.start()
         super().leaveEvent(event)
 
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Right):
+            parent_window = self.window()
+            if hasattr(parent_window, "tab_stack"):
+                current_tab = parent_window.tab_stack.currentWidget()
+                if current_tab:
+                    current_tab.setFocus()
+                    event.accept()
+                    return
+        super().keyPressEvent(event)
+
 
 class ChangePasswordDialog(QDialog):
     def __init__(self, parent=None):
@@ -241,9 +252,30 @@ class ChangePasswordDialog(QDialog):
         """)
         self.ok_btn.clicked.connect(self.handle_change)
 
+        if self.has_current:
+            self.current_input.returnPressed.connect(self.handle_change)
+        self.new_input.returnPressed.connect(self.handle_change)
+        self.confirm_input.returnPressed.connect(self.handle_change)
+
+        self.ok_btn.setDefault(True)
         btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.ok_btn)
         layout.addLayout(btn_layout)
+
+        if self.has_current:
+            self.current_input.setFocus()
+        else:
+            self.new_input.setFocus()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.handle_change()
+            event.accept()
+        elif event.key() == Qt.Key.Key_Escape:
+            self.reject()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def handle_change(self):
         current_pwd = self.current_input.text() if self.has_current else None
@@ -474,7 +506,8 @@ class SettingsWindow(QDialog):
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
         self.config = config if config else get_config()
-        self.theme_mode = self.config.get("behavior.theme", "light")
+        _cfg_theme = self.config.get("behavior.theme", "light")
+        self.theme_mode = "dark" if _cfg_theme == "dark" else "light"
         self._themed_labels = []  # List of (QLabel, str) to track and update theme colors dynamically
         self._scroll_areas = []   # QScrollArea references for scrollbar re-theming
         self._signals_connected = False  # Guard to prevent duplicate signal connections
@@ -898,12 +931,42 @@ class SettingsWindow(QDialog):
         enrolled_btn_layout = QHBoxLayout()
         enrolled_btn_layout.setSpacing(10)
         
+        from ui.theme import get_colors
+        _c_btn = get_colors(self.theme_mode)
         self.test_face_btn = QPushButton("🔍 Test Face Recognition")
         self.test_face_btn.setObjectName("testFaceBtn")
+        self.test_face_btn.setStyleSheet(f"""
+            QPushButton#testFaceBtn {{
+                background-color: {_c_btn['CANCEL_BTN_BG']};
+                color: {_c_btn['TEXT_PRIMARY']};
+                border: 1px solid {_c_btn['BORDER_NEUTRAL']};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                font-size: 13px;
+            }}
+            QPushButton#testFaceBtn:hover {{
+                background-color: {_c_btn['CANCEL_BTN_HOVER']};
+            }}
+        """)
         self.test_face_btn.clicked.connect(self.run_face_verification_test)
 
         self.enroll_new_btn = QPushButton("➕ Enroll New Face")
         self.enroll_new_btn.setObjectName("enrollNewBtn")
+        self.enroll_new_btn.setStyleSheet(f"""
+            QPushButton#enrollNewBtn {{
+                background-color: {_c_btn['ACCENT_PURPLE']};
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                font-size: 13px;
+            }}
+            QPushButton#enrollNewBtn:hover {{
+                background-color: {_c_btn['ACCENT_PURPLE_HOVER']};
+            }}
+        """)
         self.enroll_new_btn.clicked.connect(self.open_enrollment_wizard)
 
         enrolled_btn_layout.addWidget(self.test_face_btn)
@@ -955,6 +1018,13 @@ class SettingsWindow(QDialog):
         self.margin_label.setProperty("extra_css", "font-size: 13px; border: none;")
         self._themed_labels.append((self.margin_label, "TEXT_PRIMARY"))
         c2_layout.addWidget(self.margin_label)
+
+        liveness = self.config.get("recognition.liveness_min_motion", "0.5")
+        self.liveness_label = QLabel(f"Liveness Anti-Spoofing: {liveness} (Micro-motion centroid tracking active)")
+        style_themed_label(self.liveness_label, "TEXT_PRIMARY", "font-size: 13px; border: none;")
+        self.liveness_label.setProperty("extra_css", "font-size: 13px; border: none;")
+        self._themed_labels.append((self.liveness_label, "TEXT_PRIMARY"))
+        c2_layout.addWidget(self.liveness_label)
 
         layout.addWidget(self.card_security_profiles)
         layout.addStretch()
@@ -1020,9 +1090,10 @@ class SettingsWindow(QDialog):
         theme_lbl = QLabel("Application Theme Mode:")
         theme_lbl.setStyleSheet("font-size: 13px;")
         theme_lbl.setProperty("secondary", True)
+        theme_lbl.setWordWrap(True)
         self.theme_combo = AnimatedComboBox()
+        self.theme_combo.addItem("Light Theme Mode (Default & Facial Illumination)", "light")
         self.theme_combo.addItem("System Default Theme", "system")
-        self.theme_combo.addItem("Light Theme Mode", "light")
         self.theme_combo.addItem("Dark Theme Mode", "dark")
         self.theme_combo.currentIndexChanged.connect(self.handle_theme_changed)
         theme_layout.addWidget(theme_lbl)
@@ -1049,8 +1120,12 @@ class SettingsWindow(QDialog):
         policy_form = QFormLayout()
         policy_form.setSpacing(10)
         policy_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        policy_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        policy_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
 
+        from PySide6.QtWidgets import QSizePolicy
         self.policy_combo = AnimatedComboBox()
+        self.policy_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.policy_combo.addItem("Close and exit the locked application immediately (Recommended)", "kill")
         self.policy_combo.addItem("Freeze the application in the background", "keep_stopped")
         policy_form.addRow("If authentication is cancelled or fails:", self.policy_combo)
@@ -1082,12 +1157,15 @@ class SettingsWindow(QDialog):
         prot_desc = QLabel("Prevents unauthorized users from deleting FaceGate settings or bypassing protection.")
         prot_desc.setStyleSheet("font-size: 11px; margin-left: 20px; border: none; background: transparent;")
         prot_desc.setProperty("secondary", True)
+        prot_desc.setWordWrap(True)
+        prot_desc.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         prot_layout.addWidget(prot_desc)
 
         hk_layout = QHBoxLayout()
         hk_lbl = QLabel("Emergency Shutdown Shortcut:")
         hk_lbl.setStyleSheet("font-size: 13px;")
         hk_lbl.setProperty("secondary", True)
+        hk_lbl.setWordWrap(True)
         self.hotkey_input = QLineEdit()
         self.hotkey_input.setPlaceholderText("<Control><Alt>k")
         hk_layout.addWidget(hk_lbl)
@@ -1099,12 +1177,14 @@ class SettingsWindow(QDialog):
         hk_desc.setStyleSheet("font-size: 11px; font-style: italic; margin-bottom: 5px;")
         hk_desc.setProperty("secondary", True)
         hk_desc.setWordWrap(True)
+        hk_desc.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         prot_layout.addWidget(hk_desc)
 
         panic_hk_layout = QHBoxLayout()
         panic_hk_lbl = QLabel("Panic Lockdown Shortcut:")
         panic_hk_lbl.setStyleSheet("font-size: 13px;")
         panic_hk_lbl.setProperty("secondary", True)
+        panic_hk_lbl.setWordWrap(True)
         self.panic_hotkey_input = QLineEdit()
         self.panic_hotkey_input.setPlaceholderText("<Control><Alt>l")
         panic_hk_layout.addWidget(panic_hk_lbl)
@@ -1116,6 +1196,7 @@ class SettingsWindow(QDialog):
         panic_hk_desc.setStyleSheet("font-size: 11px; font-style: italic;")
         panic_hk_desc.setProperty("secondary", True)
         panic_hk_desc.setWordWrap(True)
+        panic_hk_desc.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         prot_layout.addWidget(panic_hk_desc)
 
         layout.addWidget(self.card_protection)
@@ -1370,7 +1451,7 @@ class SettingsWindow(QDialog):
     def populate_enrolled_users(self):
         """Populates the enrolled users list with Admin badges and per-user actions."""
         from ui.theme import get_colors
-        c = get_colors()
+        c = get_colors(getattr(self, "theme_mode", "light"))
 
         # Clear existing items
         while self.enrolled_users_layout.count():
@@ -2583,6 +2664,38 @@ class SettingsWindow(QDialog):
         if hasattr(self, "enrolled_users_container"):
             self.populate_enrolled_users()
 
+        if hasattr(self, "enroll_new_btn") and self.enroll_new_btn:
+            self.enroll_new_btn.setStyleSheet(f"""
+                QPushButton#enrollNewBtn {{
+                    background-color: {c['ACCENT_PURPLE']};
+                    color: #ffffff;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                    font-size: 13px;
+                }}
+                QPushButton#enrollNewBtn:hover {{
+                    background-color: {c['ACCENT_PURPLE_HOVER']};
+                }}
+            """)
+
+        if hasattr(self, "test_face_btn") and self.test_face_btn:
+            self.test_face_btn.setStyleSheet(f"""
+                QPushButton#testFaceBtn {{
+                    background-color: {c['CANCEL_BTN_BG']};
+                    color: {c['TEXT_PRIMARY']};
+                    border: 1px solid {c['BORDER_NEUTRAL']};
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                    font-size: 13px;
+                }}
+                QPushButton#testFaceBtn:hover {{
+                    background-color: {c['CANCEL_BTN_HOVER']};
+                }}
+            """)
+
         # Re-theme scrollbars for all scroll areas
         _scrollbar_bg = "#4c3d99" if c.get("IS_DARK") else "#c7d2fe"
         _scrollbar_hover = "#7c6ecf" if c.get("IS_DARK") else "#818cf8"
@@ -2618,3 +2731,10 @@ class SettingsWindow(QDialog):
                 """)
             except Exception as e:
                 logging.error(f"Error updating scrollbar style: {e}")
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.reject()
+            event.accept()
+        else:
+            super().keyPressEvent(event)

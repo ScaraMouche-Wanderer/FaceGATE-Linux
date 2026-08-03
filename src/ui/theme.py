@@ -488,8 +488,11 @@ def get_card_qss(importance: str = "normal", colors: dict = None) -> str:
     text_sec = colors["TEXT_SECONDARY"]
     header_color = colors.get("HEADER_TEXT", "#c084fc")
     accent = colors["ACCENT_PURPLE"]
+    accent_hover = colors.get("ACCENT_PURPLE_HOVER", "#6d28d9")
     danger = colors.get("DANGER_RED", "#ef4444")
     widget_bg = colors.get("WIDGET_BG", "#110f1c")
+    cancel_bg = colors.get("CANCEL_BTN_BG", "#f1f5f9")
+    cancel_hover = colors.get("CANCEL_BTN_HOVER", "#e2e8f0")
     
     if importance == "danger":
         border_qss = f"border-left: 4px solid {danger}; border-top: 1px solid {border_color}; border-right: 1px solid {border_color}; border-bottom: 1px solid {border_color};"
@@ -529,6 +532,30 @@ def get_card_qss(importance: str = "normal", colors: dict = None) -> str:
         }}
         QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{
             border: 1px solid {accent};
+        }}
+        QPushButton#enrollBtn, QPushButton#enrollNewBtn {{
+            background-color: {accent};
+            color: #ffffff;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-weight: bold;
+            font-size: 13px;
+        }}
+        QPushButton#enrollBtn:hover, QPushButton#enrollNewBtn:hover {{
+            background-color: {accent_hover};
+        }}
+        QPushButton#testFaceBtn, QPushButton#changePwdBtn {{
+            background-color: {cancel_bg};
+            color: {text_color};
+            border: 1px solid {border_color};
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-weight: bold;
+            font-size: 13px;
+        }}
+        QPushButton#testFaceBtn:hover, QPushButton#changePwdBtn:hover {{
+            background-color: {cancel_hover};
         }}
     """
 
@@ -692,6 +719,16 @@ class AnimatedComboBox(QComboBox):
         self.anim.start()
         super().hidePopup()
 
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            if self.view().isVisible():
+                self.hidePopup()
+            else:
+                self.showPopup()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
@@ -729,7 +766,15 @@ class AnimatedCheckBox(QCheckBox):
         self._check_progress = 1.0 if self.isChecked() else 0.0
         self.anim = None
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.toggled.connect(self._on_toggled)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.toggle()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     @Property(float)
     def check_progress(self):
@@ -789,6 +834,11 @@ class AnimatedCheckBox(QCheckBox):
         painter.setPen(QPen(current_border, 1.5))
         painter.drawRoundedRect(box_rect, 5, 5)
 
+        if self.hasFocus():
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(border_active, 2.0))
+            painter.drawRoundedRect(box_rect.adjusted(-2, -2, 2, 2), 6, 6)
+
         if p > 0.05:
             painter.save()
             painter.setPen(QPen(QColor("#ffffff"), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
@@ -814,8 +864,8 @@ class AnimatedCheckBox(QCheckBox):
             painter.setPen(QColor(c["TEXT_PRIMARY"]))
             font = self.font()
             painter.setFont(font)
-            text_rect = QRectF(box_size + 10, 0, self.width() - box_size - 10, self.height())
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+            text_rect = QRectF(box_size + 10, 0, max(10.0, self.width() - box_size - 10), self.height())
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap, text)
 
     def sizeHint(self):
         font_metrics = self.fontMetrics()
@@ -823,6 +873,15 @@ class AnimatedCheckBox(QCheckBox):
         w = 18 + (10 if text_w > 0 else 0) + text_w + 12
         h = max(24, font_metrics.height() + 6)
         return QSize(w, h)
+
+    def heightForWidth(self, width):
+        if not self.text():
+            return 24
+        font_metrics = self.fontMetrics()
+        box_size = 18
+        avail_w = max(10, width - box_size - 10)
+        rect = font_metrics.boundingRect(0, 0, avail_w, 10000, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap, self.text())
+        return max(24, rect.height() + 6)
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import QPoint
@@ -1031,8 +1090,7 @@ class SlidingThemeToggle(QWidget):
             except Exception:
                 self.theme_mode = "light"
             
-        from ui.theme import is_system_dark_mode
-        is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
+        is_dark = (self.theme_mode == "dark")
         
         self._knob_position = 1.0 if is_dark else 0.0
         self.anim = None
@@ -1058,8 +1116,7 @@ class SlidingThemeToggle(QWidget):
             except Exception:
                 self.theme_mode = "light"
             
-        from ui.theme import is_system_dark_mode
-        is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
+        is_dark = (self.theme_mode == "dark")
         target_pos = 1.0 if is_dark else 0.0
         
         if self.anim:
@@ -1080,8 +1137,7 @@ class SlidingThemeToggle(QWidget):
                 self.parent_bar.parent.theme_mode = target_theme
                 self.theme_mode = target_theme
             else:
-                from ui.theme import is_system_dark_mode
-                current_is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
+                current_is_dark = (self.theme_mode == "dark")
                 target_theme = "light" if current_is_dark else "dark"
                 self.theme_mode = target_theme
                 

@@ -32,12 +32,27 @@ class MockVideoCapture:
         if self.img is None:
             raise RuntimeError(f"Could not load mock image from {img_path}")
         self.opened = True
+        self._frame_count = 0
 
     def isOpened(self):
         return self.opened
 
     def read(self):
-        return True, self.img.copy()
+        # Apply a small, alternating frame-to-frame translation to simulate
+        # the natural hand/head micro-jitter present in any real live camera
+        # feed. Returning the byte-identical frame every call (as before)
+        # represents a printed photo/screen held perfectly still - exactly
+        # the presentation attack the liveness check in auth_dialog.py is
+        # meant to reject - so it is not a realistic stand-in for a live
+        # subject and would defeat the very check it should be exercising.
+        self._frame_count += 1
+        offset = 3 if (self._frame_count % 2 == 0) else -3
+        h, w = self.img.shape[:2]
+        translation_matrix = np.float32([[1, 0, offset], [0, 1, 0]])
+        jittered = cv2.warpAffine(
+            self.img, translation_matrix, (w, h), borderMode=cv2.BORDER_REPLICATE
+        )
+        return True, jittered
 
     def set(self, propId, value):
         return True
@@ -51,6 +66,20 @@ class MockVideoCapture:
 
     def release(self):
         self.opened = False
+
+
+class MockDetectorMoving:
+    def __init__(self, *args, **kwargs):
+        self.frame_count = 0
+    def detect_faces(self, frame):
+        # Shift face slightly in each frame to simulate micro-motion
+        offset = self.frame_count * 5 # 5 pixels movement per frame
+        self.frame_count += 1
+        return [{
+            'bbox': [100 + offset, 100, 200 + offset, 200],
+            'embedding': np.zeros(512, dtype=np.float32),
+            'kps': np.zeros((5, 2))
+        }]
 
 
 class TestAuthDialog(unittest.TestCase):
@@ -68,28 +97,29 @@ class TestAuthDialog(unittest.TestCase):
     @patch('cv2.VideoCapture', side_effect=MockVideoCapture)
     @patch('utils.config_loader.get_config')
     def test_face_recognition_accepts_matched_user(self, mock_get_config, mock_vc, mock_load, mock_cos):
-        """Face mode dialog should accept after 3 consecutive match frames."""
+        """Face mode dialog should accept after consecutive match frames with micro-motion."""
         from utils.config_loader import Config
         mock_get_config.return_value = Config()
 
         from ui.auth_dialog import AuthDialog
 
-        dialog = AuthDialog("Test Terminal", mode="face", timeout_seconds=60)
+        with patch('recognition.detector.Detector', side_effect=MockDetectorMoving):
+            dialog = AuthDialog("Test Terminal", mode="face", timeout_seconds=60)
 
-        failure_timer = QTimer()
-        failure_timer.setSingleShot(True)
-        failure_timer.timeout.connect(dialog.reject)
-        failure_timer.start(30000)
+            failure_timer = QTimer()
+            failure_timer.setSingleShot(True)
+            failure_timer.timeout.connect(dialog.reject)
+            failure_timer.start(30000)
 
-        result = dialog.exec()
-        failure_timer.stop()
+            result = dialog.exec()
+            failure_timer.stop()
 
-        self.assertEqual(result, QDialog.DialogCode.Accepted)
-        self.assertTrue(dialog.authenticated)
-        self.assertFalse(dialog.camera_error)
-        self.assertFalse(dialog.timed_out)
-        self.assertEqual(dialog.matched_user, "test_user")
-        self.assertIsNotNone(dialog.final_score)
+            self.assertEqual(result, QDialog.DialogCode.Accepted)
+            self.assertTrue(dialog.authenticated)
+            self.assertFalse(dialog.camera_error)
+            self.assertFalse(dialog.timed_out)
+            self.assertEqual(dialog.matched_user, "test_user")
+            self.assertIsNotNone(dialog.final_score)
 
     def test_password_mode_lockout_after_3_failures(self):
         """Password dialog should impose lockout after 3 failed attempts (tracked per app)."""
@@ -400,6 +430,27 @@ class TestEnrollmentWizard(unittest.TestCase):
         wizard.process_intro_next()
         mock_warning.assert_called_once()
         self.assertIn("already enrolled", mock_warning.call_args[0][2].lower())
+
+    @patch('database.embedding_store.load_embeddings', return_value={'existing_user': np.ones((512,), dtype=np.float32)})
+    @patch('ui.enrollment_wizard.load_embeddings', return_value={'existing_user': np.ones((512,), dtype=np.float32)})
+    def test_detects_duplicate_face_vector(self, mock_load_ui, mock_load_db):
+        """EnrollmentWizard must detect duplicate face vectors and present a warning."""
+        from ui.enrollment_wizard import EnrollmentWizard
+        wizard = EnrollmentWizard(target_username="new_user")
+        wizard.username = "new_user"
+
+        # Simulate captured faces with high similarity to existing_user
+        faces = [{'bbox': [10, 10, 50, 50], 'embedding': np.ones((512,), dtype=np.float32)}]
+        dummy_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+
+        with patch('ui.enrollment_wizard.is_blurry', return_value=False):
+            with patch.object(wizard, 'cleanup_camera'):
+                for _ in range(15):
+                    wizard.on_detection_result(faces, dummy_frame)
+
+        self.assertEqual(wizard.duplicate_user, "existing_user")
+        self.assertGreater(wizard.duplicate_similarity, 0.99)
+        self.assertIn("Duplicate Face Profile Detected", wizard.success_msg_lbl.text())
 
 
 class TestIntruderSelfieGate(unittest.TestCase):
