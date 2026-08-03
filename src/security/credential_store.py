@@ -142,12 +142,16 @@ def update_master_password(current_password: str | None, new_password: str) -> N
         
         os.makedirs(os.path.dirname(EMBEDDING_FILE), exist_ok=True)
         tmp_file = EMBEDDING_FILE + ".tmp"
-        with open(tmp_file, 'w') as f:
+        # Create with 0600 atomically (os.open + mode) rather than open()
+        # followed by a separate os.chmod(), which briefly leaves the file
+        # at the process umask (commonly world/group-readable).
+        fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
             json.dump(new_envelope, f, indent=4)
             f.flush()
             os.fsync(f.fileno())
-            
-        os.chmod(tmp_file, 0o600)
+
+        os.chmod(tmp_file, 0o600)  # belt-and-braces if tmp_file pre-existed with looser perms
         os.replace(tmp_file, EMBEDDING_FILE)
 
         # Update in-memory key cache to match newly encrypted envelope

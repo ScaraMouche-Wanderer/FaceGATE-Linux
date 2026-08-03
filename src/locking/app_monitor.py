@@ -111,10 +111,18 @@ class AppMonitor:
                 protected_apps = self.main_app.get_protected_apps()
                 self._update_cache_if_needed(protected_apps)
 
-                # Scan running processes
-                for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
+                # Scan running processes. 'cmdline' is deliberately NOT requested
+                # here - it is one of the more expensive psutil fields to fetch
+                # (an extra /proc/<pid>/cmdline read per process) and, before this
+                # change, was being fetched eagerly for every single process on
+                # every poll tick even though it's only ever inspected for the
+                # small subset of processes that reach the gapplication-service
+                # check below. It is now fetched lazily, only when needed.
+                active_pids = set()
+                for proc in psutil.process_iter(['pid', 'name', 'exe']):
                     try:
                         pid = proc.info['pid']
+                        active_pids.add(pid)
                         
                         # Skip ourselves
                         if pid == os.getpid():
@@ -140,7 +148,10 @@ class AppMonitor:
                         # Skip D-Bus-activated background services (e.g. GNOME gapplication)
                         # NOTE: Only --gapplication-service is skipped. Generic --background
                         # flags are NOT skipped as they can be trivially faked (audit §2.4).
-                        cmdline = proc.info.get('cmdline') or []
+                        try:
+                            cmdline = proc.cmdline() or []
+                        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                            cmdline = []
                         is_background_service = False
                         for arg in cmdline:
                             if "--gapplication-service" in arg:
@@ -254,8 +265,10 @@ class AppMonitor:
                     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         continue
 
-                # Housekeep seen and non-suspicious (pid, create_time) sets
-                active_pids = set(psutil.pids())
+                # Housekeep seen and non-suspicious (pid, create_time) sets.
+                # active_pids was already collected during the scan above, so
+                # this avoids a second full process-table walk (psutil.pids())
+                # on every tick.
                 self._seen_pids = {k for k in self._seen_pids if k[0] in active_pids}
                 self._not_suspicious_pids = {k for k in self._not_suspicious_pids if k[0] in active_pids}
 

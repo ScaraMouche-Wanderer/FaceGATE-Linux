@@ -137,16 +137,30 @@ class CameraWorker:
         actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
         logging.info(f"Camera opened. Resolution: {actual_width}x{actual_height}")
 
+        target_interval = 1.0 / fps if fps else 0.0
+        last_emit = time.monotonic()
         while self.running:
             ret, frame = self.cap.read()
             if not ret or frame is None:
                 logging.warning("Failed to grab camera frame")
                 time.sleep(0.01)
                 continue
-                
+
             self.signals.frame_ready.emit(frame)
-            # Yield CPU slightly to match FPS target
-            time.sleep(1.0 / fps)
+
+            # Only sleep the *remaining* time to hit the FPS target. Most
+            # V4L2 backends already block inside read() until the next frame
+            # is available, so unconditionally sleeping a further 1/fps on
+            # top (as before) added avoidable per-frame latency. If the
+            # driver/backend instead returns frames immediately (e.g. some
+            # virtual/loopback devices), this still throttles CPU usage the
+            # same as before.
+            now = time.monotonic()
+            elapsed = now - last_emit
+            remaining = target_interval - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
+            last_emit = time.monotonic()
 
         self.cap.release()
         self.cap = None

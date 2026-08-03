@@ -31,12 +31,18 @@ def set_cached_key(key: bytes):
     with _cached_key_lock:
         _cached_key = bytearray(key) if isinstance(key, bytes) else key
 
-    # Write key to user-private RAM-backed tmpfs file (0600 permissions)
+    # Write key to user-private RAM-backed tmpfs file (0600 permissions).
+    # The file is created with mode 0600 atomically via os.open() so there is
+    # no window (as there would be with open() followed by a separate
+    # os.chmod()) during which the raw key is readable at the process umask.
     try:
         ram_file = _get_ram_key_file()
         key_bytes = bytes(key) if isinstance(key, (bytes, bytearray)) else key
-        with open(ram_file, 'wb') as f:
+        fd = os.open(ram_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'wb') as f:
             f.write(key_bytes)
+        # Belt-and-braces: if the file already existed with looser
+        # permissions (e.g. left over from a pre-fix version), tighten it.
         os.chmod(ram_file, 0o600)
     except Exception as e:
         logging.warning(f"Could not persist RAM key file: {e}")
