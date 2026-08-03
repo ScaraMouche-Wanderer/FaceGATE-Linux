@@ -370,31 +370,38 @@ def delete_embedding(name: str):
     plaintext_bytes = json.dumps(serialized).encode('utf-8')
     
     try:
-        from security.crypto_engine import encrypt
-        nonce, ciphertext = encrypt(plaintext_bytes, key)
-        
         envelope = read_envelope_file()
         if envelope:
             iterations = envelope["iterations"]
             salt = envelope["salt"]
+            kdf_name = envelope.get("kdf", "pbkdf2_hmac_sha256")
         else:
             from utils.config_loader import get_config
             config = get_config()
             iterations = int(config.get("security.pbkdf2_iterations", 600000))
             salt = os.urandom(16)
-            
+            kdf_name = "pbkdf2_hmac_sha256"
+
+        from security.crypto_engine import encrypt, build_aad
+        aad = build_aad(kdf_name, iterations, salt)
+        nonce, ciphertext = encrypt(plaintext_bytes, key, aad)
+        
         new_envelope = {
-            "kdf": "pbkdf2_hmac_sha256",
+            "kdf": kdf_name,
             "iterations": iterations,
             "salt": base64.b64encode(salt).decode('utf-8') if isinstance(salt, bytes) else salt,
             "nonce": base64.b64encode(nonce).decode('utf-8'),
             "ciphertext": base64.b64encode(ciphertext).decode('utf-8')
         }
         
-        with open(EMBEDDING_FILE, 'w') as f:
+        tmp_file = EMBEDDING_FILE + ".tmp"
+        with open(tmp_file, 'w') as f:
             json.dump(new_envelope, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
             
-        os.chmod(EMBEDDING_FILE, 0o600)
+        os.chmod(tmp_file, 0o600)
+        os.replace(tmp_file, EMBEDDING_FILE)
         logging.info(f"Deleted embedding for user '{name}' from {EMBEDDING_FILE}. {len(embeddings)} user(s) remaining.")
 
         # Handle Admin User re-assignment if the deleted user was the admin
