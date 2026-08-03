@@ -11,6 +11,10 @@ authentication:
 recognition:
   similarity_threshold: 0.52
   ambiguity_margin: 0.03
+  # liveness_min_motion: minimum cumulative bounding-box centroid movement (in
+  # pixels, summed across the confirmation frames) required before a
+  # high-confidence face match is allowed to authenticate.
+  # Set to 0.0 to disable motion checking (default).
   liveness_min_motion: 0.0
 security:
   session_timeout_seconds: 300

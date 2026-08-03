@@ -56,8 +56,14 @@ class TestMatcher(unittest.TestCase):
             "user2": np.zeros(512)
         }
 
-        # Case 2: Dual match acceptance (both are above threshold, e.g. user1=0.85, user2=0.84)
+        # Case 2a: Dual candidate with scores within ambiguity margin (user1=0.85, user2=0.84, margin 0.01 < 0.03) -> Rejected
         mock_cos.side_effect = lambda live, stored: 0.85 if stored is enrolled["user1"] else 0.84
+        matched_name, confidence = match_face(np.zeros(512), enrolled=enrolled)
+        self.assertIsNone(matched_name)
+        self.assertEqual(confidence, 0.85)
+
+        # Case 2b: Dual candidate with scores exceeding ambiguity margin (user1=0.85, user2=0.80, margin 0.05 >= 0.03) -> Accepted
+        mock_cos.side_effect = lambda live, stored: 0.85 if stored is enrolled["user1"] else 0.80
         matched_name, confidence = match_face(np.zeros(512), enrolled=enrolled)
         self.assertEqual(matched_name, "user1")
         self.assertEqual(confidence, 0.85)

@@ -116,3 +116,45 @@ def test_liveness_requires_motion_even_for_high_confidence_match(mock_get_config
         
         assert result == QDialog.DialogCode.Rejected
         assert not dialog.authenticated
+
+@patch('recognition.blur_checker.is_blurry', return_value=False)
+@patch('recognition.matcher.cosine_similarity', return_value=0.98)
+@patch('database.embedding_store.load_embeddings', return_value={"test_user": np.zeros(512, dtype=np.float32)})
+@patch('cv2.VideoCapture', side_effect=MockVideoCaptureStatic)
+@patch('utils.config_loader.get_config')
+def test_liveness_disables_motion_check_when_configured_zero(mock_get_config, mock_vc, mock_load, mock_cos, mock_blur):
+    """Setting recognition.liveness_min_motion to 0.0 disables liveness check and permits authentication."""
+    from ui.auth_dialog import AuthDialog
+    
+    mock_config = MagicMock()
+    mock_config.get.side_effect = lambda key, default=None: 0.0 if key == "recognition.liveness_min_motion" else default
+    mock_get_config.return_value = mock_config
+    
+    with patch('recognition.detector.Detector', side_effect=MockDetectorStatic):
+        dialog = AuthDialog("Test Terminal", mode="face", timeout_seconds=5)
+        QTimer.singleShot(4000, dialog.reject)
+        result = dialog.exec()
+        
+        assert result == QDialog.DialogCode.Accepted
+        assert dialog.authenticated
+
+@patch('recognition.blur_checker.is_blurry', return_value=False)
+@patch('recognition.matcher.cosine_similarity', return_value=0.98)
+@patch('database.embedding_store.load_embeddings', return_value={"test_user": np.zeros(512, dtype=np.float32)})
+@patch('cv2.VideoCapture', side_effect=MockVideoCaptureStatic)
+@patch('utils.config_loader.get_config')
+def test_liveness_allows_explicit_negative_opt_out(mock_get_config, mock_vc, mock_load, mock_cos, mock_blur):
+    """Setting recognition.liveness_min_motion to -1.0 explicitly disables liveness check with log warning."""
+    from ui.auth_dialog import AuthDialog
+    
+    mock_config = MagicMock()
+    mock_config.get.side_effect = lambda key, default=None: -1.0 if key == "recognition.liveness_min_motion" else default
+    mock_get_config.return_value = mock_config
+    
+    with patch('recognition.detector.Detector', side_effect=MockDetectorStatic):
+        dialog = AuthDialog("Test Terminal", mode="face", timeout_seconds=5)
+        QTimer.singleShot(4000, dialog.reject)
+        result = dialog.exec()
+        
+        assert result == QDialog.DialogCode.Accepted
+        assert dialog.authenticated

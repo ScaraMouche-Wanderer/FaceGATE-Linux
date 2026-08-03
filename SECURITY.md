@@ -51,7 +51,7 @@ For a full discussion of the security model, see the [README](README.md#security
 ### Liveness Verification (Anti-Spoofing)
 
 FaceGATE-Linux includes a basic motion-based liveness check to prevent static photo or screen bypasses:
-- **Mechanism**: Bounding box centroid tracking across the 3 confirmation frames requires a minimum micro-motion threshold (configurable via `recognition.liveness_min_motion` in `default.yaml`).
+- **Mechanism**: Bounding box centroid tracking across confirmation frames requires a minimum micro-motion threshold (default `0.5`, fail-closed enforced, configurable via `recognition.liveness_min_motion` in `default.yaml`).
 - **Limitations**: This is a pure motion/jitter check. It does **not** perform hardware-backed 3D depth sensing or active infrared (IR) scanning. Therefore, a high-resolution video of the owner or a dynamic presentation attack could potentially bypass this check.
 
 ## Cryptographic Details

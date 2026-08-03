@@ -97,12 +97,11 @@ class AuthDialog(QDialog):
         self.mode = mode
         self.timeout_seconds = timeout_seconds
         
-        # Determine theme mode from config
+        # Determine theme mode from config (Light theme is always enforced for face mode to illuminate face)
         from utils.config_loader import get_config
-        from ui.theme import is_system_dark_mode
         try:
             _cfg_theme = get_config().get("behavior.theme", "light")
-            if _cfg_theme == "dark":
+            if _cfg_theme == "dark" and self.mode != "face":
                 self.theme_mode = "dark"
             else:
                 self.theme_mode = "light"
@@ -562,8 +561,15 @@ class AuthDialog(QDialog):
             
             # High-confidence match (score >= threshold + 0.12) authenticates immediately
             if self.success_count >= 2 or matched_score >= (threshold + 0.12):
-                min_motion = float(config.get("recognition.liveness_min_motion", 0.0))
-                
+                raw_min_motion = config.get("recognition.liveness_min_motion", 0.0)
+                try:
+                    min_motion = float(raw_min_motion)
+                except (TypeError, ValueError):
+                    min_motion = 0.0
+                liveness_disabled = min_motion <= 0.0
+                if liveness_disabled:
+                    logging.debug("Liveness motion check is disabled (recognition.liveness_min_motion <= 0).")
+
                 total_dist = 0.0
                 if len(self.matched_centroids) >= 2:
                     import math
@@ -572,8 +578,8 @@ class AuthDialog(QDialog):
                         c2 = self.matched_centroids[idx]
                         total_dist += math.hypot(c2[0] - c1[0], c2[1] - c1[1])
                 
-                # Check liveness micro-motion if enabled (> 0.0)
-                if min_motion > 0.0 and total_dist < min_motion:
+                # Check liveness micro-motion unless explicitly disabled
+                if not liveness_disabled and total_dist < min_motion:
                     logging.info(f"Liveness motion check waiting: total motion {total_dist:.4f} < threshold {min_motion}")
                     self.status_label.setText("Verifying... slight movement recommended")
                 else:
