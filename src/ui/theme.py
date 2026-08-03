@@ -238,6 +238,45 @@ def get_theme_qss(theme_override: str = None) -> str:
         QPushButton:pressed {{
             background-color: {c["ACCENT_PURPLE_PRESSED"]};
         }}
+        QPushButton#macCloseBtn {{
+            background-color: #ff5f56 !important;
+            border-radius: 6px !important;
+            border: none !important;
+            min-width: 12px !important;
+            max-width: 12px !important;
+            min-height: 12px !important;
+            max-height: 12px !important;
+            padding: 0px !important;
+        }}
+        QPushButton#macCloseBtn:hover {{
+            background-color: #ff4c40 !important;
+        }}
+        QPushButton#macMinBtn {{
+            background-color: #ffbd2e !important;
+            border-radius: 6px !important;
+            border: none !important;
+            min-width: 12px !important;
+            max-width: 12px !important;
+            min-height: 12px !important;
+            max-height: 12px !important;
+            padding: 0px !important;
+        }}
+        QPushButton#macMinBtn:hover {{
+            background-color: #ffb114 !important;
+        }}
+        QPushButton#macMaxBtn {{
+            background-color: #27c93f !important;
+            border-radius: 6px !important;
+            border: none !important;
+            min-width: 12px !important;
+            max-width: 12px !important;
+            min-height: 12px !important;
+            max-height: 12px !important;
+            padding: 0px !important;
+        }}
+        QPushButton#macMaxBtn:hover {{
+            background-color: #1ec030 !important;
+        }}
         QPushButton#cancelBtn, QPushButton#changePwdBtn, QPushButton#testFaceBtn {{
             background-color: {c["CANCEL_BTN_BG"]};
             color: {c["TEXT_PRIMARY"]};
@@ -910,70 +949,59 @@ class CustomTitleBar(QWidget):
         # 2. macOS Style Traffic Light Buttons (Right side)
         # Yellow (Minimize)
         self.min_btn = QPushButton()
+        self.min_btn.setObjectName("macMinBtn")
         self.min_btn.setFixedSize(12, 12)
         self.min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.min_btn.setToolTip("Minimize")
+        self.min_btn.setStyleSheet("""
+            QPushButton#macMinBtn {
+                background-color: #ffbd2e;
+                border-radius: 6px;
+                border: none;
+            }
+            QPushButton#macMinBtn:hover {
+                background-color: #ffb114;
+            }
+        """)
         if self.allow_minimize:
-            self.min_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #ffbd2e;
-                    border-radius: 6px;
-                    border: none;
-                }
-                QPushButton:hover {
-                    background-color: #ffb114;
-                }
-            """)
             self.min_btn.clicked.connect(self.parent.showMinimized)
         else:
-            self.min_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #e2e8f0;
-                    border-radius: 6px;
-                    border: none;
-                }
-            """)
             self.min_btn.setEnabled(False)
         
         # Green (Maximize)
         self.max_btn = QPushButton()
+        self.max_btn.setObjectName("macMaxBtn")
         self.max_btn.setFixedSize(12, 12)
         self.max_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.max_btn.setToolTip("Maximize")
+        self.max_btn.setStyleSheet("""
+            QPushButton#macMaxBtn {
+                background-color: #27c93f;
+                border-radius: 6px;
+                border: none;
+            }
+            QPushButton#macMaxBtn:hover {
+                background-color: #1ec030;
+            }
+        """)
         if self.allow_maximize:
-            self.max_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #27c93f;
-                    border-radius: 6px;
-                    border: none;
-                }
-                QPushButton:hover {
-                    background-color: #1ec030;
-                }
-            """)
             self.max_btn.clicked.connect(self.toggle_maximize)
         else:
-            self.max_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #e2e8f0;
-                    border-radius: 6px;
-                    border: none;
-                }
-            """)
             self.max_btn.setEnabled(False)
             
         # Red (Close)
         self.close_btn = QPushButton()
+        self.close_btn.setObjectName("macCloseBtn")
         self.close_btn.setFixedSize(12, 12)
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.setToolTip("Close")
         self.close_btn.setStyleSheet("""
-            QPushButton {
+            QPushButton#macCloseBtn {
                 background-color: #ff5f56;
                 border-radius: 6px;
                 border: none;
             }
-            QPushButton:hover {
+            QPushButton#macCloseBtn:hover {
                 background-color: #ff4c40;
             }
         """)
@@ -983,7 +1011,7 @@ class CustomTitleBar(QWidget):
         self.theme_toggle = SlidingThemeToggle(self)
         self.theme_toggle.toggled.connect(self.on_theme_toggled)
         layout.addWidget(self.theme_toggle)
-        layout.addSpacing(8)
+        layout.addSpacing(10)
              
         layout.addWidget(self.min_btn)
         layout.addWidget(self.max_btn)
@@ -1002,24 +1030,6 @@ class CustomTitleBar(QWidget):
         theme_mode = getattr(self.parent, "theme_mode", None)
         c = get_colors(theme_mode)
         self.title_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {c['TEXT_PRIMARY']}; font-family: {FONT_FAMILY}; padding: 0px; background: transparent;")
-        
-        disabled_bg = "#2c2a38" if c.get("IS_DARK") else "#e2e8f0"
-        if not self.allow_minimize:
-            self.min_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {disabled_bg};
-                    border-radius: 6px;
-                    border: none;
-                }}
-            """)
-        if not self.allow_maximize:
-            self.max_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {disabled_bg};
-                    border-radius: 6px;
-                    border: none;
-                }}
-            """)
 
     def on_theme_toggled(self, new_theme):
         from utils.config_loader import get_config
