@@ -988,6 +988,10 @@ class CustomTitleBar(QWidget):
         layout.addWidget(self.min_btn)
         layout.addWidget(self.max_btn)
         layout.addWidget(self.close_btn)
+
+        self.min_btn.setVisible(True)
+        self.max_btn.setVisible(True)
+        self.close_btn.setVisible(True)
         
         # Dragging support (disabled for normal system window)
         self.drag_position = QPoint()
