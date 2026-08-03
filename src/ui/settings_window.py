@@ -22,13 +22,13 @@ from PySide6.QtWidgets import (
     QComboBox, QCheckBox, QMessageBox, QLineEdit, QTreeWidget, QTreeWidgetItem, QListView,
     QGridLayout, QScrollArea, QFrame, QProgressBar, QTextEdit
 )
-from PySide6.QtCore import Qt, QSize, QEvent, QPropertyAnimation, QEasingCurve, QUrl, QDateTime
+from PySide6.QtCore import Qt, QSize, QEvent, QPropertyAnimation, QEasingCurve, QUrl, QDateTime, QTimer
 from PySide6.QtGui import QIcon, QDesktopServices
 from utils.config_loader import get_config
 from utils.systemd_manager import is_enabled, enable, disable
 from ui.app_picker_dialog import AppPickerDialog
 from locking.launcher_sub import apply_substitution, restore_substitution
-from ui.theme import AnimatedComboBox, AnimatedCheckBox, AnimatedSpinBox
+from ui.theme import AnimatedComboBox, AnimatedCheckBox, AnimatedSpinBox, AnimatedButton, PulsingStatusDot
 
 class AnimatedSidebar(QListWidget):
     def __init__(self, parent=None):
@@ -1333,7 +1333,7 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
-        from ui.theme import get_card_qss, style_heading, style_themed_label, get_colors
+        from ui.theme import get_card_qss, style_heading, style_themed_label, get_colors, AnimatedButton, PulsingStatusDot
         c = get_colors(self.theme_mode)
 
         scroll = QScrollArea()
@@ -1348,7 +1348,7 @@ class SettingsWindow(QDialog):
         scroll_layout.setSpacing(16)
 
         # Header Title
-        header = QLabel("AI Security Operations Center & System Hub")
+        header = QLabel("About FaceGate")
         style_heading(header, 20)
         header.setProperty("heading_size", 20)
         self._themed_labels.append((header, "TEXT_PRIMARY"))
@@ -1357,7 +1357,7 @@ class SettingsWindow(QDialog):
         # 1. Main Banner Card
         self.card_about = QWidget()
         self.card_about.setObjectName("card")
-        self.card_about.setStyleSheet(get_card_qss("normal"))
+        self.card_about.setStyleSheet(get_card_qss("normal", c))
         card_layout = QVBoxLayout(self.card_about)
         card_layout.setContentsMargins(22, 20, 22, 20)
         card_layout.setSpacing(12)
@@ -1388,10 +1388,10 @@ class SettingsWindow(QDialog):
         scroll_layout.addWidget(self.card_about)
 
         # 2. System Health & Runtime Diagnostics Card
-        card_diag = QWidget()
-        card_diag.setObjectName("card")
-        card_diag.setStyleSheet(get_card_qss("normal"))
-        diag_layout = QVBoxLayout(card_diag)
+        self.card_diag = QWidget()
+        self.card_diag.setObjectName("card")
+        self.card_diag.setStyleSheet(get_card_qss("normal", c))
+        diag_layout = QVBoxLayout(self.card_diag)
         diag_layout.setContentsMargins(22, 20, 22, 20)
         diag_layout.setSpacing(14)
 
@@ -1400,7 +1400,6 @@ class SettingsWindow(QDialog):
         self._themed_labels.append((diag_title, "TEXT_PRIMARY"))
         diag_layout.addWidget(diag_title)
 
-        # Diagnostic Indicators Grid
         grid = QGridLayout()
         grid.setHorizontalSpacing(16)
         grid.setVerticalSpacing(10)
@@ -1409,28 +1408,49 @@ class SettingsWindow(QDialog):
         lbl_ai = QLabel("🤖 AI Recognition Engine:")
         style_themed_label(lbl_ai, "TEXT_PRIMARY", "font-weight: bold; font-size: 13px; border: none;")
         self._themed_labels.append((lbl_ai, "TEXT_PRIMARY"))
-        self.status_ai = QLabel("🟢 InsightFace ONNX Runtime Active (512-D L2 Vectors)")
+        ai_row = QHBoxLayout()
+        ai_row.setContentsMargins(0, 0, 0, 0)
+        ai_row.setSpacing(6)
+        self.dot_ai = PulsingStatusDot("#10b981")
+        self.status_ai = QLabel("InsightFace ONNX Runtime Active (512-D L2 Vectors)")
         self.status_ai.setStyleSheet("font-size: 13px; color: #10b981; font-weight: 600; border: none;")
+        ai_row.addWidget(self.dot_ai)
+        ai_row.addWidget(self.status_ai)
+        ai_row.addStretch()
         grid.addWidget(lbl_ai, 0, 0)
-        grid.addWidget(self.status_ai, 0, 1)
+        grid.addLayout(ai_row, 0, 1)
 
         # Encryption Vault
         lbl_vault = QLabel("🔐 Security Vault:")
         style_themed_label(lbl_vault, "TEXT_PRIMARY", "font-weight: bold; font-size: 13px; border: none;")
         self._themed_labels.append((lbl_vault, "TEXT_PRIMARY"))
-        self.status_vault = QLabel("🟢 AES-256-GCM Encrypted (Master Envelope Intact)")
+        vault_row = QHBoxLayout()
+        vault_row.setContentsMargins(0, 0, 0, 0)
+        vault_row.setSpacing(6)
+        self.dot_vault = PulsingStatusDot("#10b981")
+        self.status_vault = QLabel("AES-256-GCM Encrypted (Master Envelope Intact)")
         self.status_vault.setStyleSheet("font-size: 13px; color: #10b981; font-weight: 600; border: none;")
+        vault_row.addWidget(self.dot_vault)
+        vault_row.addWidget(self.status_vault)
+        vault_row.addStretch()
         grid.addWidget(lbl_vault, 1, 0)
-        grid.addWidget(self.status_vault, 1, 1)
+        grid.addLayout(vault_row, 1, 1)
 
         # D-Bus IPC
         lbl_dbus = QLabel("📡 D-Bus IPC Service:")
         style_themed_label(lbl_dbus, "TEXT_PRIMARY", "font-weight: bold; font-size: 13px; border: none;")
         self._themed_labels.append((lbl_dbus, "TEXT_PRIMARY"))
-        self.status_dbus = QLabel("🟢 Connected (org.facegate.Daemon)")
+        dbus_row = QHBoxLayout()
+        dbus_row.setContentsMargins(0, 0, 0, 0)
+        dbus_row.setSpacing(6)
+        self.dot_dbus = PulsingStatusDot("#10b981")
+        self.status_dbus = QLabel("Connected (org.facegate.FaceGate)")
         self.status_dbus.setStyleSheet("font-size: 13px; color: #10b981; font-weight: 600; border: none;")
+        dbus_row.addWidget(self.dot_dbus)
+        dbus_row.addWidget(self.status_dbus)
+        dbus_row.addStretch()
         grid.addWidget(lbl_dbus, 2, 0)
-        grid.addWidget(self.status_dbus, 2, 1)
+        grid.addLayout(dbus_row, 2, 1)
 
         # Python / Qt Environment
         import sys, platform
@@ -1445,13 +1465,13 @@ class SettingsWindow(QDialog):
         grid.addWidget(val_env, 3, 1)
 
         diag_layout.addLayout(grid)
-        scroll_layout.addWidget(card_diag)
+        scroll_layout.addWidget(self.card_diag)
 
         # 3. Live Hardware & AI Benchmark Card
-        card_bench = QWidget()
-        card_bench.setObjectName("card")
-        card_bench.setStyleSheet(get_card_qss("normal"))
-        bench_layout = QVBoxLayout(card_bench)
+        self.card_bench = QWidget()
+        self.card_bench.setObjectName("card")
+        self.card_bench.setStyleSheet(get_card_qss("normal", c))
+        bench_layout = QVBoxLayout(self.card_bench)
         bench_layout.setContentsMargins(22, 20, 22, 20)
         bench_layout.setSpacing(12)
 
@@ -1462,7 +1482,7 @@ class SettingsWindow(QDialog):
         bench_top.addWidget(bench_title)
         bench_top.addStretch()
 
-        self.btn_run_bench = QPushButton("⚡ Run Benchmark")
+        self.btn_run_bench = AnimatedButton("⚡ Run Benchmark")
         self.btn_run_bench.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: #ffffff; padding: 8px 16px; border-radius: 6px; font-weight: bold; font-size: 12px;")
         self.btn_run_bench.clicked.connect(self.run_ai_benchmark)
         bench_top.addWidget(self.btn_run_bench)
@@ -1500,13 +1520,13 @@ class SettingsWindow(QDialog):
         bench_grid.addWidget(self.val_scan_b, 2, 1)
 
         bench_layout.addLayout(bench_grid)
-        scroll_layout.addWidget(card_bench)
+        scroll_layout.addWidget(self.card_bench)
 
         # 4. Security Inspector & Health Rating Card
-        card_sec = QWidget()
-        card_sec.setObjectName("card")
-        card_sec.setStyleSheet(get_card_qss("normal"))
-        sec_layout = QVBoxLayout(card_sec)
+        self.card_sec = QWidget()
+        self.card_sec.setObjectName("card")
+        self.card_sec.setStyleSheet(get_card_qss("normal", c))
+        sec_layout = QVBoxLayout(self.card_sec)
         sec_layout.setContentsMargins(22, 20, 22, 20)
         sec_layout.setSpacing(12)
 
@@ -1517,49 +1537,49 @@ class SettingsWindow(QDialog):
         sec_top.addWidget(sec_title)
         sec_top.addStretch()
 
-        self.btn_run_audit = QPushButton("🛡️ Run Security Inspection")
+        self.btn_run_audit = AnimatedButton("🛡️ Run Security Inspection")
         self.btn_run_audit.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: #ffffff; padding: 8px 16px; border-radius: 6px; font-weight: bold; font-size: 12px;")
         self.btn_run_audit.clicked.connect(self.run_security_audit)
         sec_top.addWidget(self.btn_run_audit)
         sec_layout.addLayout(sec_top)
 
         sec_grid = QHBoxLayout()
-        self.lbl_sec_score = QLabel("100% EXCELLENT")
-        self.lbl_sec_score.setStyleSheet("background-color: #10b981; color: white; padding: 6px 16px; border-radius: 8px; font-weight: bold; font-size: 14px;")
+        self.lbl_sec_score = QLabel("Run audit to check")
+        self.lbl_sec_score.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_SECONDARY']}; padding: 6px 16px; border-radius: 8px; font-weight: bold; font-size: 14px;")
         sec_grid.addWidget(self.lbl_sec_score)
 
-        self.lbl_sec_summary = QLabel("All security policies, key envelopes, and vault permissions comply with OWASP 2024 specifications.")
+        self.lbl_sec_summary = QLabel("Click 'Run Security Inspection' to audit vault permissions, liveness settings, and admin configuration.")
         style_themed_label(self.lbl_sec_summary, "TEXT_SECONDARY", "font-size: 12px; border: none;")
         self.lbl_sec_summary.setWordWrap(True)
         self._themed_labels.append((self.lbl_sec_summary, "TEXT_SECONDARY"))
         sec_grid.addWidget(self.lbl_sec_summary)
         sec_layout.addLayout(sec_grid)
 
-        scroll_layout.addWidget(card_sec)
+        scroll_layout.addWidget(self.card_sec)
 
         # 5. Interactive Action Bar & Operations Controls
-        card_actions = QWidget()
-        card_actions.setObjectName("card")
-        card_actions.setStyleSheet(get_card_qss("normal"))
-        act_layout = QHBoxLayout(card_actions)
+        self.card_actions = QWidget()
+        self.card_actions.setObjectName("card")
+        self.card_actions.setStyleSheet(get_card_qss("normal", c))
+        act_layout = QHBoxLayout(self.card_actions)
         act_layout.setContentsMargins(20, 16, 20, 16)
         act_layout.setSpacing(12)
 
-        self.btn_copy_diag = QPushButton("📋 Copy Diagnostics")
+        self.btn_copy_diag = AnimatedButton("📋 Copy Diagnostics")
         self.btn_copy_diag.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: #ffffff; padding: 10px 16px; border-radius: 6px; font-weight: bold; font-size: 13px;")
         self.btn_copy_diag.clicked.connect(self.copy_diagnostics_to_clipboard)
 
-        self.btn_attrib = QPushButton("📜 Attributions & Licenses")
+        self.btn_attrib = AnimatedButton("📜 Attributions & Licenses")
         self.btn_attrib.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 10px 16px; border-radius: 6px; font-weight: bold; font-size: 13px;")
         self.btn_attrib.clicked.connect(self.show_attributions_dialog)
 
-        self.btn_github = QPushButton("🌐 GitHub Repository")
+        self.btn_github = AnimatedButton("🌐 GitHub Repository")
         self.btn_github.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 10px 16px; border-radius: 6px; font-weight: bold; font-size: 13px;")
         self.btn_github.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/ScaraMouche-Wanderer/FaceGATE-Linux")))
 
-        self.btn_health = QPushButton("⚡ Re-Check Health")
+        self.btn_health = AnimatedButton("⚡ Re-Check Health")
         self.btn_health.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 10px 16px; border-radius: 6px; font-weight: bold; font-size: 13px;")
-        self.btn_health.clicked.connect(self.run_diagnostics_health_check)
+        self.btn_health.clicked.connect(lambda: self.run_diagnostics_health_check(show_dialog=True))
 
         act_layout.addWidget(self.btn_copy_diag)
         act_layout.addWidget(self.btn_attrib)
@@ -1567,16 +1587,18 @@ class SettingsWindow(QDialog):
         act_layout.addWidget(self.btn_health)
         act_layout.addStretch()
 
-        scroll_layout.addWidget(card_actions)
+        scroll_layout.addWidget(self.card_actions)
         scroll.setWidget(scroll_content)
         layout.addWidget(scroll)
 
         self.tab_stack.addWidget(page)
 
+        # Trigger initial status refresh
+        QTimer.singleShot(100, lambda: self.run_diagnostics_health_check(show_dialog=False))
+
     def run_ai_benchmark(self):
         """Runs a live real-time benchmark of AES-256-GCM encryption, 512-D vector
-        matching, and process-table scan overhead. All three numbers below are
-        measured on this machine, right now - none are canned/marketing figures."""
+        matching, and process-table scan overhead."""
         import time, os
         import psutil
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -1585,7 +1607,7 @@ class SettingsWindow(QDialog):
         # 1. AES-256-GCM Crypto Benchmark
         key = AESGCM.generate_key(bit_length=256)
         aesgcm = AESGCM(key)
-        data = b"X" * (64 * 1024) # 64KB payload
+        data = b"X" * (64 * 1024)
         nonce = os.urandom(12)
 
         t0 = time.perf_counter()
@@ -1596,7 +1618,7 @@ class SettingsWindow(QDialog):
         t1 = time.perf_counter()
 
         elapsed_crypto = t1 - t0
-        mb_processed = (iters * 64 * 2) / 1024 # total MB
+        mb_processed = (iters * 64 * 2) / 1024
         crypto_throughput = mb_processed / elapsed_crypto if elapsed_crypto > 0 else 0
 
         # 2. 512-D Vector Search Benchmark
@@ -1614,9 +1636,7 @@ class SettingsWindow(QDialog):
         elapsed_vector = t3 - t2
         ops_per_sec = v_iters / elapsed_vector if elapsed_vector > 0 else 0
 
-        # 3. Process Interception Overhead - a real measurement of one
-        # psutil.process_iter() pass, i.e. the same scan app_monitor.py
-        # performs every poll tick (see app_monitor.py poll_interval_seconds).
+        # 3. Process Scan Overhead
         t4 = time.perf_counter()
         scan_iters = 5
         for _ in range(scan_iters):
@@ -1630,7 +1650,7 @@ class SettingsWindow(QDialog):
         self.val_crypto_b.setStyleSheet("font-size: 12px; color: #10b981; font-weight: bold; border: none;")
         self.val_vector_b.setText(f"🚀 {ops_per_sec:,.0f} ops/sec (512-D Vector Cosine Matching)")
         self.val_vector_b.setStyleSheet("font-size: 12px; color: #10b981; font-weight: bold; border: none;")
-        self.val_scan_b.setText(f"🚀 {scan_ms:.2f} ms (Process Table Scan, this machine)")
+        self.val_scan_b.setText(f"🚀 {scan_ms:.2f} ms (Process Table Scan)")
         self.val_scan_b.setStyleSheet("font-size: 12px; color: #10b981; font-weight: bold; border: none;")
 
         QMessageBox.information(
@@ -1645,10 +1665,7 @@ class SettingsWindow(QDialog):
 
     def run_security_audit(self):
         """Performs a security audit of vault permissions, key envelopes, liveness
-        configuration, and primary admin settings. Every line below reflects a
-        real check against on-disk/config state - nothing here is a canned
-        result, because a security product that shows a fixed 'all good' score
-        regardless of actual state is worse than no indicator at all."""
+        configuration, and primary admin settings."""
         from database.embedding_store import read_envelope_file, EMBEDDING_FILE
         import os
 
@@ -1676,11 +1693,10 @@ class SettingsWindow(QDialog):
                 f"Vault File Permissions secure ({mode})",
                 f"Vault File Permissions: {mode} (Recommended: 0600)")
         else:
-            checks.append("✅ Vault Database File ready for creation")
+            add(False,
+                "Vault Database File exists",
+                "Vault Database File not yet created (initial setup)")
 
-        # Liveness / anti-spoofing: the single most consequential recognition
-        # setting - a disabled or misconfigured value here permits a static
-        # photo/screen to authenticate. Not previously checked at all.
         try:
             raw_motion = self.config.get("recognition.liveness_min_motion", 0.5)
             motion_val = float(raw_motion)
@@ -1690,14 +1706,43 @@ class SettingsWindow(QDialog):
             f"Liveness/Anti-Spoofing active (min motion: {motion_val})",
             "Liveness/Anti-Spoofing is DISABLED - static photo/screen presentation is not mitigated")
 
-        admin_user = self.config.get("security.primary_admin")
+        admin_user = self.config.get("security.admin_user")
         if admin_user:
-            checks.append(f"✅ Primary Admin Vault Owner set ('{admin_user}')")
+            add(True,
+                f"Primary Admin Vault Owner set ('{admin_user}')",
+                "")
         else:
-            checks.append("ℹ️ Vault Owner: Shared System Users")
+            add(False,
+                "Primary Admin Vault Owner configured",
+                "No Primary Admin configured — first enrolled user will be used as fallback")
 
-        checks.append("✅ Process SIGSTOP Interception Engine active")
-        checks.append("✅ Fail-Closed Launcher Substitutions active")
+        # D-Bus service connectivity check
+        dbus_connected = False
+        try:
+            from PySide6.QtDBus import QDBusConnection
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected():
+                try:
+                    owner_reply = bus.interface().serviceOwner("org.facegate.FaceGate")
+                    dbus_connected = owner_reply.isValid() and bool(owner_reply.value())
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        add(dbus_connected,
+            "D-Bus IPC Service connected (org.facegate.FaceGate)",
+            "D-Bus IPC Service not connected — daemon may not be running")
+
+        # Enrolled faces check
+        try:
+            from database.embedding_store import load_embeddings
+            enrolled = load_embeddings()
+            enrolled_count = len(enrolled)
+        except Exception:
+            enrolled_count = 0
+        add(enrolled_count > 0,
+            f"Enrolled face profiles: {enrolled_count} user(s)",
+            "No face profiles enrolled — password-only authentication active")
 
         score_pct = int(round(100 * passed / total)) if total else 100
         audit_text = "\n".join(checks)
@@ -1731,27 +1776,20 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
-        lbl = QLabel("📜 Open Source Software Credits & Attributions")
+        lbl = QLabel("Open Source Software Attributions")
         style_heading(lbl, 16)
         layout.addWidget(lbl)
 
         txt = QTextEdit()
         txt.setReadOnly(True)
         txt.setText(
-            "FaceGate-Linux is powered by the following open source technologies:\n\n"
-            "1. InsightFace (MIT License)\n"
-            "   Deep Face Analysis Library & 512-D Embedding Extraction.\n\n"
-            "2. ONNX Runtime (MIT License)\n"
-            "   High Performance Neural Network Execution Engine.\n\n"
-            "3. PySide6 / Qt6 (LGPLv3 / Commercial)\n"
-            "   Cross-Platform GUI Application Framework.\n\n"
-            "4. OpenCV (Apache 2.0 License)\n"
-            "   Open Source Computer Vision & Camera Capture Library.\n\n"
-            "5. Cryptography (Apache 2.0 / BSD)\n"
-            "   Authenticated AES-256-GCM Encryption Library.\n\n"
-            "6. PyYAML (MIT License)\n"
-            "   YAML Configuration Parser.\n\n"
-            "Thank you to all open source contributors!"
+            "FaceGate-Linux is built with open source software:\n\n"
+            "• InsightFace (MIT License) - Deep Face Analysis\n"
+            "• ONNX Runtime (MIT License) - Model Inference Engine\n"
+            "• PySide6 / Qt6 (LGPLv3) - Cross-Platform UI Framework\n"
+            "• OpenCV (Apache 2.0) - Computer Vision & Video Capture\n"
+            "• Cryptography (Apache 2.0 / BSD) - AES-256-GCM Encryption\n"
+            "• PyYAML (MIT License) - Configuration Management\n"
         )
         layout.addWidget(txt)
 
@@ -1764,30 +1802,80 @@ class SettingsWindow(QDialog):
         import sys, platform
         from PySide6.QtGui import QGuiApplication
         report = (
-            "=== FaceGate-Linux System Diagnostics Report ===\n"
-            f"Version: 1.1.0 (Stable Enterprise Release)\n"
+            "=== FaceGate System Diagnostics ===\n"
+            f"Version: 1.1.0\n"
             f"Python: {sys.version.split()[0]} ({platform.machine()})\n"
             f"Platform: {platform.system()} {platform.release()}\n"
-            f"AI Engine: InsightFace ONNX Runtime (512-D L2 Vectors)\n"
-            f"Encryption: AES-256-GCM Master Envelope Vault\n"
-            f"D-Bus Service: org.facegate.Daemon\n"
+            f"D-Bus Service: org.facegate.FaceGate\n"
             f"Config Path: ~/.config/facegate/\n"
             f"Timestamp: {QDateTime.currentDateTime().toString(Qt.DateFormat.ISODate)}\n"
-            "================================================="
+            "==================================="
         )
         QGuiApplication.clipboard().setText(report)
-        QMessageBox.information(self, "Diagnostics Copied", "System diagnostic report copied to clipboard!")
+        QMessageBox.information(self, "Diagnostics Copied", "System diagnostic report copied to clipboard.")
 
-    def run_diagnostics_health_check(self):
+    def run_diagnostics_health_check(self, show_dialog: bool = True):
+        issues = []
+
+        # 1. Vault status
         from database.embedding_store import read_envelope_file
         envelope = read_envelope_file()
         if envelope is not None:
-            self.status_vault.setText("🟢 AES-256-GCM Encrypted (Master Envelope Intact)")
-            self.status_vault.setStyleSheet("font-size: 13px; color: #10b981; font-weight: 600; border: none;")
+            self.status_vault.setText("Encrypted (AES-256-GCM)")
+            self.status_vault.setStyleSheet("font-size: 13px; color: #10b981; border: none;")
+            if hasattr(self, 'dot_vault'): self.dot_vault.set_color("#10b981")
         else:
-            self.status_vault.setText("🟡 Unencrypted / Initial Setup Mode")
-            self.status_vault.setStyleSheet("font-size: 13px; color: #f59e0b; font-weight: 600; border: none;")
-        QMessageBox.information(self, "Health Check", "System health check completed. All subsystems operational!")
+            self.status_vault.setText("Not setup (Unencrypted mode)")
+            self.status_vault.setStyleSheet("font-size: 13px; color: #f59e0b; border: none;")
+            if hasattr(self, 'dot_vault'): self.dot_vault.set_color("#f59e0b")
+            issues.append("Vault is not yet encrypted")
+
+        # 2. D-Bus connectivity
+        dbus_ok = False
+        try:
+            from PySide6.QtDBus import QDBusConnection
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected():
+                try:
+                    owner_reply = bus.interface().serviceOwner("org.facegate.FaceGate")
+                    dbus_ok = owner_reply.isValid() and bool(owner_reply.value())
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        if dbus_ok:
+            self.status_dbus.setText("Active (org.facegate.FaceGate)")
+            self.status_dbus.setStyleSheet("font-size: 13px; color: #10b981; border: none;")
+            if hasattr(self, 'dot_dbus'): self.dot_dbus.set_color("#10b981")
+        else:
+            self.status_dbus.setText("Disconnected (Daemon inactive)")
+            self.status_dbus.setStyleSheet("font-size: 13px; color: #f59e0b; border: none;")
+            if hasattr(self, 'dot_dbus'): self.dot_dbus.set_color("#f59e0b")
+            issues.append("D-Bus daemon not detected")
+
+        # 3. AI/ONNX model check
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        models_dir = os.path.abspath(os.path.join(current_dir, "..", "..", "models"))
+        models_exist = os.path.isdir(models_dir) and len(os.listdir(models_dir)) > 0 if os.path.isdir(models_dir) else False
+
+        if models_exist:
+            self.status_ai.setText("InsightFace ONNX (buffalo_l)")
+            self.status_ai.setStyleSheet("font-size: 13px; color: #10b981; border: none;")
+            if hasattr(self, 'dot_ai'): self.dot_ai.set_color("#10b981")
+        else:
+            self.status_ai.setText("Model directory empty or missing")
+            self.status_ai.setStyleSheet("font-size: 13px; color: #f59e0b; border: none;")
+            if hasattr(self, 'dot_ai'): self.dot_ai.set_color("#f59e0b")
+            issues.append("AI models not found")
+
+        if show_dialog:
+            if issues:
+                summary = "Subsystem Status:\n• " + "\n• ".join(issues)
+            else:
+                summary = "Subsystem status check complete. All components operational."
+            QMessageBox.information(self, "Subsystem Status", summary)
 
     # ------------------ Loading Settings ------------------
     
@@ -3072,10 +3160,26 @@ class SettingsWindow(QDialog):
             ("card_protection", "danger"),
             ("card_notifications", "normal"),
             ("card_about", "normal"),
+            ("card_diag", "normal"),
+            ("card_bench", "normal"),
+            ("card_sec", "normal"),
+            ("card_actions", "normal"),
         ]:
             card = getattr(self, card_ref, None)
             if card is not None:
                 card.setStyleSheet(get_card_qss(importance, c))
+
+        # Re-theme About section buttons
+        if hasattr(self, "btn_run_bench") and self.btn_run_bench:
+            self.btn_run_bench.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: #ffffff; padding: 8px 16px; border-radius: 6px; font-weight: bold; font-size: 12px;")
+        if hasattr(self, "btn_run_audit") and self.btn_run_audit:
+            self.btn_run_audit.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: #ffffff; padding: 8px 16px; border-radius: 6px; font-weight: bold; font-size: 12px;")
+        if hasattr(self, "btn_copy_diag") and self.btn_copy_diag:
+            self.btn_copy_diag.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: #ffffff; padding: 10px 16px; border-radius: 6px; font-weight: bold; font-size: 13px;")
+        for btn_ref in ["btn_attrib", "btn_github", "btn_health"]:
+            btn = getattr(self, btn_ref, None)
+            if btn is not None:
+                btn.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 10px 16px; border-radius: 6px; font-weight: bold; font-size: 13px;")
 
         # Refresh enrolled users list colors
         if hasattr(self, "enrolled_users_container"):

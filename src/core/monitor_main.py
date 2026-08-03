@@ -445,7 +445,6 @@ class FaceGateApplication(QObject):
             # Wait for subprocess while keeping Qt event loop alive
             while proc.poll() is None:
                 QApplication.processEvents()
-                import time
                 time.sleep(0.05)
 
             stdout_data, _ = proc.communicate()
