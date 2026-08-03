@@ -46,6 +46,7 @@ For a full discussion of the security model, see the [README](README.md#security
   2. **Process Polling Monitor**: A background monitor (`AppMonitor`) polls running system processes at a configurable interval (default `0.4s`) to detect and suspend (via `SIGSTOP`) unauthorized instances of protected apps.
 - **Direct-Launch Exposure**: Because process monitoring relies on a polling thread, there is a sub-second window of exposure between a process spawning and it being detected and suspended.
 - **Direct Binary Launch Bypass**: Processes launched directly via their absolute or relative binary paths (e.g. from a terminal, a custom script, or an IDE run configuration) completely bypass the launcher substitution hook. In these cases, protection relies solely on the background process monitor, meaning the application will launch and briefly execute for up to the duration of the polling interval before being suspended and gated by the authentication dialog.
+- **Fail-Closed Daemon Signals**: Terminal signals (`SIGTERM`, `SIGINT`) received by the daemon fail closed. Launcher substitutions remain active on disk to ensure protected applications are not exposed by killing the daemon process without prior biometric or password authentication.
 
 ### Liveness Verification (Anti-Spoofing)
 

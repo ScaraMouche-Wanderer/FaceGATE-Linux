@@ -76,8 +76,10 @@ def enroll_user(name: str):
         print(f"\nError: Could not capture enough sharp face frames. Got {len(embeddings)}/{required_frames} attempts.", file=sys.stderr)
         sys.exit(1)
         
-    # Calculate average embedding
-    avg_embedding = np.mean(embeddings, axis=0)
+    # Calculate average embedding and apply L2 unit normalization
+    mean_emb = np.mean(embeddings, axis=0)
+    norm = np.linalg.norm(mean_emb)
+    avg_embedding = mean_emb / norm if norm > 0 else mean_emb
     
     # Store the averaged embedding
     save_embedding(name, avg_embedding)

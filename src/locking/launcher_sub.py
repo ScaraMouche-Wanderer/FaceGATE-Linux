@@ -1,8 +1,10 @@
 import os
 import sys
 import ctypes
+import logging
+from typing import List, Dict, Optional
 
-# Preload libc and librt with RTLD_GLOBAL to resolve GLIBC symbol conflicts (__pointer_chk_guard) on Linux
+# Preload libc and librt with RTLD_GLOBAL to resolve GLIBC symbol conflicts on Linux
 try:
     ctypes.CDLL("libc.so.6", mode=ctypes.RTLD_GLOBAL)
 except Exception:
@@ -12,256 +14,81 @@ try:
 except Exception:
     pass
 
-import shutil
-import logging
-from typing import List, Dict
+from locking.launcher_manager import (
+    LauncherManager,
+    is_facegate_launcher,
+    get_facegate_cmd,
+    get_facegate_executable,
+    get_system_desktop_path,
+    calculate_checksum,
+    refresh_desktop_database,
+    extract_primary_executable,
+    verify_executable_exists,
+    notify_permission_error,
+    USER_DESKTOP_DIR as LM_USER_DESKTOP_DIR,
+    BACKUP_DIR as LM_BACKUP_DIR,
+    MANIFEST_FILE as LM_MANIFEST_FILE,
+    SYSTEM_DESKTOP_DIRS as LM_SYSTEM_DESKTOP_DIRS,
+    FACEGATE_MARKER
+)
 
-SYSTEM_DESKTOP_DIRS = [
-    "/usr/share/applications",
-    "/usr/local/share/applications",
-    "/var/lib/flatpak/exports/share/applications",
-    os.path.expanduser("~/.local/share/applications")
-]
+SYSTEM_DESKTOP_DIRS = LM_SYSTEM_DESKTOP_DIRS
+USER_DESKTOP_DIR = LM_USER_DESKTOP_DIR
+BACKUP_DIR = LM_BACKUP_DIR
+MANIFEST_FILE = LM_MANIFEST_FILE
 
-USER_DESKTOP_DIR = os.path.expanduser("~/.local/share/applications")
-BACKUP_DIR = os.path.expanduser("~/.config/facegate/backups")
 
-FACEGATE_MARKER = "# Modified by FaceGate"
+def get_manager() -> LauncherManager:
+    """Helper to return LauncherManager bound to current module parameters."""
+    import locking.launcher_sub as current_mod
+    return LauncherManager(
+        user_desktop_dir=current_mod.USER_DESKTOP_DIR,
+        backup_dir=current_mod.BACKUP_DIR,
+        manifest_file=current_mod.MANIFEST_FILE,
+        system_desktop_dirs=current_mod.SYSTEM_DESKTOP_DIRS
+    )
 
-def is_facegate_launcher(filepath: str) -> bool:
-    """Helper to check if a .desktop file was modified by FaceGate."""
-    if not os.path.exists(filepath):
-        return False
-    try:
-        with open(filepath, 'r') as f:
-            content = f.read(512)
-            return FACEGATE_MARKER in content
-    except Exception:
-        return False
 
-def get_facegate_executable() -> str:
-    """
-    Resolves absolute path of facegate executable cleanly using sys.executable or fixed locations.
-    """
-    python_bin_dir = os.path.dirname(sys.executable)
-    fg_in_py = os.path.join(python_bin_dir, "facegate")
-    if os.path.exists(fg_in_py):
-        return os.path.abspath(fg_in_py)
+def load_manifest() -> Dict[str, Dict]:
+    return get_manager().load_manifest()
 
-    user_bin = os.path.expanduser("~/.local/bin/facegate")
-    if os.path.exists(user_bin):
-        return user_bin
 
-    facegate_bin = shutil.which("facegate")
-    if facegate_bin:
-        return os.path.abspath(facegate_bin)
+def save_manifest(manifest: Dict[str, Dict]):
+    get_manager().save_manifest(manifest)
 
-    if sys.argv and sys.argv[0]:
-        argv_abs = os.path.abspath(sys.argv[0])
-        if os.path.exists(argv_abs) and os.path.basename(argv_abs) == "facegate":
-            return argv_abs
-            
-    return "facegate"
-
-def get_system_desktop_path(desktop_name: str) -> str:
-    for directory in SYSTEM_DESKTOP_DIRS:
-        if directory == USER_DESKTOP_DIR:
-            continue
-        path = os.path.join(directory, desktop_name)
-        if os.path.exists(path):
-            return path
-    path = os.path.join(USER_DESKTOP_DIR, desktop_name)
-    if os.path.exists(path):
-        return path
-    return None
-
-_temp_tray = None
-
-def notify_permission_error(desktop_name: str, failing_path: str, error_msg: str):
-    """Surfaces a one-time tray notification telling the user protection could not be applied."""
-    from PySide6.QtWidgets import QApplication, QSystemTrayIcon
-    app = QApplication.instance()
-    if not app:
-        return
-
-    found_tray = None
-    for obj in app.children():
-        if isinstance(obj, QSystemTrayIcon):
-            found_tray = obj
-            break
-        for child in obj.children():
-            if isinstance(child, QSystemTrayIcon):
-                found_tray = child
-                break
-
-    message_title = "FaceGate Protection Failed"
-    message_text = f"Could not lock '{desktop_name}' due to a permission error at: {failing_path}. Please check file permissions."
-
-    if found_tray:
-        found_tray.showMessage(message_title, message_text, QSystemTrayIcon.MessageIcon.Critical, 10000)
-    else:
-        global _temp_tray
-        _temp_tray = QSystemTrayIcon()
-        _temp_tray.show()
-        _temp_tray.showMessage(message_title, message_text, QSystemTrayIcon.MessageIcon.Critical, 10000)
 
 def apply_substitution(protected_apps: List[Dict]):
-    """
-    Substitutes system launchers for protected apps with a FaceGate wrapped command.
-    Files are written atomically to user-level ~/.local/share/applications/ to shadow system ones.
-    """
-    try:
-        os.makedirs(USER_DESKTOP_DIR, exist_ok=True)
-        os.makedirs(BACKUP_DIR, exist_ok=True)
-    except PermissionError as pe:
-        failing_path = pe.filename or USER_DESKTOP_DIR
-        logging.error(f"PermissionError: Failed to create directories at '{failing_path}': {pe}")
-        notify_permission_error("FaceGate System Directories", failing_path, str(pe))
-        return
-    
+    """Applies launcher substitution for all protected apps using LauncherManager."""
+    manager = get_manager()
     for app in protected_apps:
-        desktop_name = app.get("desktop_name")
-        if not desktop_name:
-            continue
-            
-        system_path = get_system_desktop_path(desktop_name)
-        if not system_path:
-            logging.warning(f"Could not find source .desktop file for '{desktop_name}'")
-            continue
-            
-        user_path = os.path.join(USER_DESKTOP_DIR, desktop_name)
-        backup_path = os.path.join(BACKUP_DIR, desktop_name)
-        
-        is_already_substituted = is_facegate_launcher(user_path)
-                    
-        if is_already_substituted:
-            logging.info(f"Launcher '{desktop_name}' is already substituted.")
-            # Refresh backup if system launcher file was updated
-            if os.path.exists(system_path) and os.path.exists(backup_path):
-                if os.path.getmtime(system_path) > os.path.getmtime(backup_path):
-                    shutil.copy2(system_path, backup_path)
-                    logging.info(f"Refreshed backup launcher '{desktop_name}' due to system package update.")
-            elif not os.path.exists(backup_path) and os.path.exists(system_path):
-                shutil.copy2(system_path, backup_path)
-            continue
-            
-        # Backup original content
-        try:
-            if os.path.exists(user_path) and not is_already_substituted:
-                shutil.copy2(user_path, backup_path)
-                logging.info(f"Backed up custom user launcher '{desktop_name}' to {backup_path}")
-            elif os.path.exists(system_path):
-                shutil.copy2(system_path, backup_path)
-                logging.info(f"Backed up system launcher '{desktop_name}' to {backup_path}")
-                
-            # Perform modification
-            with open(backup_path, 'r') as f:
-                lines = f.readlines()
-                
-            new_lines = [f"{FACEGATE_MARKER}\n"]
-            in_desktop_entry = False
-            exec_modified = False
-            
-            for line in lines:
-                stripped = line.strip()
-                if stripped == "[Desktop Entry]":
-                    in_desktop_entry = True
-                elif stripped.startswith("[") and stripped.endswith("]"):
-                    in_desktop_entry = False
-                    
-                if in_desktop_entry and stripped.startswith("Exec="):
-                    orig_exec = stripped[5:]
-                    facegate_bin = get_facegate_executable()
-                    new_line = f"Exec={facegate_bin} --auth-launch {desktop_name} -- {orig_exec}\n"
-                    new_lines.append(new_line)
-                    exec_modified = True
-                    logging.info(f"Rewrote Exec for '{desktop_name}': {new_line.strip()}")
-                else:
-                    new_lines.append(line)
-                    
-            if not exec_modified:
-                logging.warning(f"Could not find Exec line in [Desktop Entry] for '{desktop_name}'")
-                if os.path.exists(backup_path):
-                    os.remove(backup_path)
-                continue
-                
-            # Write out modified file atomically
-            tmp_user_path = user_path + ".tmp"
-            with open(tmp_user_path, 'w') as f:
-                f.writelines(new_lines)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_user_path, user_path)
-            logging.info(f"Successfully substituted launcher: {user_path}")
-            
-        except PermissionError as pe:
-            failing_path = pe.filename or user_path
-            logging.error(f"Permission denied when modifying launcher '{desktop_name}' at path '{failing_path}': {pe}")
-            notify_permission_error(desktop_name, failing_path, str(pe))
-        except Exception as e:
-            logging.error(f"Failed to substitute launcher '{desktop_name}': {e}")
+        manager.protect_application(app)
 
-def restore_substitution(protected_apps: List[Dict]):
-    """
-    Restores launcher files to their exact pre-substitution state using unified marker check.
-    """
-    for app in protected_apps:
-        desktop_name = app.get("desktop_name")
-        if not desktop_name:
-            continue
-            
-        user_path = os.path.join(USER_DESKTOP_DIR, desktop_name)
-        backup_path = os.path.join(BACKUP_DIR, desktop_name)
-        
-        if os.path.exists(user_path):
-            was_modified = is_facegate_launcher(user_path)
-            if was_modified:
-                if os.path.exists(backup_path):
-                    try:
-                        shutil.copy2(backup_path, user_path)
-                        logging.info(f"Restored original launcher '{desktop_name}' from backup.")
-                    except Exception as e:
-                        logging.error(f"Failed to restore launcher '{desktop_name}': {e}")
-                else:
-                    # If backup doesn't exist, we probably copied from system, so delete the override
-                    try:
-                        os.remove(user_path)
-                        logging.info(f"Removed override launcher '{desktop_name}' (restoring to system default).")
-                    except Exception as e:
-                        logging.error(f"Failed to remove override launcher '{desktop_name}': {e}")
-                        
-        # Clean up backup
-        if os.path.exists(backup_path):
-            try:
-                os.remove(backup_path)
-            except Exception as e:
-                logging.warning(f"Failed to remove backup file for '{desktop_name}': {e}")
+
+def restore_substitution(protected_apps: Optional[List[Dict]] = None):
+    """Restores launcher substitution using LauncherManager."""
+    manager = get_manager()
+    if protected_apps is not None:
+        for app in protected_apps:
+            desktop_name = app.get("desktop_name")
+            if desktop_name:
+                manager.unprotect_application(desktop_name)
+    else:
+        manager.restore_all_launchers()
+
 
 def check_and_fix_substitutions(protected_apps: List[Dict]):
-    """
-    Checks if launcher files have been reverted (e.g. by Flatpak/system updates)
-    and re-applies substitutions if necessary. Logs whenever a reversion is corrected.
-    """
+    """Checks if launchers have been reverted and re-applies substitutions using LauncherManager."""
+    manager = get_manager()
     for app in protected_apps:
         desktop_name = app.get("desktop_name")
         if not desktop_name:
             continue
-            
-        user_path = os.path.join(USER_DESKTOP_DIR, desktop_name)
-        reverted = False
-        
-        if not os.path.exists(user_path):
-            reverted = True
-        else:
-            try:
-                with open(user_path, 'r') as f:
-                    content = f.read()
-                    if "# Modified by FaceGate" not in content:
-                        reverted = True
-            except Exception as e:
-                logging.error(f"Error checking user launcher '{desktop_name}' for re-check: {e}")
-                reverted = True
-                
-        if reverted:
+        user_path = os.path.join(manager.user_desktop_dir, desktop_name)
+        if not is_facegate_launcher(user_path):
             logging.warning(f"Launcher Recheck: Reversion detected for '{desktop_name}'. Re-applying substitution.")
-            apply_substitution([app])
+            manager.protect_application(app)
+
+
+def emergency_restore_launchers() -> int:
+    """Emergency utility to restore ALL launchers using LauncherManager."""
+    return get_manager().restore_all_launchers()

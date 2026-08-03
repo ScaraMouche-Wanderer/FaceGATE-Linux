@@ -1,6 +1,51 @@
+import os
+import subprocess
+import time
 import logging
 from PySide6.QtCore import QObject, Slot, ClassInfo
 from PySide6.QtDBus import QDBusConnection, QDBusAbstractAdaptor
+from PySide6.QtWidgets import QApplication
+from locking.launcher_sub import get_facegate_cmd, get_facegate_executable
+
+def run_recognition_helper(identifier: str, cached_key: bytes | None = None) -> tuple[int, str]:
+    cmd = list(get_facegate_cmd())
+    cmd.extend(["--recognize", identifier])
+    pass_fds = []
+    w = None
+
+    if cached_key is not None:
+        r, w = os.pipe()
+        os.set_inheritable(r, True)
+        cmd.extend(["--key-fd", str(r)])
+        pass_fds.append(r)
+
+    logging.info(f"Spawning recognition subprocess: {' '.join(cmd)}")
+
+    try:
+        proc = subprocess.Popen(cmd, pass_fds=pass_fds, stdout=subprocess.PIPE, text=True, close_fds=True)
+        if cached_key is not None:
+            os.close(r)
+            try:
+                os.write(w, cached_key)
+            finally:
+                os.close(w)
+
+        while proc.poll() is None:
+            QApplication.processEvents()
+            time.sleep(0.05)
+
+        stdout_data, _ = proc.communicate()
+        return proc.returncode, stdout_data
+    except Exception as e:
+        logging.error(f"Failed to spawn recognition subprocess: {e}")
+        if cached_key is not None:
+            for fd in (r, w):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        return 1, ""
+
 
 class FaceGateService(QObject):
     def __init__(self, main_app=None):
@@ -17,6 +62,13 @@ class FaceGateService(QObject):
             logging.info("FaceGate is inactive/disabled. Auto-authorizing.")
             return True
 
+        # If the app is already authorized in current session, bypass auth
+        if self.main_app:
+            app_id = self.main_app.get_app_id_from_desktop(app_identifier)
+            if self.main_app.is_app_authorized(app_id):
+                logging.info(f"App '{app_identifier}' (ID: '{app_id}') is already authorized in session. Auto-authorizing.")
+                return True
+
         # Check for persistent brute-force lockout
         from security.lockout_manager import is_locked_out
         locked_out, remaining = is_locked_out(app_identifier)
@@ -26,85 +78,46 @@ class FaceGateService(QObject):
             log_auth_attempt(app_identifier, "lockout", "fail")
             return False
 
-        import subprocess
-        import os
         from database.embedding_store import get_cached_key, set_cached_key
-        from locking.launcher_sub import get_facegate_executable
-        from PySide6.QtWidgets import QApplication
-        import time
-        
         cached_key = get_cached_key()
-        facegate_bin = get_facegate_executable()
         
-        cmd = [facegate_bin, "--recognize", app_identifier]
-        pass_fds = []
-        w = None
+        exit_code, stdout_data = run_recognition_helper(app_identifier, cached_key)
+        logging.info(f"Recognition subprocess exited with code {exit_code}")
         
-        if cached_key is not None:
-            r, w = os.pipe()
-            os.set_inheritable(r, True)
-            cmd.extend(["--key-fd", str(r)])
-            pass_fds.append(r)
-            
-        logging.info(f"Spawning recognition subprocess: {facegate_bin} --recognize {app_identifier}")
+        success = (exit_code == 0)
+        method = "face"
+        username = None
+        score = None
         
-        try:
-            proc = subprocess.Popen(cmd, pass_fds=pass_fds, stdout=subprocess.PIPE, text=True, close_fds=True)
-            if cached_key is not None:
-                os.close(r)
-                try:
-                    os.write(w, cached_key)
-                finally:
-                    os.close(w)
+        if stdout_data:
+            for line in stdout_data.splitlines():
+                line = line.strip()
+                if line.startswith("FACEGATE_METHOD:"):
+                    method = line.split(":", 1)[1]
+                elif line.startswith("FACEGATE_USER:"):
+                    username = line.split(":", 1)[1]
+                elif line.startswith("FACEGATE_SCORE:"):
+                    try:
+                        score = float(line.split(":", 1)[1])
+                    except ValueError:
+                        pass
+                elif len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
+                    try:
+                        key_bytes = bytes.fromhex(line)
+                        if len(key_bytes) == 32:
+                            set_cached_key(key_bytes)
+                            logging.info("Successfully cached key returned from recognition subprocess.")
+                    except Exception as ex:
+                        logging.error(f"Failed to parse key returned from subprocess: {ex}")
+        
+        # Write to SQLite audit log
+        from database.audit_log import log_auth_attempt
+        log_auth_attempt(app_identifier, method, "success" if success else "fail", score, username)
+        
+        if success and self.main_app:
+            self.main_app.authorize_app(app_identifier)
             
-            # Wait for subprocess while keeping event loop alive
-            while proc.poll() is None:
-                QApplication.processEvents()
-                time.sleep(0.05)
-                
-            stdout_data, _ = proc.communicate()
-            exit_code = proc.returncode
-            logging.info(f"Recognition subprocess exited with code {exit_code}")
-            
-            success = (exit_code == 0)
-            method = "face"
-            username = None
-            score = None
-            
-            if success:
-                # Parse subprocess output for metadata and key
-                if stdout_data:
-                    for line in stdout_data.splitlines():
-                        line = line.strip()
-                        if line.startswith("FACEGATE_METHOD:"):
-                            method = line.split(":", 1)[1]
-                        elif line.startswith("FACEGATE_USER:"):
-                            username = line.split(":", 1)[1]
-                        elif line.startswith("FACEGATE_SCORE:"):
-                            try:
-                                score = float(line.split(":", 1)[1])
-                            except ValueError:
-                                pass
-                        elif len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
-                            try:
-                                key_bytes = bytes.fromhex(line)
-                                if len(key_bytes) == 32:
-                                    set_cached_key(key_bytes)
-                                    logging.info("Successfully cached key returned from recognition subprocess.")
-                            except Exception as ex:
-                                logging.error(f"Failed to parse key returned from subprocess: {ex}")
-            
-            # Write to SQLite audit log
-            from database.audit_log import log_auth_attempt
-            log_auth_attempt(app_identifier, method, "success" if success else "fail", score, username)
-            
-            if success and self.main_app:
-                self.main_app.authorize_app(app_identifier)
-                
-            return success
-        except Exception as e:
-            logging.error(f"Failed to spawn recognition subprocess: {e}")
-            return False
+        return success
 
     def emergency_kill_internal(self):
         """
@@ -136,6 +149,20 @@ class FaceGateService(QObject):
         logging.info("RelockAll command received via D-Bus.")
         if self.main_app:
             self.main_app.relock_all()
+
+    def enable_internal(self) -> bool:
+        logging.info("D-Bus request received: Enable FaceGate")
+        if self.main_app:
+            self.main_app.resume()
+            return True
+        return False
+
+    def disable_internal(self, minutes: int = 15) -> bool:
+        logging.info(f"D-Bus request received: Disable FaceGate for {minutes} minutes")
+        if self.main_app:
+            self.main_app.disable_for(minutes)
+            return True
+        return False
 
     def get_enrolled_users_internal(self) -> str:
         from database.embedding_store import load_embeddings
@@ -221,33 +248,37 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
         super().__init__(parent)
         self.service = parent
 
+    def _verify_caller_uid(self) -> bool:
+        msg = self.message()
+        if msg.isValid():
+            caller_service = msg.service()
+            if not caller_service:
+                return True
+            import os
+            from PySide6.QtDBus import QDBusConnection
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected() and bus.interface():
+                try:
+                    owner_reply = bus.interface().serviceUid(caller_service)
+                    if owner_reply.isValid():
+                        caller_uid = owner_reply.value()
+                        if caller_uid != os.getuid():
+                            logging.warning(f"D-Bus call REJECTED: Caller UID {caller_uid} != process UID {os.getuid()}")
+                            return False
+                except Exception as e:
+                    logging.debug(f"Caller UID check non-blocking fallback: {e}")
+        return True
+
     @Slot(result=bool)
     def ReloadConfig(self) -> bool:
+        if not self._verify_caller_uid():
+            return False
         return self.service.reload_config_internal()
 
     @Slot(str, result=bool)
     def RequestAuth(self, app_identifier: str) -> bool:
-        # Peer credential verification: check caller UID matches daemon owner
-        msg = self.message()
-        if msg.isValid():
-            caller_service = msg.service()
-            from PySide6.QtDBus import QDBusConnection, QDBusInterface
-            import os
-            bus = QDBusConnection.sessionBus()
-            if bus.isConnected():
-                dbus_iface = QDBusInterface(
-                    "org.freedesktop.DBus",
-                    "/org/freedesktop/DBus",
-                    "org.freedesktop.DBus",
-                    bus
-                )
-                if dbus_iface.isValid():
-                    reply = dbus_iface.call("GetConnectionUnixUser", caller_service)
-                    if reply.isValid() and len(reply.arguments()) > 0:
-                        caller_uid = int(reply.arguments()[0])
-                        if caller_uid != os.getuid():
-                            logging.warning(f"D-Bus RequestAuth REJECTED: Caller UID {caller_uid} != process UID {os.getuid()}")
-                            return False
+        if not self._verify_caller_uid():
+            return False
         return self.service.request_auth_internal(app_identifier)
 
     # NOTE: GetCachedKey and UpdateCachedKey have been deliberately REMOVED from
@@ -257,26 +288,50 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
 
     @Slot(result=str)
     def GetEnrolledUsers(self) -> str:
+        if not self._verify_caller_uid():
+            return ""
         return self.service.get_enrolled_users_internal()
 
     @Slot(result=str)
     def GetAdminUser(self) -> str:
+        if not self._verify_caller_uid():
+            return ""
         return self.service.get_admin_user_internal()
 
     @Slot(str, result=bool)
     def SetAdminUser(self, username: str) -> bool:
+        if not self._verify_caller_uid():
+            return False
         return self.service.set_admin_user_internal(username)
 
     @Slot()
     def EmergencyKill(self):
+        if not self._verify_caller_uid():
+            return
         self.service.emergency_kill_internal()
 
     @Slot()
     def RelockAll(self):
+        if not self._verify_caller_uid():
+            return
         self.service.relock_all_internal()
+
+    @Slot(result=bool)
+    def Enable(self) -> bool:
+        if not self._verify_caller_uid():
+            return False
+        return self.service.enable_internal()
+
+    @Slot(int, result=bool)
+    def Disable(self, minutes: int = 15) -> bool:
+        if not self._verify_caller_uid():
+            return False
+        return self.service.disable_internal(minutes)
 
     @Slot(str, result=bool)
     def RemoveEnrolledUser(self, username: str) -> bool:
+        if not self._verify_caller_uid():
+            return False
         return self.service.remove_enrolled_user_internal(username)
 
 def register_dbus_service(service_obj) -> bool:

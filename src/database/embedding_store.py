@@ -168,7 +168,8 @@ def load_embeddings() -> dict:
         
     try:
         from security.crypto_engine import decrypt, build_aad
-        aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), envelope.get("iterations", 600000), envelope.get("salt", ""))
+        has_kdf = "kdf" in envelope
+        aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), envelope.get("iterations", 600000), envelope.get("salt", "")) if has_kdf else None
         try:
             decrypted_bytes = decrypt(envelope["nonce"], envelope["ciphertext"], key, aad)
         except Exception:

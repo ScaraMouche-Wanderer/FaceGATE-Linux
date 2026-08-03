@@ -19,7 +19,7 @@ def match_face(live_embedding: np.ndarray, enrolled: dict = None) -> tuple:
         (matched_name, confidence) if a successful match is found, or (None, confidence)
     """
     config = get_config()
-    threshold = float(config.get("recognition.similarity_threshold", 0.65))
+    threshold = float(config.get("recognition.similarity_threshold", 0.52))
     ambiguity_margin = float(config.get("recognition.ambiguity_margin", 0.03))
     
     if enrolled is None:

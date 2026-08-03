@@ -91,10 +91,6 @@ def convert_cv_to_pixmap(frame: "np.ndarray", width: int = 360, height: int = 27
     return QPixmap.fromImage(q_img.copy())
 
 class AuthDialog(QDialog):
-    # Class-level dictionary to track failed attempts and lockout per app_name across dialog instances
-    # Format: app_name -> {"attempts": int, "lockout_until": float}
-    lockout_data = {}
-
     def __init__(self, app_name: str, mode: str = "password", timeout_seconds: int = 0, parent=None):
         super().__init__(parent)
         self.app_name = app_name
@@ -105,11 +101,11 @@ class AuthDialog(QDialog):
         from utils.config_loader import get_config
         from ui.theme import is_system_dark_mode
         try:
-            _cfg_theme = get_config().get("behavior.theme", "system")
-            if _cfg_theme == "system":
-                self.theme_mode = "dark" if is_system_dark_mode() else "light"
+            _cfg_theme = get_config().get("behavior.theme", "light")
+            if _cfg_theme == "dark":
+                self.theme_mode = "dark"
             else:
-                self.theme_mode = _cfg_theme
+                self.theme_mode = "light"
         except Exception:
             self.theme_mode = "light"
         self.authenticated = False
@@ -124,6 +120,7 @@ class AuthDialog(QDialog):
         self.matched_centroids = []
         self.enrolled_embeddings = {}
         self.failed_pwd_attempts = 0
+        self.warmup_frames_left = 3
         
         self.detector = None
         self.camera_worker = None
@@ -143,9 +140,11 @@ class AuthDialog(QDialog):
     def init_ui(self):
         self.setWindowTitle("FaceGate Authentication")
         self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint | 
             Qt.WindowType.Dialog
         )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
         
         # Determine screen-based size
@@ -241,7 +240,7 @@ class AuthDialog(QDialog):
         self.camera_label = QLabel()
         self.camera_label.setFixedSize(360, 270)
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.camera_label.setStyleSheet("border: 2px solid #3a3a4a; border-radius: 8px; background-color: #0d0d11;")
+        self.camera_label.setStyleSheet(f"border: 2px solid {c['BORDER_NEUTRAL']}; border-radius: 8px; background-color: {c['CARD_NEUTRAL']};")
         face_layout.addWidget(self.camera_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Password Fallback Button
@@ -384,6 +383,9 @@ class AuthDialog(QDialog):
             }}
         """)
         
+        if hasattr(self, "camera_label") and self.camera_label:
+            self.camera_label.setStyleSheet(f"border: 2px solid {c['BORDER_NEUTRAL']}; border-radius: 8px; background-color: {c['CARD_NEUTRAL']};")
+
         if hasattr(self, "status_label") and self.status_label:
             self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
         if hasattr(self, "sub_label") and self.sub_label:
@@ -417,12 +419,27 @@ class AuthDialog(QDialog):
         try:
             self.detector = detector
             
-            from database.embedding_store import load_embeddings
+            from database.embedding_store import load_embeddings, get_cached_key, EMBEDDING_FILE
+            import os
             try:
                 self.enrolled_embeddings = load_embeddings()
             except Exception as e:
                 logging.error(f"Error loading enrolled embeddings: {e}")
                 self.enrolled_embeddings = {}
+                
+            if not self.enrolled_embeddings:
+                if get_cached_key() is None and os.path.exists(EMBEDDING_FILE):
+                    logging.info("Vault is locked (no encryption key in RAM). Switching AuthDialog to password mode to prompt for master password.")
+                    if hasattr(self, "sub_label") and self.sub_label:
+                        self.sub_label.setText("🔒 Enter Master Password once to unlock Face Recognition for this session:")
+                    self.switch_to_password_mode()
+                    return
+                elif get_cached_key() is not None:
+                    logging.warning("No enrolled embeddings found in database. Switching to password mode.")
+                    if hasattr(self, "sub_label") and self.sub_label:
+                        self.sub_label.setText("No facial profiles enrolled yet. Enter master password:")
+                    self.switch_to_password_mode()
+                    return
                 
             # Start background face detection worker
             self.detector_worker = FaceDetectorWorker(self.detector)
@@ -480,9 +497,14 @@ class AuthDialog(QDialog):
         from recognition.blur_checker import is_blurry
         c = get_colors()
 
+        # Camera warmup: skip initial frames after startup to let camera auto-exposure stabilize
+        if getattr(self, "warmup_frames_left", 0) > 0:
+            self.warmup_frames_left -= 1
+            return
+
         # Skip detection evaluation on severely blurry frames to prevent false matches (audit §6.5)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        if is_blurry(gray, threshold=12.0):
+        if is_blurry(gray, threshold=8.0):
             logging.debug("Skipping severely blurry camera frame during face recognition.")
             return
         
@@ -534,22 +556,24 @@ class AuthDialog(QDialog):
             centroid = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
             self.matched_centroids.append(centroid)
             
-            if self.success_count >= 3:
-                # Perform motion/liveness check
-                from utils.config_loader import get_config
-                config = get_config()
-                min_motion = float(config.get("recognition.liveness_min_motion", 0.05))
+            from utils.config_loader import get_config
+            config = get_config()
+            threshold = float(config.get("recognition.similarity_threshold", 0.52))
+            
+            # High-confidence match (score >= threshold + 0.12) authenticates immediately
+            if self.success_count >= 2 or matched_score >= (threshold + 0.12):
+                min_motion = float(config.get("recognition.liveness_min_motion", 0.0))
                 
                 total_dist = 0.0
-                if len(self.matched_centroids) >= 3:
+                if len(self.matched_centroids) >= 2:
                     import math
                     for idx in range(1, len(self.matched_centroids)):
                         c1 = self.matched_centroids[idx - 1]
                         c2 = self.matched_centroids[idx]
                         total_dist += math.hypot(c2[0] - c1[0], c2[1] - c1[1])
                 
-                # Require micro-motion (liveness) unconditionally for all face matches
-                if total_dist < min_motion:
+                # Check liveness micro-motion if enabled (> 0.0)
+                if min_motion > 0.0 and total_dist < min_motion:
                     logging.info(f"Liveness motion check waiting: total motion {total_dist:.4f} < threshold {min_motion}")
                     self.status_label.setText("Verifying... slight movement recommended")
                 else:
@@ -559,11 +583,13 @@ class AuthDialog(QDialog):
                     self.matched_user = matched_user
                     self.accept()
             else:
-                self.status_label.setText("Hold still, verifying liveness…")
+                self.status_label.setText("Verifying face match…")
                 self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
         else:
-            self.success_count = 0
-            self.matched_centroids.clear()
+            if self.success_count > 0:
+                self.success_count -= 1
+            else:
+                self.matched_centroids.clear()
             if len(faces) > 0:
                 self.unknown_face_ticks += 1
                 if not self.enrolled_embeddings:
@@ -582,7 +608,7 @@ class AuthDialog(QDialog):
                         
                 from utils.config_loader import get_config
                 config = get_config()
-                threshold = float(config.get("recognition.similarity_threshold", 0.65))
+                threshold = float(config.get("recognition.similarity_threshold", 0.52))
                 margin = float(config.get("recognition.ambiguity_margin", 0.03))
                 
                 if max_score >= (threshold - margin):
@@ -632,14 +658,21 @@ class AuthDialog(QDialog):
         
         if verify_password(password):
             reset_lockout(self.app_name)
-            AuthDialog.lockout_data.pop(self.app_name, None)
             self.authenticated = True
             import getpass
             self.matched_user = getpass.getuser()
+            
+            # Print derived key to stdout so parent daemon process caches key in memory & RAM tmpfs
+            import sys
+            from database.embedding_store import get_cached_key
+            key = get_cached_key()
+            if key:
+                print(key.hex())
+                sys.stdout.flush()
+                
             self.accept()
         else:
             attempts, lockout_until, remaining = record_failed_attempt(self.app_name)
-            AuthDialog.lockout_data[self.app_name] = {"attempts": attempts, "lockout_until": lockout_until}
             self.failed_pwd_attempts += 1
             self.password_input.selectAll()
             

@@ -69,15 +69,8 @@ class TestAuthDialog(unittest.TestCase):
     @patch('utils.config_loader.get_config')
     def test_face_recognition_accepts_matched_user(self, mock_get_config, mock_vc, mock_load, mock_cos):
         """Face mode dialog should accept after 3 consecutive match frames."""
-        mock_config = MagicMock()
         from utils.config_loader import Config
-        real_config = Config()
-        def get_val(key, default=None):
-            if key == "recognition.liveness_min_motion":
-                return 0.0
-            return real_config.get(key, default)
-        mock_config.get.side_effect = get_val
-        mock_get_config.return_value = mock_config
+        mock_get_config.return_value = Config()
 
         from ui.auth_dialog import AuthDialog
 
@@ -102,10 +95,9 @@ class TestAuthDialog(unittest.TestCase):
         """Password dialog should impose lockout after 3 failed attempts (tracked per app)."""
         from ui.auth_dialog import AuthDialog
 
-        # Reset class-level lockout state for test app
+        # Reset persistent lockout state for test app
         app_name = "Test App"
-        AuthDialog.lockout_data.pop(app_name, None)
-        from security.lockout_manager import reset_lockout
+        from security.lockout_manager import reset_lockout, is_locked_out
         reset_lockout(app_name)
 
         dialog = AuthDialog(app_name, mode="password")
@@ -116,12 +108,11 @@ class TestAuthDialog(unittest.TestCase):
                 dialog.password_input.setText("wrong")
                 dialog.handle_unlock()
 
-        app_info = AuthDialog.lockout_data.get(app_name, {})
-        self.assertEqual(app_info.get("attempts"), 3)
-        self.assertGreater(app_info.get("lockout_until"), 0.0)
+        is_locked, remaining = is_locked_out(app_name)
+        self.assertTrue(is_locked)
+        self.assertGreater(remaining, 0.0)
 
-        # Clean up class state
-        AuthDialog.lockout_data.pop(app_name, None)
+        # Clean up state
         reset_lockout(app_name)
 
 

@@ -21,11 +21,11 @@ class EnrollmentWizard(QDialog):
         from utils.config_loader import get_config
         from ui.theme import is_system_dark_mode
         try:
-            _cfg_theme = get_config().get("behavior.theme", "system")
-            if _cfg_theme == "system":
-                self.theme_mode = "dark" if is_system_dark_mode() else "light"
+            _cfg_theme = get_config().get("behavior.theme", "light")
+            if _cfg_theme == "dark":
+                self.theme_mode = "dark"
             else:
-                self.theme_mode = _cfg_theme
+                self.theme_mode = "light"
         except Exception:
             self.theme_mode = "light"
         self.detector = None
@@ -64,7 +64,8 @@ class EnrollmentWizard(QDialog):
         c = get_colors(self.theme_mode)
         self.setStyleSheet(get_theme_qss(self.theme_mode))
         
-        self.setWindowFlags(Qt.WindowType.Dialog)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         # Outer layout
         window_layout = QVBoxLayout(self)
@@ -207,10 +208,12 @@ class EnrollmentWizard(QDialog):
         self.instruction_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.instruction_lbl)
 
+        from ui.theme import get_colors
+        c_init = get_colors(self.theme_mode)
         # Video Frame box
         self.camera_label = QLabel()
         self.camera_label.setFixedSize(360, 270)
-        self.camera_label.setStyleSheet("background-color: #1a1a1e; border: 1px solid #2d2d34; border-radius: 8px;")
+        self.camera_label.setStyleSheet(f"background-color: {c_init['CARD_NEUTRAL']}; border: 1px solid {c_init['BORDER_NEUTRAL']}; border-radius: 8px;")
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.camera_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -433,7 +436,9 @@ class EnrollmentWizard(QDialog):
             # Check if capture finished
             if len(self.embeddings) >= self.required_frames:
                 self.cleanup_camera()
-                self.avg_embedding = np.mean(self.embeddings, axis=0)
+                mean_emb = np.mean(self.embeddings, axis=0)
+                norm = np.linalg.norm(mean_emb)
+                self.avg_embedding = mean_emb / norm if norm > 0 else mean_emb
                 self.show_success_page()
                 
         except Exception as e:
@@ -546,5 +551,7 @@ class EnrollmentWizard(QDialog):
                 border-radius: 12px;
             }}
         """)
+        if hasattr(self, "camera_label") and self.camera_label:
+            self.camera_label.setStyleSheet(f"background-color: {c['CARD_NEUTRAL']}; border: 1px solid {c['BORDER_NEUTRAL']}; border-radius: 8px;")
         if hasattr(self, "title_bar") and self.title_bar:
             self.title_bar.apply_theme_dynamically()

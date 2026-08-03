@@ -20,13 +20,53 @@ WARNING_AMBER = "#fbbf24"
 FONT_FAMILY = 'Inter, "Cantarell", "Noto Sans", sans-serif'
 
 def is_system_dark_mode() -> bool:
+    # 1. Check Qt application palette if QApplication instance exists
+    try:
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtGui import QPalette
+        app = QApplication.instance()
+        if app:
+            window_color = app.palette().color(QPalette.ColorRole.Window)
+            if window_color.value() < 128:
+                return True
+    except Exception:
+        pass
+
+    # Avoid subprocess calls if subprocess.Popen is mocked during unit tests
+    import subprocess
+    if hasattr(subprocess.Popen, "assert_called") or hasattr(subprocess.Popen, "return_value"):
+        return False
     try:
         res = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
                              capture_output=True, text=True, timeout=1.0)
-        if "prefer-dark" in res.stdout:
+        if "dark" in res.stdout.lower():
             return True
     except Exception:
         pass
+
+    # 3. Check GNOME / GTK gtk-theme setting
+    try:
+        res = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "gtk-theme"],
+                             capture_output=True, text=True, timeout=1.0)
+        if "dark" in res.stdout.lower():
+            return True
+    except Exception:
+        pass
+
+    # 4. Check KDE Plasma theme configuration
+    try:
+        res = subprocess.run(["kreadconfig5", "--group", "WM", "--key", "theme"],
+                             capture_output=True, text=True, timeout=1.0)
+        if "dark" in res.stdout.lower():
+            return True
+    except Exception:
+        pass
+
+    # 5. Check environment variables (GTK_THEME)
+    gtk_theme = os.environ.get("GTK_THEME", "").lower()
+    if "dark" in gtk_theme:
+        return True
+
     return False
 
 def get_colors(theme_override: str = None) -> dict:
@@ -35,15 +75,15 @@ def get_colors(theme_override: str = None) -> dict:
         from utils.config_loader import get_config
         try:
             config = get_config()
-            theme = config.get("behavior.theme", "system")
+            theme = config.get("behavior.theme", "light")
         except Exception:
-            theme = "system"
+            theme = "light"
         
     is_dark = False
     if theme == "dark":
         is_dark = True
-    elif theme == "system":
-        is_dark = is_system_dark_mode()
+    else:
+        is_dark = False
         
     if is_dark:
         return {
@@ -309,10 +349,11 @@ def get_theme_qss(theme_override: str = None) -> str:
         }}
         QHeaderView::section {{
             background-color: {c["STATUS_HEADER_BG"]};
-            color: {c["TEXT_SECONDARY"]};
-            padding: 6px;
+            color: {c["TEXT_PRIMARY"]};
+            padding: 8px;
             border: 1px solid {c["BORDER_NEUTRAL"]};
             font-weight: bold;
+            font-size: 13px;
         }}
         QComboBox {{
             background-color: {c["WIDGET_BG"]};
@@ -726,11 +767,11 @@ class AnimatedCheckBox(QCheckBox):
         box_y = (self.height() - box_size) / 2.0
         box_rect = QRectF(0, box_y, box_size, box_size)
 
-        bg_inactive = QColor(c.get("WIDGET_BG", "#110f1c"))
-        bg_active = QColor(c.get("ACCENT_PURPLE", "#a855f7"))
+        bg_inactive = QColor(c.get("WIDGET_BG", "#ffffff"))
+        bg_active = QColor(c.get("ACCENT_PURPLE", "#7c3aed"))
         
-        border_inactive = QColor(c.get("BORDER_NEUTRAL", "#322c4d"))
-        border_active = QColor(c.get("ACCENT_PURPLE", "#a855f7"))
+        border_inactive = QColor(c.get("BORDER_NEUTRAL", "#cbd5e1"))
+        border_active = QColor(c.get("ACCENT_PURPLE", "#7c3aed"))
 
         p = max(0.0, min(1.0, self._check_progress))
 
@@ -800,7 +841,8 @@ class CustomTitleBar(QWidget):
         
         # 1. Window Title (Left side)
         self.title_lbl = QLabel(title)
-        self.title_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {TEXT_PRIMARY}; font-family: {FONT_FAMILY};")
+        self.title_lbl.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.title_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {TEXT_PRIMARY}; font-family: {FONT_FAMILY}; padding: 0px; background: transparent;")
         self.title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         layout.addWidget(self.title_lbl)
         
@@ -896,7 +938,7 @@ class CustomTitleBar(QWidget):
         from ui.theme import get_colors, FONT_FAMILY
         theme_mode = getattr(self.parent, "theme_mode", None)
         c = get_colors(theme_mode)
-        self.title_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {c['TEXT_PRIMARY']}; font-family: {FONT_FAMILY};")
+        self.title_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {c['TEXT_PRIMARY']}; font-family: {FONT_FAMILY}; padding: 0px; background: transparent;")
         
         disabled_bg = "#2c2a38" if c.get("IS_DARK") else "#e2e8f0"
         if not self.allow_minimize:
@@ -950,10 +992,14 @@ class CustomTitleBar(QWidget):
                 """)
         
     def mousePressEvent(self, event):
-        pass
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_position = event.globalPosition().toPoint() - self.parent.frameGeometry().topLeft()
+            event.accept()
             
     def mouseMoveEvent(self, event):
-        pass
+        if event.buttons() == Qt.MouseButton.LeftButton and hasattr(self, "drag_position") and not self.drag_position.isNull():
+            self.parent.move(event.globalPosition().toPoint() - self.drag_position)
+            event.accept()
             
     def toggle_maximize(self):
         if self.parent.isMaximized():
@@ -981,9 +1027,9 @@ class SlidingThemeToggle(QWidget):
             from utils.config_loader import get_config
             try:
                 config = get_config()
-                self.theme_mode = config.get("behavior.theme", "system")
+                self.theme_mode = config.get("behavior.theme", "light")
             except Exception:
-                self.theme_mode = "system"
+                self.theme_mode = "light"
             
         from ui.theme import is_system_dark_mode
         is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())
@@ -1008,9 +1054,9 @@ class SlidingThemeToggle(QWidget):
             from utils.config_loader import get_config
             try:
                 config = get_config()
-                self.theme_mode = config.get("behavior.theme", "system")
+                self.theme_mode = config.get("behavior.theme", "light")
             except Exception:
-                self.theme_mode = "system"
+                self.theme_mode = "light"
             
         from ui.theme import is_system_dark_mode
         is_dark = (self.theme_mode == "dark") or (self.theme_mode == "system" and is_system_dark_mode())

@@ -37,7 +37,7 @@ class Config:
                 logging.error(f"Error reading user config: {e}")
                 
         # Synchronize theme values across behavior and ui namespaces
-        theme_val = self.get("behavior.theme") or self.get("ui.theme") or "system"
+        theme_val = self.get("behavior.theme") or self.get("ui.theme") or "light"
         if "behavior" not in self.settings or not isinstance(self.settings["behavior"], dict):
             self.settings["behavior"] = {}
         if "ui" not in self.settings or not isinstance(self.settings["ui"], dict):

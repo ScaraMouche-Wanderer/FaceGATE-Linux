@@ -58,7 +58,8 @@ def verify_password(password: str) -> bool:
         
         # Attempt to decrypt the embeddings with AAD binding.
         from security.crypto_engine import build_aad
-        aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), iterations, salt)
+        has_kdf = "kdf" in envelope
+        aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), iterations, salt) if has_kdf else None
         try:
             decrypt(nonce, ciphertext, key, aad)
         except Exception:
@@ -105,7 +106,8 @@ def update_master_password(current_password: str | None, new_password: str) -> N
             
             key = derive_key(current_bytes, salt, iterations)
             from security.crypto_engine import build_aad
-            aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), iterations, salt)
+            has_kdf = "kdf" in envelope
+            aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), iterations, salt) if has_kdf else None
             try:
                 decrypted_bytes = decrypt(nonce, ciphertext, key, aad)
             except Exception:

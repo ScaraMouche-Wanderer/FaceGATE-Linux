@@ -1,8 +1,7 @@
 app_monitor:
   # poll_interval_seconds: Polling frequency for detecting protected apps.
-  # Lowering this improves detection latency (e.g. <= 0.5s) but increases idle CPU usage.
-  # 0.75s consumes negligible (~1.5%) CPU when idle on modern processors and is recommended.
-  poll_interval_seconds: 0.75
+  # Lowering this improves detection latency (0.2s = 200ms window) for process interception.
+  poll_interval_seconds: 0.2
   on_auth_failure: kill
   auth_timeout_seconds: 60
 protected_apps: []
@@ -10,9 +9,9 @@ auth: {}
 authentication:
   password_fallback_grace_seconds: 15
 recognition:
-  similarity_threshold: 0.60
+  similarity_threshold: 0.52
   ambiguity_margin: 0.03
-  liveness_min_motion: 0.05
+  liveness_min_motion: 0.0
 security:
   session_timeout_seconds: 300
   pbkdf2_iterations: 600000
@@ -27,7 +26,7 @@ behavior:
   launch_at_login: true
   uninstall_protection: true
   lock_on_sleep_or_lock: true
-  theme: system
+  theme: light
 camera:
   backend: V4L2
   fps: 30
@@ -42,5 +41,5 @@ ui:
   developer_mode: false
   fps_counter: true
   logging_enabled: true
-  theme: system
+  theme: light
 

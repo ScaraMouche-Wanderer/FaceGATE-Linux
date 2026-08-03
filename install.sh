@@ -3,7 +3,33 @@ set -e
 
 echo "=== FaceGate-Linux Installer ==="
 
-# 1. Verify Poetry is installed
+# Handle uninstall flag
+if [ "$1" == "--uninstall" ]; then
+    echo "Uninstalling FaceGate-Linux..."
+    if command -v facegate &> /dev/null; then
+        facegate --restore-launchers || true
+    elif [ -f "$HOME/.local/bin/facegate" ]; then
+        "$HOME/.local/bin/facegate" --restore-launchers || true
+    fi
+    echo "Stopping and disabling systemd service..."
+    systemctl --user stop facegate.service || true
+    systemctl --user disable facegate.service || true
+    rm -f "$HOME/.config/systemd/user/facegate.service"
+    systemctl --user daemon-reload || true
+    rm -f "$HOME/.local/bin/facegate"
+    echo "FaceGate-Linux successfully uninstalled and all launchers restored!"
+    exit 0
+fi
+
+if [ "$1" == "--restore-launchers" ]; then
+    if [ -f "$HOME/.local/bin/facegate" ]; then
+        "$HOME/.local/bin/facegate" --restore-launchers
+    else
+        echo "Error: facegate command not found in ~/.local/bin/facegate"
+        exit 1
+    fi
+    exit 0
+fi
 if ! command -v poetry &> /dev/null; then
     echo "Error: Poetry is not installed."
     echo "Please install Poetry first (e.g. via pipx or your system package manager) before running this script."

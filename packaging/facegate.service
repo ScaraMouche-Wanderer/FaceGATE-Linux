@@ -1,5 +1,7 @@
 [Unit]
 Description=FaceGate-Linux background lock daemon
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 ExecStart=%h/.local/bin/facegate --monitor

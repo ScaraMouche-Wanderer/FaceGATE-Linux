@@ -152,7 +152,7 @@ class TestCredentialStorePasswordVerification:
 
     def test_verify_correct_password(self, temp_embedding_paths):
         """verify_password() must return True for the correct password."""
-        from security.crypto_engine import derive_key, encrypt
+        from security.crypto_engine import derive_key, encrypt, build_aad
         from security.credential_store import verify_password
 
         password = "MySecurePass!123"
@@ -161,7 +161,8 @@ class TestCredentialStorePasswordVerification:
         key = derive_key(password.encode('utf-8'), salt, iterations)
 
         plaintext = json.dumps({}).encode('utf-8')
-        nonce, ciphertext = encrypt(plaintext, key)
+        aad = build_aad("pbkdf2_hmac_sha256", iterations, salt)
+        nonce, ciphertext = encrypt(plaintext, key, aad)
 
         envelope = {
             "kdf": "pbkdf2_hmac_sha256",
@@ -180,7 +181,7 @@ class TestCredentialStorePasswordVerification:
 
     def test_verify_wrong_password(self, temp_embedding_paths):
         """verify_password() must return False for incorrect password."""
-        from security.crypto_engine import derive_key, encrypt
+        from security.crypto_engine import derive_key, encrypt, build_aad
         from security.credential_store import verify_password
 
         correct_pwd = "CorrectPassword"
@@ -189,7 +190,8 @@ class TestCredentialStorePasswordVerification:
         key = derive_key(correct_pwd.encode('utf-8'), salt, iterations)
 
         plaintext = json.dumps({}).encode('utf-8')
-        nonce, ciphertext = encrypt(plaintext, key)
+        aad = build_aad("pbkdf2_hmac_sha256", iterations, salt)
+        nonce, ciphertext = encrypt(plaintext, key, aad)
 
         envelope = {
             "kdf": "pbkdf2_hmac_sha256",
@@ -235,6 +237,8 @@ class TestAdminFaceVerification:
     def test_verify_admin_face_states(self, mock_exists, mock_load, mock_run_sub, mock_dbus, mock_app_monitor, mock_tray):
         from core.monitor_main import FaceGateApplication
         from utils.config_loader import Config
+        from security.lockout_manager import reset_lockout
+        reset_lockout("test_reason")
 
         mock_config = Config()
         mock_config.settings = {

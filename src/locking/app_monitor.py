@@ -8,6 +8,25 @@ from PySide6.QtCore import QObject, Signal
 import psutil
 import hashlib
 
+# Processes that must NEVER be SIGSTOP'd/SIGKILL'd, even if a SHA-256 match
+# fires. This is a last-resort safety net for the "copied binary" heuristic
+# below: many unrelated apps (Electron/Chromium/Flatpak/AppImage runtimes in
+# particular) legitimately ship a byte-for-byte identical launcher binary,
+# so a hash match does NOT reliably mean "this is the same app the user
+# protected". Suspending one of these by mistake can freeze/kill core
+# session components, which is what produces symptoms like random app
+# crashes or the whole desktop session logging out.
+CRITICAL_PROCESS_DENYLIST = {
+    "gnome-shell", "mutter", "kwin_x11", "kwin_wayland", "plasmashell",
+    "xfwm4", "xfce4-session", "sway", "Xorg", "Xwayland", "weston",
+    "systemd", "systemd-logind", "dbus-daemon", "dbus-broker",
+    "gdm", "gdm3", "sddm", "lightdm", "pulseaudio", "pipewire",
+    "pipewire-pulse", "wireplumber", "NetworkManager", "polkitd",
+    "gvfsd", "gvfs-daemon", "ibus-daemon", "xdg-desktop-portal",
+    "xdg-desktop-portal-gnome", "xdg-desktop-portal-kde", "ssh-agent",
+    "gnome-keyring-daemon", "at-spi2-registryd",
+}
+
 def calculate_sha256(filepath):
     """Calculates SHA-256 checksum of the target file to detect copied binaries."""
     try:
@@ -163,9 +182,44 @@ class AppMonitor:
                                     if not use_cached_negative:
                                         proc_hash = calculate_sha256(real_exe)
                                         if proc_hash and proc_hash in self._hash_map:
-                                            match_app = self._hash_map[proc_hash]
+                                            candidate_app = self._hash_map[proc_hash]
+                                            # Defense in depth: a content hash match alone is not
+                                            # sufficient proof this is a copy of the SAME app -
+                                            # different apps can legitimately ship byte-identical
+                                            # launcher binaries (e.g. shared Electron/Chromium
+                                            # runtimes). Require the running process name to at
+                                            # least share the configured executable's basename
+                                            # before trusting the match; otherwise treat it as a
+                                            # coincidental collision and skip it.
+                                            configured_exec = str(candidate_app.get("executable", "")).lower()
+                                            if configured_exec and configured_exec in (name or "").lower():
+                                                match_app = candidate_app
+                                            else:
+                                                logging.warning(
+                                                    f"AppMonitor: SHA-256 matched protected app "
+                                                    f"'{candidate_app.get('id')}' but process name "
+                                                    f"'{name}' doesn't match executable "
+                                                    f"'{configured_exec}'. Treating as a hash "
+                                                    f"collision and ignoring (likely a shared "
+                                                    f"runtime binary, not a real match)."
+                                                )
+                                                self._negative_hash_cache[real_exe] = (mtime, size, time.time())
                                         else:
                                             self._negative_hash_cache[real_exe] = (mtime, size, time.time())
+
+                        # Safety net: never act on a match involving a critical
+                        # session/system process name, regardless of how the
+                        # match was made (canonical path or hash fallback).
+                        if match_app and name in CRITICAL_PROCESS_DENYLIST:
+                            logging.error(
+                                f"AppMonitor: SAFETY OVERRIDE - refusing to suspend critical "
+                                f"process '{name}' (PID: {pid}) even though it matched "
+                                f"protected app '{match_app.get('id')}'. This indicates a "
+                                f"false-positive match (likely a SHA-256 collision) and should "
+                                f"be reported."
+                            )
+                            self._not_suspicious_pids.add(proc_key)
+                            match_app = None
 
                         if match_app:
                             app_id = match_app.get("id")

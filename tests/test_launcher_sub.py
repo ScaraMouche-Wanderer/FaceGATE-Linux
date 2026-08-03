@@ -119,3 +119,63 @@ def test_get_installed_desktop_entries(tmp_path):
     assert apps[1]["name"] == "App One"
     assert apps[2]["name"] == "App Three"
     assert apps[3]["name"] == "App Two"
+
+def test_restore_substitution_and_manifest(tmp_path):
+    from locking.launcher_sub import apply_substitution, restore_substitution, load_manifest
+    
+    user_desktop_dir = str(tmp_path / "user_desktop")
+    backup_dir = str(tmp_path / "backup")
+    system_desktop_dir = str(tmp_path / "system_desktop")
+    manifest_file = str(tmp_path / "manifest.json")
+    
+    os.makedirs(system_desktop_dir, exist_ok=True)
+    sys_file = os.path.join(system_desktop_dir, "app1.desktop")
+    with open(sys_file, "w") as f:
+        f.write("[Desktop Entry]\nExec=ls\n")
+        
+    with patch("locking.launcher_sub.USER_DESKTOP_DIR", user_desktop_dir), \
+         patch("locking.launcher_sub.BACKUP_DIR", backup_dir), \
+         patch("locking.launcher_sub.MANIFEST_FILE", manifest_file), \
+         patch("locking.launcher_sub.SYSTEM_DESKTOP_DIRS", [system_desktop_dir]):
+         
+        # Apply substitution
+        apply_substitution([{"desktop_name": "app1.desktop"}])
+        user_file = os.path.join(user_desktop_dir, "app1.desktop")
+        assert os.path.exists(user_file)
+        
+        manifest = load_manifest()
+        assert "app1.desktop" in manifest
+        assert manifest["app1.desktop"]["protected"] is True
+
+        # Now restore substitution
+        restore_substitution([{"desktop_name": "app1.desktop"}])
+        assert not os.path.exists(user_file) # Restored to system default by removing user override
+        manifest = load_manifest()
+        assert manifest["app1.desktop"]["protected"] is False
+
+def test_emergency_restore_launchers(tmp_path):
+    from locking.launcher_sub import apply_substitution, emergency_restore_launchers
+    
+    user_desktop_dir = str(tmp_path / "user_desktop")
+    backup_dir = str(tmp_path / "backup")
+    system_desktop_dir = str(tmp_path / "system_desktop")
+    manifest_file = str(tmp_path / "manifest.json")
+    
+    os.makedirs(system_desktop_dir, exist_ok=True)
+    sys_file = os.path.join(system_desktop_dir, "app2.desktop")
+    with open(sys_file, "w") as f:
+        f.write("[Desktop Entry]\nExec=ls\n")
+        
+    with patch("locking.launcher_sub.USER_DESKTOP_DIR", user_desktop_dir), \
+         patch("locking.launcher_sub.BACKUP_DIR", backup_dir), \
+         patch("locking.launcher_sub.MANIFEST_FILE", manifest_file), \
+         patch("locking.launcher_sub.SYSTEM_DESKTOP_DIRS", [system_desktop_dir]):
+         
+        apply_substitution([{"desktop_name": "app2.desktop"}])
+        user_file = os.path.join(user_desktop_dir, "app2.desktop")
+        assert os.path.exists(user_file)
+
+        count = emergency_restore_launchers()
+        assert count >= 1
+        assert not os.path.exists(user_file)
+
