@@ -1,5 +1,7 @@
 import logging
 import ctypes
+import time
+import math
 import numpy as np
 
 # Preload libc and librt with RTLD_GLOBAL to resolve GLIBC symbol conflicts (__pointer_chk_guard) on Linux
@@ -78,6 +80,45 @@ class FaceDetectorWorker(QThread):
         self.running = False
         self.wait()
 
+def draw_tech_corner_reticle(img, bbox, color, text=""):
+    """
+    Draws sleek tech corner brackets and an animated vertical laser scan line.
+    """
+    import cv2
+    x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
+    w = max(1, x2 - x1)
+    h = max(1, y2 - y1)
+    c_len = min(22, max(8, int(min(w, h) * 0.22)))
+    thickness = 2
+    
+    # 4 Corner brackets
+    # Top-Left
+    cv2.line(img, (x1, y1), (x1 + c_len, y1), color, thickness)
+    cv2.line(img, (x1, y1), (x1, y1 + c_len), color, thickness)
+    # Top-Right
+    cv2.line(img, (x2, y1), (x2 - c_len, y1), color, thickness)
+    cv2.line(img, (x2, y1), (x2, y1 + c_len), color, thickness)
+    # Bottom-Left
+    cv2.line(img, (x1, y2), (x1 + c_len, y2), color, thickness)
+    cv2.line(img, (x1, y2), (x1, y2 - c_len), color, thickness)
+    # Bottom-Right
+    cv2.line(img, (x2, y2), (x2 - c_len, y2), color, thickness)
+    cv2.line(img, (x2, y2), (x2, y2 - c_len), color, thickness)
+
+    # Animated laser scan line sweeping vertically over the face
+    sweep_phase = (math.sin(time.time() * 3.0) + 1.0) / 2.0
+    scan_y = int(y1 + sweep_phase * h)
+    scan_y = max(y1, min(y2, scan_y))
+    cv2.line(img, (x1 + 2, scan_y), (x2 - 2, scan_y), color, 1, cv2.LINE_AA)
+
+    # Label text with clean background pill
+    if text:
+        (text_w, text_h), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        lbl_y1 = max(0, y1 - 22)
+        lbl_y2 = max(text_h + 4, y1 - 4)
+        cv2.rectangle(img, (x1, lbl_y1), (x1 + text_w + 10, lbl_y2), (20, 20, 30), cv2.FILLED)
+        cv2.putText(img, text, (x1 + 5, lbl_y2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+
 def convert_cv_to_pixmap(frame: "np.ndarray", width: int = 360, height: int = 270) -> QPixmap:
     """
     Utility to convert an OpenCV BGR frame to a Qt QPixmap.
@@ -124,7 +165,6 @@ class AuthDialog(QDialog):
         self.detector = None
         self.camera_worker = None
         
-        from utils.config_loader import get_config
         self.grace_period_ms = int(get_config().get("authentication.password_fallback_grace_seconds", 15)) * 1000
         
         self.init_ui()
@@ -472,14 +512,12 @@ class AuthDialog(QDialog):
             return
 
         # Check for dark frame (e.g. physical camera privacy shutter closed or dim lighting)
+        from ui.theme import get_colors
+        c = get_colors(self.theme_mode)
         if frame is not None and frame.mean() < 15.0:
-            from ui.theme import get_colors
-            c = get_colors()
             self.status_label.setText("⚠️ Camera is dark — open camera cover or turn on light")
             self.status_label.setStyleSheet(f"color: {c['WARNING_AMBER']}; font-size: 13px; font-weight: bold;")
         else:
-            from ui.theme import get_colors
-            c = get_colors()
             self.status_label.setText("Position your face in the camera view...")
             self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
 
@@ -540,9 +578,8 @@ class AuthDialog(QDialog):
                 if score > 0:
                     text += f" ({score:.2f})"
             
-            # Draw bounding box and label
-            cv2.rectangle(display_frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
-            cv2.putText(display_frame, text, (bbox[0], bbox[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            # Draw sleek reticle bounding box and label
+            draw_tech_corner_reticle(display_frame, bbox, color, text)
 
         # Update preview with overlays
         pixmap = convert_cv_to_pixmap(display_frame, 360, 270)
