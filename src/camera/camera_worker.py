@@ -6,18 +6,24 @@ import time
 from PySide6.QtCore import QObject, Signal
 from utils.config_loader import get_config
 
-def is_ir_frame(frame: np.ndarray) -> bool:
+def is_ir_frame(frame: np.ndarray, threshold: float = None) -> bool:
     """
     Heuristical check to determine if a frame is near-grayscale (like an IR camera).
     Compares standard deviation / mean differences between color channels.
     """
     if frame is None or len(frame.shape) < 3:
         return True
+    if threshold is None:
+        try:
+            config = get_config()
+            threshold = float(config.get("camera.ir_color_variance_threshold", 5.0))
+        except Exception:
+            threshold = 5.0
     b, g, r = cv2.split(frame)
     diff_rg = np.abs(r.astype(int) - g.astype(int))
     diff_gb = np.abs(g.astype(int) - b.astype(int))
     mean_diff = (np.mean(diff_rg) + np.mean(diff_gb)) / 2.0
-    return mean_diff < 5.0
+    return mean_diff < threshold
 
 def detect_camera_device() -> int:
     """
