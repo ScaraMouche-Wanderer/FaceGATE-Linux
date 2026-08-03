@@ -1,9 +1,9 @@
 # FaceGate-Linux 🛡️👤
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v1.0.0-blue?style=for-the-badge" alt="Version 1.0.0">
+  <img src="https://img.shields.io/badge/version-v1.1.0-blue?style=for-the-badge" alt="Version 1.1.0">
   <img src="https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge&logo=pytest" alt="Build Passing">
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=for-the-badge&logo=python" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue?style=for-the-badge&logo=python" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/crypto-AES--256--GCM-purple?style=for-the-badge" alt="AES-256-GCM">
   <img src="https://img.shields.io/badge/gui-PySide6%2FQt6-orange?style=for-the-badge&logo=qt" alt="PySide6 / Qt6">
   <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License MIT">
