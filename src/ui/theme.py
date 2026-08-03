@@ -1208,3 +1208,101 @@ def style_themed_label(label, color_key: str, extra_css: str = ""):
 
 def style_heading(label, size: int = 20):
     style_themed_label(label, "TEXT_PRIMARY", f"font-size: {size}px; font-weight: bold;")
+
+
+from PySide6.QtCore import QObject, QEvent, QRect, QPoint
+
+class WindowDragResizeFilter(QObject):
+    """
+    Event filter providing smooth mouse edge/corner resizing and titlebar moving
+    for frameless translucent windows with rounded corners.
+    """
+    EDGE_MARGIN = 8
+
+    def __init__(self, window: QWidget):
+        super().__init__(window)
+        self.window = window
+        self.resizing = False
+        self.resize_edges = ""
+        self.drag_start_pos = QPoint()
+        self.window_start_geo = QRect()
+        self.window.setMouseTracking(True)
+        if hasattr(self.window, "main_container") and self.window.main_container:
+            self.window.main_container.setMouseTracking(True)
+            self.window.main_container.installEventFilter(self)
+        self.window.installEventFilter(self)
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseMove:
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            if self.resizing:
+                self._handle_resize(event.globalPosition().toPoint())
+                return True
+            else:
+                edges = self._get_edges(pos)
+                self._update_cursor(edges)
+                return False
+
+        elif event.type() == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton:
+                pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+                edges = self._get_edges(pos)
+                if edges:
+                    self.resizing = True
+                    self.resize_edges = edges
+                    self.drag_start_pos = event.globalPosition().toPoint()
+                    self.window_start_geo = self.window.geometry()
+                    return True
+
+        elif event.type() == QEvent.Type.MouseButtonRelease:
+            if event.button() == Qt.MouseButton.LeftButton and self.resizing:
+                self.resizing = False
+                self.window.unsetCursor()
+                return True
+
+        return super().eventFilter(obj, event)
+
+    def _get_edges(self, pos: QPoint) -> str:
+        rect = self.window.rect()
+        top = pos.y() <= self.EDGE_MARGIN
+        bottom = pos.y() >= rect.height() - self.EDGE_MARGIN
+        left = pos.x() <= self.EDGE_MARGIN
+        right = pos.x() >= rect.width() - self.EDGE_MARGIN
+
+        edges = ""
+        if top: edges += "T"
+        if bottom: edges += "B"
+        if left: edges += "L"
+        if right: edges += "R"
+        return edges
+
+    def _update_cursor(self, edges: str):
+        if edges in ("TL", "BR"):
+            self.window.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        elif edges in ("TR", "BL"):
+            self.window.setCursor(Qt.CursorShape.SizeBDiagCursor)
+        elif "L" in edges or "R" in edges:
+            self.window.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif "T" in edges or "B" in edges:
+            self.window.setCursor(Qt.CursorShape.SizeVertCursor)
+        else:
+            self.window.unsetCursor()
+
+    def _handle_resize(self, global_pos: QPoint):
+        diff = global_pos - self.drag_start_pos
+        geo = QRect(self.window_start_geo)
+        min_w = self.window.minimumWidth() or 300
+        min_h = self.window.minimumHeight() or 200
+
+        if "R" in self.resize_edges:
+            geo.setWidth(max(min_w, self.window_start_geo.width() + diff.x()))
+        if "B" in self.resize_edges:
+            geo.setHeight(max(min_h, self.window_start_geo.height() + diff.y()))
+        if "L" in self.resize_edges:
+            new_w = max(min_w, self.window_start_geo.width() - diff.x())
+            geo.setLeft(self.window_start_geo.right() - new_w)
+        if "T" in self.resize_edges:
+            new_h = max(min_h, self.window_start_geo.height() - diff.y())
+            geo.setTop(self.window_start_geo.bottom() - new_h)
+
+        self.window.setGeometry(geo)

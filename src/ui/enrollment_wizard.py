@@ -80,9 +80,11 @@ class EnrollmentWizard(QDialog):
             QWidget#mainContainer {{
                 background-color: {c["BG_NEUTRAL"]};
                 border: 1px solid {c["BORDER_NEUTRAL"]};
-                border-radius: 12px;
+                border-radius: 14px;
             }}
         """)
+        from ui.theme import WindowDragResizeFilter
+        self.drag_filter = WindowDragResizeFilter(self)
         
         # Shadow disabled (server-side decorations handle shadows now)
         self.shadow = None

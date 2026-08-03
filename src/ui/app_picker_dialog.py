@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QLabel
+    QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QLabel, QWidget
 )
 from PySide6.QtCore import Qt, QSize
 from utils.desktop_entry_scanner import get_installed_desktop_entries
@@ -14,15 +14,42 @@ class AppPickerDialog(QDialog):
 
     def init_ui(self):
         self.setWindowTitle("Add Applications to Protect")
-        self.setFixedSize(450, 500)
+        self.setFixedSize(450, 520)
         self.setModal(True)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        from ui.theme import get_theme_qss, style_heading
+        from ui.theme import get_theme_qss, get_colors, style_heading, CustomTitleBar, WindowDragResizeFilter
+        c = get_colors()
         self.setStyleSheet(get_theme_qss())
 
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
+        window_layout = QVBoxLayout(self)
+        window_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.main_container = QWidget()
+        self.main_container.setObjectName("mainContainer")
+        self.main_container.setStyleSheet(f"""
+            QWidget#mainContainer {{
+                background-color: {c["BG_NEUTRAL"]};
+                border: 1px solid {c["BORDER_NEUTRAL"]};
+                border-radius: 14px;
+            }}
+        """)
+        window_layout.addWidget(self.main_container)
+        self.drag_filter = WindowDragResizeFilter(self)
+
+        container_layout = QVBoxLayout(self.main_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        self.title_bar = CustomTitleBar(self, title="Add Applications to Protect", allow_maximize=False, allow_minimize=False)
+        container_layout.addWidget(self.title_bar)
+
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
+        layout.setContentsMargins(20, 16, 20, 20)
         layout.setSpacing(12)
+        container_layout.addWidget(content_widget)
 
         # Header Info
         header_label = QLabel("Select an installed application to protect:")
@@ -57,8 +84,6 @@ class AppPickerDialog(QDialog):
         btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.ok_btn)
         layout.addLayout(btn_layout)
-
-        self.setLayout(layout)
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):

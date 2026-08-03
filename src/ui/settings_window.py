@@ -123,9 +123,11 @@ class ChangePasswordDialog(QDialog):
             QWidget#mainContainer {{
                 background-color: {c["BG_NEUTRAL"]};
                 border: 1px solid {c["BORDER_NEUTRAL"]};
-                border-radius: 12px;
+                border-radius: 14px;
             }}
         """)
+        from ui.theme import WindowDragResizeFilter
+        self.drag_filter = WindowDragResizeFilter(self)
         window_layout.addWidget(self.main_container)
 
         container_layout = QVBoxLayout(self.main_container)
@@ -337,9 +339,11 @@ class FaceVerificationTestDialog(QDialog):
             QWidget#mainContainer {{
                 background-color: {c["BG_NEUTRAL"]};
                 border: 1px solid {c["BORDER_NEUTRAL"]};
-                border-radius: 12px;
+                border-radius: 14px;
             }}
         """)
+        from ui.theme import WindowDragResizeFilter
+        self.drag_filter = WindowDragResizeFilter(self)
         window_layout.addWidget(self.main_container)
         
         container_layout = QVBoxLayout(self.main_container)
@@ -538,10 +542,10 @@ class SettingsWindow(QDialog):
             self.resize(840, 580)
             self.setMinimumSize(800, 540)
             
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        from ui.theme import get_theme_qss, get_sidebar_qss, get_colors, CustomTitleBar
+        from ui.theme import get_theme_qss, get_sidebar_qss, get_colors, CustomTitleBar, WindowDragResizeFilter
         c = get_colors(self.theme_mode)
         # Set base theme styling
         self.setStyleSheet(get_theme_qss(self.theme_mode) + get_sidebar_qss(c))
@@ -557,9 +561,10 @@ class SettingsWindow(QDialog):
             QWidget#mainContainer {{
                 background-color: {c["BG_NEUTRAL"]};
                 border: 1px solid {c["BORDER_NEUTRAL"]};
-                border-radius: 12px;
+                border-radius: 14px;
             }}
         """)
+        self.drag_filter = WindowDragResizeFilter(self)
         
         # Shadow disabled (server-side decorations handle shadows now)
         self.shadow = None
