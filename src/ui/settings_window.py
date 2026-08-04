@@ -33,7 +33,7 @@ from ui.theme import AnimatedComboBox, AnimatedCheckBox, AnimatedSpinBox, Animat
 class AnimatedSidebar(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(190)
+        self.setFixedWidth(205)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.anim = None
@@ -49,13 +49,13 @@ class AnimatedSidebar(QListWidget):
         self.anim = QPropertyAnimation(self, b"minimumWidth")
         self.anim.setDuration(220)
         self.anim.setStartValue(self.width())
-        self.anim.setEndValue(215)
+        self.anim.setEndValue(225)
         self.anim.setEasingCurve(QEasingCurve.Type.OutQuad)
         
         self.max_anim = QPropertyAnimation(self, b"maximumWidth")
         self.max_anim.setDuration(220)
         self.max_anim.setStartValue(self.width())
-        self.max_anim.setEndValue(215)
+        self.max_anim.setEndValue(225)
         self.max_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
         
         self.anim.start()
@@ -71,13 +71,13 @@ class AnimatedSidebar(QListWidget):
         self.anim = QPropertyAnimation(self, b"minimumWidth")
         self.anim.setDuration(220)
         self.anim.setStartValue(self.width())
-        self.anim.setEndValue(190)
+        self.anim.setEndValue(205)
         self.anim.setEasingCurve(QEasingCurve.Type.OutQuad)
         
         self.max_anim = QPropertyAnimation(self, b"maximumWidth")
         self.max_anim.setDuration(220)
         self.max_anim.setStartValue(self.width())
-        self.max_anim.setEndValue(190)
+        self.max_anim.setEndValue(205)
         self.max_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
         
         self.anim.start()
@@ -702,9 +702,9 @@ class SettingsWindow(QDialog):
         scroll.viewport().setStyleSheet("background: transparent;")
         widget.setStyleSheet("background: transparent;")
         from ui.theme import get_colors as _gc2
-        _c2 = _gc2()
-        _scrollbar_bg = "#4c3d99" if _c2.get("IS_DARK") else "#c7d2fe"
-        _scrollbar_hover = "#7c6ecf" if _c2.get("IS_DARK") else "#818cf8"
+        _c2 = _gc2(getattr(self, "theme_mode", None))
+        _scrollbar_bg = _c2.get("ACCENT_PURPLE_PRESSED", _c2.get("ACCENT_PURPLE")) if _c2.get("IS_DARK") else _c2.get("BORDER_NEUTRAL")
+        _scrollbar_hover = _c2.get("ACCENT_PURPLE") if _c2.get("IS_DARK") else _c2.get("ACCENT_PURPLE_HOVER")
         scroll.setStyleSheet(f"""
             QScrollArea, QScrollArea > QWidget, QAbstractScrollArea {{
                 background: transparent;
@@ -1110,6 +1110,40 @@ class SettingsWindow(QDialog):
         theme_layout.addStretch()
         startup_layout.addLayout(theme_layout)
 
+        # Color Palette Selection
+        palette_layout = QHBoxLayout()
+        palette_lbl = QLabel("Color Palette:")
+        palette_lbl.setStyleSheet("font-size: 13px;")
+        palette_lbl.setProperty("secondary", True)
+        palette_lbl.setWordWrap(True)
+        self.palette_combo = AnimatedComboBox()
+        from ui.theme import PALETTES
+        for pal_key, pal_info in PALETTES.items():
+            self.palette_combo.addItem(pal_info["label"], pal_key)
+        self.palette_combo.currentIndexChanged.connect(self.handle_palette_changed)
+        palette_layout.addWidget(palette_lbl)
+        palette_layout.addWidget(self.palette_combo)
+        palette_layout.addStretch()
+        startup_layout.addLayout(palette_layout)
+
+        # Tray Icon Style Selection
+        tray_icon_layout = QHBoxLayout()
+        tray_icon_lbl = QLabel("System Tray Icon:")
+        tray_icon_lbl.setStyleSheet("font-size: 13px;")
+        tray_icon_lbl.setProperty("secondary", True)
+        tray_icon_lbl.setWordWrap(True)
+        self.tray_icon_combo = AnimatedComboBox()
+        from ui.tray import TRAY_ICON_STYLES, TRAY_ICON_STYLE_LABELS
+        from ui.theme import get_colors as _get_colors_for_tray_preview
+        _preview_color = _get_colors_for_tray_preview(self.theme_mode).get("ACCENT_PURPLE", "#c2410c")
+        for style_key, renderer in TRAY_ICON_STYLES.items():
+            self.tray_icon_combo.addItem(renderer(_preview_color), TRAY_ICON_STYLE_LABELS.get(style_key, style_key), style_key)
+        self.tray_icon_combo.currentIndexChanged.connect(self.handle_tray_icon_style_changed)
+        tray_icon_layout.addWidget(tray_icon_lbl)
+        tray_icon_layout.addWidget(self.tray_icon_combo)
+        tray_icon_layout.addStretch()
+        startup_layout.addLayout(tray_icon_layout)
+
         layout.addWidget(self.card_startup)
 
         # --- 2. Locking Policy Group ---
@@ -1336,23 +1370,12 @@ class SettingsWindow(QDialog):
         from ui.theme import get_card_qss, style_heading, style_themed_label, get_colors, AnimatedButton, PulsingStatusDot
         c = get_colors(self.theme_mode)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("background: transparent; border: none;")
-        self._scroll_areas.append(scroll)
-
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setContentsMargins(0, 0, 10, 0)
-        scroll_layout.setSpacing(16)
-
         # Header Title
         header = QLabel("About FaceGate")
         style_heading(header, 20)
         header.setProperty("heading_size", 20)
         self._themed_labels.append((header, "TEXT_PRIMARY"))
-        scroll_layout.addWidget(header)
+        layout.addWidget(header)
 
         # 1. Main Banner Card
         self.card_about = QWidget()
@@ -1385,7 +1408,7 @@ class SettingsWindow(QDialog):
         self._themed_labels.append((desc, "TEXT_SECONDARY"))
         card_layout.addWidget(desc)
 
-        scroll_layout.addWidget(self.card_about)
+        layout.addWidget(self.card_about)
 
         # 2. System Health & Runtime Diagnostics Card
         self.card_diag = QWidget()
@@ -1465,7 +1488,7 @@ class SettingsWindow(QDialog):
         grid.addWidget(val_env, 3, 1)
 
         diag_layout.addLayout(grid)
-        scroll_layout.addWidget(self.card_diag)
+        layout.addWidget(self.card_diag)
 
         # 3. Live Hardware & AI Benchmark Card
         self.card_bench = QWidget()
@@ -1520,7 +1543,7 @@ class SettingsWindow(QDialog):
         bench_grid.addWidget(self.val_scan_b, 2, 1)
 
         bench_layout.addLayout(bench_grid)
-        scroll_layout.addWidget(self.card_bench)
+        layout.addWidget(self.card_bench)
 
         # 4. Security Inspector & Health Rating Card
         self.card_sec = QWidget()
@@ -1555,7 +1578,7 @@ class SettingsWindow(QDialog):
         sec_grid.addWidget(self.lbl_sec_summary)
         sec_layout.addLayout(sec_grid)
 
-        scroll_layout.addWidget(self.card_sec)
+        layout.addWidget(self.card_sec)
 
         # 5. Interactive Action Bar & Operations Controls
         self.card_actions = QWidget()
@@ -1587,11 +1610,10 @@ class SettingsWindow(QDialog):
         act_layout.addWidget(self.btn_health)
         act_layout.addStretch()
 
-        scroll_layout.addWidget(self.card_actions)
-        scroll.setWidget(scroll_content)
-        layout.addWidget(scroll)
+        layout.addWidget(self.card_actions)
+        layout.addStretch()
 
-        self.tab_stack.addWidget(page)
+        self.tab_stack.addWidget(self.wrap_in_scroll_area(page))
 
         # Trigger initial status refresh
         QTimer.singleShot(100, lambda: self.run_diagnostics_health_check(show_dialog=False))
@@ -1919,7 +1941,22 @@ class SettingsWindow(QDialog):
         if theme_idx >= 0:
             self.theme_combo.setCurrentIndex(theme_idx)
         self.theme_combo.blockSignals(False)
+        
+        self.palette_combo.blockSignals(True)
+        pal_val = self.config.get("behavior.color_palette", "iron_ember")
+        pal_idx = self.palette_combo.findData(pal_val)
+        if pal_idx >= 0:
+            self.palette_combo.setCurrentIndex(pal_idx)
+        self.palette_combo.blockSignals(False)
+
         self.apply_theme_dynamically()
+
+        self.tray_icon_combo.blockSignals(True)
+        tray_style_val = self.config.get("behavior.tray_icon_style", "circle")
+        tray_style_idx = self.tray_icon_combo.findData(tray_style_val)
+        if tray_style_idx >= 0:
+            self.tray_icon_combo.setCurrentIndex(tray_style_idx)
+        self.tray_icon_combo.blockSignals(False)
         
         self.sleep_lock_check.setChecked(self.config.get("behavior.lock_on_sleep_or_lock", True))
         self.lock_settings_check.setChecked(self.config.get("security.lock_settings_window", True))
@@ -2011,7 +2048,7 @@ class SettingsWindow(QDialog):
         hover_n = c.get("HOVER_NEUTRAL", c.get("LIST_ITEM_HOVER", "#312e43"))
         text_p = c.get("TEXT_PRIMARY", "#e2e1e9")
         text_s = c.get("TEXT_SECONDARY", "#a5a3b4")
-        accent_p = c.get("ACCENT_PURPLE", "#a855f7")
+        accent_p = c.get("ACCENT_PURPLE", "#f97316")
 
         for username in usernames:
             is_admin = (username == admin_user)
@@ -2078,7 +2115,7 @@ class SettingsWindow(QDialog):
                 row_layout.addWidget(make_admin_btn)
 
             reenroll_btn = QPushButton("Re-Enroll")
-            cancel_bg = c.get("CANCEL_BTN_BG", "#25213b")
+            cancel_bg = c.get("CANCEL_BTN_BG", "#2a2419")
             reenroll_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {cancel_bg};
@@ -2662,11 +2699,81 @@ class SettingsWindow(QDialog):
             self.show_restart_banner()
             logging.info(f"Staged app protection addition: '{new_app['id']}'")
 
+    def handle_tray_icon_style_changed(self):
+        if getattr(self, "_loading", False):
+            return
+        new_style = self.tray_icon_combo.itemData(self.tray_icon_combo.currentIndex())
+        self.config.set("behavior.tray_icon_style", new_style)
+        self.config.save()
+
+        # Apply live to the running daemon's tray, mirroring the pattern used
+        # elsewhere (see verify_settings_action / immediate app removal) so the
+        # user sees the new icon without restarting FaceGate.
+        try:
+            from PySide6.QtDBus import QDBusConnection, QDBusInterface
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected():
+                interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
+                if interface.isValid():
+                    interface.call("ReloadConfig")
+                    logging.info("Sent D-Bus ReloadConfig signal to daemon after tray icon style change.")
+        except Exception as e:
+            logging.warning(f"Could not send ReloadConfig D-Bus signal: {e}")
+
+        self._has_pending_changes = True
+        logging.info(f"Tray icon style changed to '{new_style}'.")
+
+    def refresh_tray_icon_preview_icons(self):
+        if hasattr(self, "tray_icon_combo") and self.tray_icon_combo:
+            current_style = self.tray_icon_combo.itemData(self.tray_icon_combo.currentIndex())
+            self.tray_icon_combo.blockSignals(True)
+            self.tray_icon_combo.clear()
+            from ui.tray import TRAY_ICON_STYLES, TRAY_ICON_STYLE_LABELS
+            from ui.theme import get_colors
+            _preview_color = get_colors(self.theme_mode).get("ACCENT_PURPLE", "#c2410c")
+            for style_key, renderer in TRAY_ICON_STYLES.items():
+                self.tray_icon_combo.addItem(renderer(_preview_color), TRAY_ICON_STYLE_LABELS.get(style_key, style_key), style_key)
+            idx = self.tray_icon_combo.findData(current_style)
+            if idx >= 0:
+                self.tray_icon_combo.setCurrentIndex(idx)
+            self.tray_icon_combo.blockSignals(False)
+
+    def handle_palette_changed(self):
+        if getattr(self, "_loading", False):
+            return
+        new_palette = self.palette_combo.itemData(self.palette_combo.currentIndex())
+        self.config.set("behavior.color_palette", new_palette)
+        self.config.save()
+        self.refresh_tray_icon_preview_icons()
+        self.apply_theme_dynamically()
+        self._loading = True
+        self.populate_enrolled_users()
+        self.populate_apps_table()
+        self.populate_logs_table()
+        self.populate_intruder_gallery()
+        self._update_sidebar_enrolled_count()
+        self._loading = False
+
+        try:
+            from PySide6.QtDBus import QDBusConnection, QDBusInterface
+            bus = QDBusConnection.sessionBus()
+            if bus.isConnected():
+                interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
+                if interface.isValid():
+                    interface.call("ReloadConfig")
+                    logging.info("Sent D-Bus ReloadConfig signal to daemon after palette change.")
+        except Exception as e:
+            logging.warning(f"Could not send ReloadConfig D-Bus signal: {e}")
+
+        self._has_pending_changes = True
+        logging.info(f"Color palette changed to '{new_palette}'.")
+
     def handle_theme_changed(self):
         new_theme = self.theme_combo.itemData(self.theme_combo.currentIndex())
         self.theme_mode = new_theme
         self.config.set("behavior.theme", new_theme)
         self.config.set("ui.theme", new_theme)
+        self.refresh_tray_icon_preview_icons()
         self.apply_theme_dynamically()
         self._loading = True  # Suppress restart banner during theme refresh
         self.populate_enrolled_users()
@@ -2706,7 +2813,13 @@ class SettingsWindow(QDialog):
                         bus
                     )
                     if interface.isValid():
-                        raw_reply = interface.call("RequestAuth", reason)
+                        from PySide6.QtDBus import QDBus
+                        raw_reply = interface.callWithArgumentList(
+                            QDBus.CallMode.Block,
+                            "RequestAuth",
+                            [reason],
+                            300000
+                        )
                         reply = QDBusReply(raw_reply)
                         if reply.isValid():
                             success = reply.value()
@@ -3218,8 +3331,8 @@ class SettingsWindow(QDialog):
             """)
 
         # Re-theme scrollbars for all scroll areas
-        _scrollbar_bg = "#4c3d99" if c.get("IS_DARK") else "#c7d2fe"
-        _scrollbar_hover = "#7c6ecf" if c.get("IS_DARK") else "#818cf8"
+        _scrollbar_bg = c.get("ACCENT_PURPLE_PRESSED", c.get("ACCENT_PURPLE")) if c.get("IS_DARK") else c.get("BORDER_NEUTRAL")
+        _scrollbar_hover = c.get("ACCENT_PURPLE") if c.get("IS_DARK") else c.get("ACCENT_PURPLE_HOVER")
         for scroll in getattr(self, "_scroll_areas", []):
             try:
                 scroll.setStyleSheet(f"""

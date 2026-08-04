@@ -698,6 +698,8 @@ class AuthDialog(QDialog):
         self.setMinimumSize(360, 265)
         self.resize(400, 290)
         self.stack.setCurrentIndex(1)
+        self.raise_()
+        self.activateWindow()
         self.password_input.setFocus()
 
     def handle_password_fallback(self):

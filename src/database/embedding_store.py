@@ -23,33 +23,129 @@ def _get_ram_key_file() -> str:
     os.chmod(fallback_dir, 0o700)
     return os.path.join(fallback_dir, "facegate.key")
 
+def _get_machine_bound_key() -> bytes:
+    """
+    Derives a machine-and-user-bound master key for local vault key encryption.
+    """
+    import hashlib
+    machine_id = ""
+    for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"]:
+        if os.path.exists(path):
+            try:
+                with open(path, "r") as f:
+                    machine_id = f.read().strip()
+                if machine_id:
+                    break
+            except Exception:
+                pass
+    if not machine_id:
+        machine_id = "facegate-fallback-machine-id"
+
+    seed = f"facegate:{machine_id}:{os.getuid()}:{os.path.expanduser('~')}".encode('utf-8')
+    from security.crypto_engine import derive_key
+    salt = b"facegate-vault-salt-v1"
+    return derive_key(seed, salt, iterations=10000)
+
+def _save_persistent_vault_key(key: bytes):
+    """
+    Saves the derived key to system keyring and machine-bound encrypted storage.
+    """
+    key_bytes = bytes(key) if isinstance(key, (bytes, bytearray)) else key
+
+    # 1. Save to system keyring if keyring module is available
+    try:
+        import keyring
+        keyring.set_password("facegate", "vault_key", key_bytes.hex())
+        logging.info("Saved vault encryption key to system keyring.")
+    except Exception as e:
+        logging.debug(f"System keyring save skipped: {e}")
+
+    # 2. Save to machine-bound encrypted file (~/.config/facegate/.vault_key.enc)
+    try:
+        vault_key_file = os.path.expanduser("~/.config/facegate/.vault_key.enc")
+        os.makedirs(os.path.dirname(vault_key_file), mode=0o700, exist_ok=True)
+        os.chmod(os.path.dirname(vault_key_file), 0o700)
+
+        m_key = _get_machine_bound_key()
+        from security.crypto_engine import encrypt
+        nonce, ciphertext = encrypt(key_bytes, m_key)
+        payload = {
+            "nonce": base64.b64encode(nonce).decode('utf-8'),
+            "ciphertext": base64.b64encode(ciphertext).decode('utf-8')
+        }
+        
+        tmp_file = vault_key_file + ".tmp"
+        fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            json.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_file, 0o600)
+        os.replace(tmp_file, vault_key_file)
+        logging.info(f"Persisted machine-bound vault key file: {vault_key_file}")
+    except Exception as e:
+        logging.warning(f"Could not persist machine-bound vault key file: {e}")
+
+def _load_persistent_vault_key() -> bytes | None:
+    """
+    Attempts to restore the vault key from system keyring or machine-bound encrypted storage.
+    """
+    # 1. Try system keyring
+    try:
+        import keyring
+        val = keyring.get_password("facegate", "vault_key")
+        if val:
+            b = bytes.fromhex(val)
+            if len(b) == 32:
+                logging.info("Restored vault encryption key from system keyring.")
+                return b
+    except Exception as e:
+        logging.debug(f"System keyring lookup skipped: {e}")
+
+    # 2. Try machine-bound encrypted file
+    try:
+        vault_key_file = os.path.expanduser("~/.config/facegate/.vault_key.enc")
+        if os.path.exists(vault_key_file):
+            with open(vault_key_file, 'r') as f:
+                payload = json.load(f)
+            nonce = base64.b64decode(payload["nonce"])
+            ciphertext = base64.b64decode(payload["ciphertext"])
+            m_key = _get_machine_bound_key()
+            from security.crypto_engine import decrypt
+            decrypted = decrypt(nonce, ciphertext, m_key)
+            if len(decrypted) == 32:
+                logging.info("Restored vault encryption key from machine-bound file.")
+                return decrypted
+    except Exception as e:
+        logging.error(f"Error restoring machine-bound vault key file: {e}")
+
+    return None
+
 def set_cached_key(key: bytes):
     """
-    Caches the derived key in process memory and user RAM tmpfs (/run/user/{uid}/facegate.key).
+    Caches the derived key in process memory, user RAM tmpfs, system keyring, and machine-bound storage.
     """
     global _cached_key
     with _cached_key_lock:
         _cached_key = bytearray(key) if isinstance(key, bytes) else key
 
     # Write key to user-private RAM-backed tmpfs file (0600 permissions).
-    # The file is created with mode 0600 atomically via os.open() so there is
-    # no window (as there would be with open() followed by a separate
-    # os.chmod()) during which the raw key is readable at the process umask.
     try:
         ram_file = _get_ram_key_file()
         key_bytes = bytes(key) if isinstance(key, (bytes, bytearray)) else key
         fd = os.open(ram_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, 'wb') as f:
             f.write(key_bytes)
-        # Belt-and-braces: if the file already existed with looser
-        # permissions (e.g. left over from a pre-fix version), tighten it.
         os.chmod(ram_file, 0o600)
     except Exception as e:
         logging.warning(f"Could not persist RAM key file: {e}")
 
+    # Save to persistent storage (system keyring / machine-bound file)
+    _save_persistent_vault_key(key)
+
 def get_cached_key() -> bytes:
     """
-    Retrieves the cached key from process memory or user RAM tmpfs.
+    Retrieves the cached key from process memory, user RAM tmpfs, or persistent storage.
     """
     global _cached_key
     with _cached_key_lock:
@@ -69,11 +165,27 @@ def get_cached_key() -> bytes:
     except Exception as e:
         logging.error(f"Error reading RAM key file: {e}")
 
+    # Check persistent storage (system keyring / machine-bound file)
+    p_key = _load_persistent_vault_key()
+    if p_key:
+        with _cached_key_lock:
+            _cached_key = bytearray(p_key)
+        # Also sync to RAM tmpfs file for fast IPC access
+        try:
+            ram_file = _get_ram_key_file()
+            fd = os.open(ram_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'wb') as f:
+                f.write(p_key)
+            os.chmod(ram_file, 0o600)
+        except Exception:
+            pass
+        return p_key
+
     return None
 
 def clear_cached_key():
     """
-    Securely zeroes and removes the cached key from memory and RAM tmpfs.
+    Securely zeroes and removes the cached key from memory, RAM tmpfs, and persistent storage.
     """
     global _cached_key
     with _cached_key_lock:
@@ -88,6 +200,19 @@ def clear_cached_key():
             with open(ram_file, 'wb') as f:
                 f.write(b'\x00' * 32)
             os.remove(ram_file)
+    except Exception:
+        pass
+
+    try:
+        import keyring
+        keyring.delete_password("facegate", "vault_key")
+    except Exception:
+        pass
+
+    try:
+        vault_key_file = os.path.expanduser("~/.config/facegate/.vault_key.enc")
+        if os.path.exists(vault_key_file):
+            os.remove(vault_key_file)
     except Exception:
         pass
 

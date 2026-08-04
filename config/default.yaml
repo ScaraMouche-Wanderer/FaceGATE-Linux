@@ -36,6 +36,11 @@ behavior:
   uninstall_protection: true
   lock_on_sleep_or_lock: true
   theme: light
+  # color_palette: preset color scheme (iron_ember, violet_slate, amber_espresso, emerald_obsidian)
+  color_palette: iron_ember
+  # tray_icon_style: which preset glyph to use for the system tray icon.
+  # One of: circle, square, shield, lock, gate. See src/ui/tray.py TRAY_ICON_STYLES.
+  tray_icon_style: circle
 camera:
   backend: V4L2
   fps: 30

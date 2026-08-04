@@ -454,5 +454,29 @@ class TestPersistentLockoutManager:
         assert result is False, "IPC service RequestAuth must return False when app is locked out"
 
 
+class TestKeyPersistence:
+    """Tests for persistent vault key storage and restoration."""
+
+    def test_key_persistence_roundtrip(self, temp_embedding_paths):
+        from database.embedding_store import set_cached_key, get_cached_key, clear_cached_key
+        import database.embedding_store as es
+
+        test_key = os.urandom(32)
+        set_cached_key(test_key)
+
+        # Clear in-memory global reference and RAM tmpfs file manually to test persistent fallback
+        with es._cached_key_lock:
+            es._cached_key = None
+
+        ram_file = es._get_ram_key_file()
+        if os.path.exists(ram_file):
+            os.remove(ram_file)
+
+        # get_cached_key should restore from persistent storage
+        restored = get_cached_key()
+        assert restored == test_key, "get_cached_key() must restore the key from persistent storage"
+
+
+
 
 

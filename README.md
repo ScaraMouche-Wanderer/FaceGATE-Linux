@@ -8,6 +8,7 @@
   <img src="https://img.shields.io/badge/gui-PySide6%2FQt6-orange?style=for-the-badge&logo=qt" alt="PySide6 / Qt6">
   <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License MIT">
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=for-the-badge" alt="PRs Welcome">
+  <a href="GUIDE.md"><img src="https://img.shields.io/badge/docs-GUIDE.md-purple?style=for-the-badge&logo=markdown" alt="Complete Guide"></a>
 </p>
 
 **FaceGate-Linux** is an advanced, local biometric application security daemon and tray interface for Linux desktop environments. Designed to prevent unauthorized access to sensitive application windows (such as web browsers, terminal consoles, password managers, or system settings), FaceGate intercepts target launches and gates them behind fast, local biometric face recognition (powered by InsightFace) and liveness checking, with a secure Master Password fallback.
@@ -15,6 +16,20 @@
 <p align="center">
   <img src="assets/demo.gif" width="900" alt="FaceGate Demo">
 </p>
+
+---
+
+## 📋 Table of Contents
+
+- [✨ Features & Highlights](#-features--highlights)
+- [📖 User & Developer Guide](#-user--developer-guide)
+- [🏗️ System Architecture](#-system-architecture)
+- [🔐 Security Model & Limitations](#-security-model--limitations)
+- [🚀 Quick Start & Installation](#-quick-start--installation)
+- [📸 Screenshots & Visual Interface](#-screenshots--visual-interface)
+- [🤝 Contributing & Open-Source Roadmap](#-contributing--open-source-roadmap)
+- [👥 Contributors & Community](#-contributors--community)
+- [📄 License](#-license)
 
 ---
 
@@ -29,6 +44,16 @@
 - 🎨 **Modern High-Contrast Dark & Light Design System**: Stunning PySide6 GUI with vibrant color palettes (`#c084fc` headers, slate cards, transparent viewports, custom `QComboBox` delegates).
 - 🛡️ **Uninstall & Panic Override**: Built-in anti-uninstall protection, panic lockdown hotkeys (`<Control><Alt>l`), and emergency recovery shortcuts (`<Control><Alt>k`).
 - 📜 **Tamper-Evident Audit Trail**: Local SQLite logging tracking authorization attempts, confidence scores, and access outcomes.
+
+---
+
+## 📖 User & Developer Guide
+
+Check out our full, in-depth **[User & Developer Guide (`GUIDE.md`)](GUIDE.md)** for exhaustive details on:
+- 💻 **Complete CLI Terminal Commands & Flags** (`--monitor`, `--settings`, `--enroll`, `--disable`, `--lock-all`, etc.)
+- ⚙️ **Detailed Configuration Schema** (`config/default.yaml`)
+- 🖥️ **Desktop Integrations** (GNOME, KDE Plasma, XFCE, Sway, Hyprland)
+- 🧪 **Comprehensive Pytest Guide & Module Breakdown**
 
 ---
 
@@ -56,7 +81,7 @@ Process launches are monitored via `psutil` and desktop launcher substitution (`
 
 ### Prerequisites
 - Linux Desktop Environment (GNOME, KDE Plasma, XFCE, Sway, Hyprland)
-- Python 3.10+ & Poetry
+- Python 3.11+ & Poetry
 - OpenCV & PySide6 dependencies
 
 ### Installation
@@ -88,13 +113,34 @@ poetry run pytest tests/ -v
 
 ---
 
-## 🤝 Contributing & Community
+## 🤝 Contributing & Open-Source Roadmap
 
-Contributions make the open-source community an amazing place to learn, inspire, and create! We warmly welcome all contributions:
+Contributions make the open-source community an amazing place to learn, inspire, and create! We warmly welcome all contributions.
 
-- 🌟 Read our [**CONTRIBUTING.md**](CONTRIBUTING.md) guide for architecture breakdowns and step-by-step instructions.
-- 💡 Check out **Good First Issues** (translations, UI tweaks, desktop DE integration).
-- 🐛 Report bugs or submit feature requests via [GitHub Issues](https://github.com/ScaraMouche-Wanderer/FaceGATE-Linux/issues).
+### 🌟 Good First Issues & Contribution Ideas
+
+Looking to contribute? Here are some great areas to get started:
+
+- 🌐 **Internationalization (i18n)**: Add multi-language translations (`.qm` / `.json`) for GUI strings.
+- 🎨 **UI Preset Palettes**: Create and submit new color scheme presets in `src/ui/theme.py`.
+- 🖥️ **Desktop Shell Extensions**: Build GNOME extension / KDE KWin plasmoid integration for quick toggling.
+- 🔌 **PAM Module**: Help build `pam_facegate` for Linux login/sudo PAM integration.
+- 🧪 **Hardware Benchmark Profiling**: Add CUDA / TensorRT ONNX provider optimizations in `tests/benchmark_fps.py`.
+
+### How to Get Started
+1. Read our **[CONTRIBUTING.md](CONTRIBUTING.md)** guide for architecture breakdowns and step-by-step instructions.
+2. Check out open **[GitHub Issues](https://github.com/ScaraMouche-Wanderer/FaceGATE-Linux/issues)** or pick up a `good first issue`.
+3. Fork the repository, create your feature branch, run `poetry run pytest tests/ -v`, and open a Pull Request!
+
+---
+
+## 👥 Contributors & Community
+
+Thank you to everyone helping build and improve FaceGate-Linux!
+
+<a href="https://github.com/ScaraMouche-Wanderer/FaceGATE-Linux/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ScaraMouche-Wanderer/FaceGATE-Linux" alt="Contributors" />
+</a>
 
 ---
 

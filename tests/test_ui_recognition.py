@@ -121,6 +121,179 @@ class TestAuthDialog(unittest.TestCase):
             self.assertEqual(dialog.matched_user, "test_user")
             self.assertIsNotNone(dialog.final_score)
 
+    @patch('database.embedding_store.load_embeddings',
+           return_value={"test_user": np.zeros(512, dtype=np.float32)})
+    @patch('cv2.VideoCapture', side_effect=MockVideoCapture)
+    def test_face_recognition_high_confidence_immediate_auth(self, mock_vc, mock_load):
+        """High-confidence match (score >= threshold + 0.12) authenticates immediately with motion."""
+        from ui.auth_dialog import AuthDialog
+        from utils.config_loader import Config
+
+        with patch('utils.config_loader.get_config', return_value=Config()):
+            dialog = AuthDialog("Test Terminal", mode="face")
+            dialog.enrolled_embeddings = {"test_user": np.zeros(512, dtype=np.float32)}
+
+            dummy_frame = np.ones((270, 360, 3), dtype=np.uint8) * 128
+            faces = [{
+                'bbox': [100, 100, 200, 200],
+                'embedding': np.zeros(512, dtype=np.float32),
+                'kps': np.zeros((5, 2))
+            }]
+
+            with patch('recognition.matcher.match_face', return_value=("test_user", 0.90)):
+                with patch('recognition.blur_checker.is_blurry', return_value=False):
+                    dialog.warmup_frames_left = 0
+                    # First frame: records centroid 1
+                    dialog.handle_detection_result(faces, dummy_frame)
+
+                    # Second frame: shifted centroid 2 to satisfy motion check
+                    faces_moved = [{
+                        'bbox': [105, 105, 205, 205],
+                        'embedding': np.zeros(512, dtype=np.float32),
+                        'kps': np.zeros((5, 2))
+                    }]
+                    dialog.handle_detection_result(faces_moved, dummy_frame)
+
+            self.assertTrue(dialog.authenticated)
+            self.assertEqual(dialog.matched_user, "test_user")
+
+    @patch('cv2.VideoCapture', side_effect=MockVideoCapture)
+    def test_face_recognition_unknown_face_ticks_fallback(self, mock_vc):
+        """Unknown face scan for 90 ticks automatically triggers password fallback."""
+        from ui.auth_dialog import AuthDialog
+        dialog = AuthDialog("Test App", mode="face")
+        dialog.enrolled_embeddings = {"test_user": np.zeros(512, dtype=np.float32)}
+        dialog.warmup_frames_left = 0
+
+        dummy_frame = np.ones((270, 360, 3), dtype=np.uint8) * 128
+        faces = [{
+            'bbox': [100, 100, 200, 200],
+            'embedding': np.random.randn(512).astype(np.float32),
+            'kps': np.zeros((5, 2))
+        }]
+
+        with patch('recognition.matcher.match_face', return_value=(None, 0.10)):
+            with patch('recognition.blur_checker.is_blurry', return_value=False):
+                for _ in range(89):
+                    dialog.handle_detection_result(faces, dummy_frame)
+                self.assertFalse(dialog.fallback_to_password)
+                self.assertEqual(dialog.unknown_face_ticks, 89)
+
+                # 90th tick triggers fallback
+                dialog.handle_detection_result(faces, dummy_frame)
+                self.assertTrue(dialog.fallback_to_password)
+                self.assertEqual(dialog.stack.currentIndex(), 1)
+
+    @patch('cv2.VideoCapture', side_effect=MockVideoCapture)
+    def test_face_recognition_close_mismatch_ambiguity_fallback(self, mock_vc):
+        """Close mismatches (near threshold) update status and trigger password fallback after 3 attempts."""
+        from ui.auth_dialog import AuthDialog
+        from utils.config_loader import Config
+        cfg = Config()
+
+        with patch('utils.config_loader.get_config', return_value=cfg):
+            dialog = AuthDialog("Test App", mode="face")
+            dialog.enrolled_embeddings = {"test_user": np.zeros(512, dtype=np.float32)}
+            dialog.warmup_frames_left = 0
+
+            dummy_frame = np.ones((270, 360, 3), dtype=np.uint8) * 128
+            faces = [{
+                'bbox': [100, 100, 200, 200],
+                'embedding': np.zeros(512, dtype=np.float32),
+                'kps': np.zeros((5, 2))
+            }]
+
+            # threshold = 0.52, margin = 0.03. Score 0.50 is >= (0.52 - 0.03) = 0.49
+            with patch('recognition.matcher.match_face', return_value=(None, 0.50)):
+                with patch('recognition.blur_checker.is_blurry', return_value=False):
+                    dialog.handle_detection_result(faces, dummy_frame)
+                    self.assertIn("Almost — try better lighting", dialog.status_label.text())
+                    self.assertEqual(dialog.close_match_attempts, 1)
+
+                    dialog.handle_detection_result(faces, dummy_frame)
+                    self.assertEqual(dialog.close_match_attempts, 2)
+
+                    dialog.handle_detection_result(faces, dummy_frame)
+                    self.assertEqual(dialog.close_match_attempts, 3)
+                    self.assertTrue(dialog.fallback_to_password)
+                    self.assertEqual(dialog.stack.currentIndex(), 1)
+
+    @patch('cv2.VideoCapture', side_effect=MockVideoCapture)
+    def test_face_recognition_camera_error_triggers_fallback(self, mock_vc):
+        """Camera loading error sets camera_error flag and displays error UI before password mode."""
+        from ui.auth_dialog import AuthDialog
+        dialog = AuthDialog("Test App", mode="face")
+
+        dialog.on_detector_load_error("Failed to open camera /dev/video0")
+        self.assertTrue(dialog.camera_error)
+        self.assertEqual(dialog.camera_error_msg, "Failed to open camera /dev/video0")
+        self.assertIn("Camera Error", dialog.status_label.text())
+
+    @patch('cv2.VideoCapture', side_effect=MockVideoCapture)
+    @patch('database.embedding_store.get_cached_key', return_value=b'12345678901234567890123456789012')
+    @patch('database.embedding_store.load_embeddings', return_value={})
+    def test_face_recognition_no_enrolled_profiles_auto_fallback(self, mock_load, mock_key, mock_vc):
+        """No enrolled facial profiles automatically switches AuthDialog to password mode."""
+        from ui.auth_dialog import AuthDialog
+        dialog = AuthDialog("Test App", mode="face")
+        mock_detector = MagicMock()
+        dialog.on_detector_loaded(mock_detector)
+
+        self.assertTrue(dialog.fallback_to_password)
+        self.assertIn("No facial profiles enrolled yet", dialog.sub_label.text())
+        self.assertEqual(dialog.stack.currentIndex(), 1)
+
+    @patch('cv2.VideoCapture', side_effect=MockVideoCapture)
+    def test_face_recognition_dark_frame_warning_message(self, mock_vc):
+        """Dark camera frame (mean < 15.0) sets low-light warning on status label."""
+        from ui.auth_dialog import AuthDialog
+        dialog = AuthDialog("Test App", mode="face")
+        dialog.detector = MagicMock()
+
+        dark_frame = np.zeros((270, 360, 3), dtype=np.uint8) # mean is 0.0
+        dialog.handle_frame(dark_frame)
+        self.assertIn("Camera is dark", dialog.status_label.text())
+
+    @patch('cv2.VideoCapture', side_effect=MockVideoCapture)
+    def test_face_recognition_blurry_frame_filtering(self, mock_vc):
+        """Blurry frame skips evaluation, leaving success count and ticks untouched."""
+        from ui.auth_dialog import AuthDialog
+        dialog = AuthDialog("Test App", mode="face")
+        dialog.warmup_frames_left = 0
+
+        dummy_frame = np.ones((270, 360, 3), dtype=np.uint8) * 128
+        faces = [{'bbox': [10, 10, 50, 50], 'embedding': np.zeros(512), 'kps': np.zeros((5, 2))}]
+
+        with patch('recognition.blur_checker.is_blurry', return_value=True):
+            dialog.handle_detection_result(faces, dummy_frame)
+            self.assertEqual(dialog.success_count, 0)
+            self.assertEqual(dialog.unknown_face_ticks, 0)
+
+    @patch('cv2.VideoCapture', side_effect=MockVideoCapture)
+    def test_face_recognition_multi_face_detection_matching(self, mock_vc):
+        """Multiple faces in frame correctly identify enrolled user while processing all reticles."""
+        from ui.auth_dialog import AuthDialog
+        dialog = AuthDialog("Test App", mode="face")
+        dialog.enrolled_embeddings = {"admin_user": np.zeros(512, dtype=np.float32)}
+        dialog.warmup_frames_left = 0
+
+        dummy_frame = np.ones((270, 360, 3), dtype=np.uint8) * 128
+        faces = [
+            {'bbox': [10, 10, 50, 50], 'embedding': np.ones(512), 'kps': np.zeros((5, 2))},
+            {'bbox': [100, 100, 200, 200], 'embedding': np.zeros(512), 'kps': np.zeros((5, 2))}
+        ]
+
+        def mock_matcher(emb, enrolled):
+            if np.array_equal(emb, np.zeros(512)):
+                return ("admin_user", 0.92)
+            return (None, 0.15)
+
+        with patch('recognition.matcher.match_face', side_effect=mock_matcher):
+            with patch('recognition.blur_checker.is_blurry', return_value=False):
+                dialog.handle_detection_result(faces, dummy_frame)
+
+        self.assertEqual(dialog.success_count, 1)
+
     def test_password_mode_lockout_after_3_failures(self):
         """Password dialog should impose lockout after 3 failed attempts (tracked per app)."""
         from ui.auth_dialog import AuthDialog
@@ -643,17 +816,103 @@ class TestThemeDynamicUpdating(unittest.TestCase):
         """get_sidebar_qss must detect dark mode via IS_DARK key."""
         from ui.theme import get_sidebar_qss, get_colors
         
-        c_dark = get_colors().copy()
-        c_dark["IS_DARK"] = True
-        
-        c_light = get_colors().copy()
-        c_light["IS_DARK"] = False
+        c_dark = get_colors("dark")
+        c_light = get_colors("light")
         
         qss_dark = get_sidebar_qss(c_dark)
         qss_light = get_sidebar_qss(c_light)
         
-        self.assertIn("#110f1c", qss_dark)
-        self.assertIn("#ede9fe", qss_light)
+        self.assertIn(c_dark["SIDEBAR_BG"], qss_dark)
+        self.assertIn(c_light["SIDEBAR_BG"], qss_light)
+
+
+class TestColorPaletteSystem(unittest.TestCase):
+    """Tests for the Color Palette preset system and dynamic resolution."""
+
+    def test_all_palettes_have_valid_structure(self):
+        """Every palette in PALETTES registry must define light and dark theme maps with all required keys."""
+        from ui.theme import PALETTES
+        required_keys = [
+            "IS_DARK", "BG_NEUTRAL", "BG_SECONDARY", "CARD_NEUTRAL", "BORDER_NEUTRAL",
+            "TEXT_PRIMARY", "TEXT_SECONDARY", "ACCENT_PURPLE", "ACCENT_PURPLE_HOVER",
+            "ACCENT_PURPLE_PRESSED", "WIDGET_BG", "LIST_ITEM_HOVER", "HOVER_NEUTRAL",
+            "CANCEL_BTN_BG", "CANCEL_BTN_HOVER", "SIDEBAR_BG", "SIDEBAR_COLOR"
+        ]
+        for key, p_info in PALETTES.items():
+            self.assertIn("label", p_info)
+            self.assertIn("dark", p_info)
+            self.assertIn("light", p_info)
+            for mode in ["dark", "light"]:
+                for r_key in required_keys:
+                    self.assertIn(r_key, p_info[mode], f"Palette '{key}' mode '{mode}' missing key '{r_key}'")
+
+    def test_get_colors_resolves_palette_preset(self):
+        """get_colors must return exact palette colors when palette_override is supplied."""
+        from ui.theme import get_colors
+        c_iron_dark = get_colors(theme_override="dark", palette_override="iron_ember")
+        self.assertEqual(c_iron_dark["ACCENT_PURPLE"], "#f97316")
+
+        c_violet_light = get_colors(theme_override="light", palette_override="violet_slate")
+        self.assertEqual(c_violet_light["ACCENT_PURPLE"], "#7c3aed")
+
+        c_emerald_dark = get_colors(theme_override="dark", palette_override="emerald_obsidian")
+        self.assertEqual(c_emerald_dark["ACCENT_PURPLE"], "#10b981")
+
+        c_amber_light = get_colors(theme_override="light", palette_override="amber_espresso")
+        self.assertEqual(c_amber_light["ACCENT_PURPLE"], "#d97706")
+
+    def test_get_colors_falls_back_on_invalid_palette(self):
+        """get_colors must fall back to iron_ember when an invalid palette key is passed."""
+        from ui.theme import get_colors
+        c = get_colors(theme_override="light", palette_override="non_existent_palette")
+        self.assertEqual(c["ACCENT_PURPLE"], "#c2410c")
+
+
+class TestTrayIconPresets(unittest.TestCase):
+    """Tests for system tray icon preset glyph renderers."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance()
+        if cls.app is None:
+            cls.app = QApplication(sys.argv)
+
+    def test_all_tray_icon_renderers_produce_valid_qicon(self):
+        """All 5 tray icon styles must render non-null QIcon instances."""
+        from ui.tray import TRAY_ICON_STYLES, get_tray_icon_renderer
+        test_color = "#c2410c"
+        for style_name, renderer in TRAY_ICON_STYLES.items():
+            icon = renderer(test_color)
+            self.assertFalse(icon.isNull(), f"Tray icon style '{style_name}' returned a null QIcon")
+
+        fallback_icon = get_tray_icon_renderer("invalid_style")(test_color)
+        self.assertFalse(fallback_icon.isNull(), "Fallback tray icon renderer returned null QIcon")
+
+
+class TestAnimatedComboBoxPopup(unittest.TestCase):
+    """Tests for AnimatedComboBox single rounded-rectangle popup styling."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance()
+        if cls.app is None:
+            cls.app = QApplication(sys.argv)
+
+    def test_animated_combobox_translucent_container(self):
+        """AnimatedComboBox must set translucent background on container while keeping QListView solid opaque."""
+        from PySide6.QtCore import Qt
+        from ui.theme import AnimatedComboBox
+        combo = AnimatedComboBox()
+        combo.addItem("Option 1", "opt1")
+        combo.addItem("Option 2", "opt2")
+        combo._apply_view_style()
+
+        view = combo.view()
+        self.assertIsNotNone(view)
+        self.assertFalse(view.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))
+        container = view.parentWidget()
+        if container:
+            self.assertTrue(container.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))
 
 
 if __name__ == "__main__":

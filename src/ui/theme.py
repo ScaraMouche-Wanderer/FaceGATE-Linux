@@ -5,14 +5,14 @@ from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSize, QVariantAnimation,
 from PySide6.QtWidgets import QSpinBox, QComboBox, QCheckBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QListView, QFrame
 
 # Global constants initialized to default light mode
-BG_NEUTRAL = "#f5f3ff"
-CARD_NEUTRAL = "#faf9fc"
-BORDER_NEUTRAL = "#e9e7f1"
-TEXT_PRIMARY = "#1e1b4b"
-TEXT_SECONDARY = "#5c5770"
-ACCENT_PURPLE = "#7c3aed"
-ACCENT_PURPLE_HOVER = "#6d28d9"
-ACCENT_PURPLE_PRESSED = "#5b21b6"
+BG_NEUTRAL = "#f5f4f2"
+CARD_NEUTRAL = "#fdfcfb"
+BORDER_NEUTRAL = "#ddd6cc"
+TEXT_PRIMARY = "#1c1917"
+TEXT_SECONDARY = "#57534e"
+ACCENT_PURPLE = "#c2410c"
+ACCENT_PURPLE_HOVER = "#9a3412"
+ACCENT_PURPLE_PRESSED = "#7c2d12"
 SUCCESS_GREEN = "#10b981"
 DANGER_RED = "#ef4444"
 WARNING_AMBER = "#fbbf24"
@@ -69,24 +69,65 @@ def is_system_dark_mode() -> bool:
 
     return False
 
-def get_colors(theme_override: str = None) -> dict:
-    theme = theme_override
-    if not theme:
-        from utils.config_loader import get_config
-        try:
-            config = get_config()
-            theme = config.get("behavior.theme", "light")
-        except Exception:
-            theme = "light"
-        
-    is_dark = False
-    if theme == "dark":
-        is_dark = True
-    else:
-        is_dark = False
-        
-    if is_dark:
-        return {
+PALETTES = {
+    "iron_ember": {
+        "label": "Iron & Ember (Burnt Copper)",
+        "dark": {
+            "IS_DARK": True,
+            "BG_NEUTRAL": "#14110d",
+            "BG_SECONDARY": "#1e1a15",
+            "CARD_NEUTRAL": "#211c17",
+            "BORDER_NEUTRAL": "#3d352c",
+            "TEXT_PRIMARY": "#f5f2ee",
+            "TEXT_SECONDARY": "#d9d2c7",
+            "HEADER_TEXT": "#fb923c",
+            "ACCENT_PURPLE": "#f97316",
+            "ACCENT_PURPLE_HOVER": "#fb923c",
+            "ACCENT_PURPLE_PRESSED": "#ea580c",
+            "WIDGET_BG": "#191510",
+            "LIST_ITEM_HOVER": "#332c22",
+            "HOVER_NEUTRAL": "#332c22",
+            "CANCEL_BTN_BG": "#2a2419",
+            "CANCEL_BTN_HOVER": "#3d3527",
+            "SHADOW_COLOR": "rgba(0, 0, 0, 0.6)",
+            "STATUS_HEADER_BG": "#241f18",
+            "SIDEBAR_BG": "#191510",
+            "SIDEBAR_HOVER_BG": "#332c22",
+            "SIDEBAR_COLOR": "#d9d2c7",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#fbbf24"
+        },
+        "light": {
+            "IS_DARK": False,
+            "BG_NEUTRAL": "#f5f4f0",
+            "BG_SECONDARY": "#ffffff",
+            "CARD_NEUTRAL": "#ffffff",
+            "BORDER_NEUTRAL": "#d9d2c7",
+            "TEXT_PRIMARY": "#1c1917",
+            "TEXT_SECONDARY": "#57534e",
+            "HEADER_TEXT": "#9a3412",
+            "ACCENT_PURPLE": "#c2410c",
+            "ACCENT_PURPLE_HOVER": "#9a3412",
+            "ACCENT_PURPLE_PRESSED": "#7c2d12",
+            "WIDGET_BG": "#ffffff",
+            "LIST_ITEM_HOVER": "#f5f4f0",
+            "HOVER_NEUTRAL": "#f5f4f0",
+            "CANCEL_BTN_BG": "#f5f4f0",
+            "CANCEL_BTN_HOVER": "#e5ddd0",
+            "SHADOW_COLOR": "rgba(194, 65, 12, 0.12)",
+            "STATUS_HEADER_BG": "#f5f4f0",
+            "SIDEBAR_BG": "#f3e7da",
+            "SIDEBAR_HOVER_BG": "#e8d5bf",
+            "SIDEBAR_COLOR": "#6b5b4a",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#f59e0b"
+        }
+    },
+    "violet_slate": {
+        "label": "Violet & Slate (Classic Purple)",
+        "dark": {
             "IS_DARK": True,
             "BG_NEUTRAL": "#0b0a12",
             "BG_SECONDARY": "#151322",
@@ -105,12 +146,14 @@ def get_colors(theme_override: str = None) -> dict:
             "CANCEL_BTN_HOVER": "#373154",
             "SHADOW_COLOR": "rgba(0, 0, 0, 0.6)",
             "STATUS_HEADER_BG": "#1f1a33",
+            "SIDEBAR_BG": "#110f1c",
+            "SIDEBAR_HOVER_BG": "#27223e",
+            "SIDEBAR_COLOR": "#cbd5e1",
             "SUCCESS_GREEN": "#10b981",
             "DANGER_RED": "#ef4444",
             "WARNING_AMBER": "#fbbf24"
-        }
-    else:
-        return {
+        },
+        "light": {
             "IS_DARK": False,
             "BG_NEUTRAL": "#f1f5f9",
             "BG_SECONDARY": "#ffffff",
@@ -129,14 +172,161 @@ def get_colors(theme_override: str = None) -> dict:
             "CANCEL_BTN_HOVER": "#e2e8f0",
             "SHADOW_COLOR": "rgba(124, 58, 237, 0.12)",
             "STATUS_HEADER_BG": "#f1f5f9",
+            "SIDEBAR_BG": "#ede9fe",
+            "SIDEBAR_HOVER_BG": "#e5dbff",
+            "SIDEBAR_COLOR": "#4c4664",
             "SUCCESS_GREEN": "#10b981",
             "DANGER_RED": "#ef4444",
             "WARNING_AMBER": "#f59e0b"
         }
+    },
+    "amber_espresso": {
+        "label": "Amber & Espresso (Warm Gold)",
+        "dark": {
+            "IS_DARK": True,
+            "BG_NEUTRAL": "#16130e",
+            "BG_SECONDARY": "#201c15",
+            "CARD_NEUTRAL": "#241f18",
+            "BORDER_NEUTRAL": "#42382b",
+            "TEXT_PRIMARY": "#f7f3eb",
+            "TEXT_SECONDARY": "#d6cbba",
+            "HEADER_TEXT": "#fbbf24",
+            "ACCENT_PURPLE": "#f59e0b",
+            "ACCENT_PURPLE_HOVER": "#fbbf24",
+            "ACCENT_PURPLE_PRESSED": "#d97706",
+            "WIDGET_BG": "#1c1812",
+            "LIST_ITEM_HOVER": "#362e22",
+            "HOVER_NEUTRAL": "#362e22",
+            "CANCEL_BTN_BG": "#2b241b",
+            "CANCEL_BTN_HOVER": "#3d3326",
+            "SHADOW_COLOR": "rgba(0, 0, 0, 0.6)",
+            "STATUS_HEADER_BG": "#282218",
+            "SIDEBAR_BG": "#1c1812",
+            "SIDEBAR_HOVER_BG": "#3d3326",
+            "SIDEBAR_COLOR": "#d6cbba",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#fbbf24"
+        },
+        "light": {
+            "IS_DARK": False,
+            "BG_NEUTRAL": "#faf7f0",
+            "BG_SECONDARY": "#ffffff",
+            "CARD_NEUTRAL": "#ffffff",
+            "BORDER_NEUTRAL": "#e5dec9",
+            "TEXT_PRIMARY": "#262118",
+            "TEXT_SECONDARY": "#615745",
+            "HEADER_TEXT": "#b45309",
+            "ACCENT_PURPLE": "#d97706",
+            "ACCENT_PURPLE_HOVER": "#b45309",
+            "ACCENT_PURPLE_PRESSED": "#92400e",
+            "WIDGET_BG": "#ffffff",
+            "LIST_ITEM_HOVER": "#faf7f0",
+            "HOVER_NEUTRAL": "#faf7f0",
+            "CANCEL_BTN_BG": "#faf7f0",
+            "CANCEL_BTN_HOVER": "#eee6d3",
+            "SHADOW_COLOR": "rgba(217, 119, 6, 0.12)",
+            "STATUS_HEADER_BG": "#faf7f0",
+            "SIDEBAR_BG": "#eee6d3",
+            "SIDEBAR_HOVER_BG": "#e5dec9",
+            "SIDEBAR_COLOR": "#615745",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#f59e0b"
+        }
+    },
+    "emerald_obsidian": {
+        "label": "Emerald & Obsidian (Green)",
+        "dark": {
+            "IS_DARK": True,
+            "BG_NEUTRAL": "#06140e",
+            "BG_SECONDARY": "#0c1f17",
+            "CARD_NEUTRAL": "#0f261d",
+            "BORDER_NEUTRAL": "#1b4233",
+            "TEXT_PRIMARY": "#ecfdf5",
+            "TEXT_SECONDARY": "#a7f3d0",
+            "HEADER_TEXT": "#34d399",
+            "ACCENT_PURPLE": "#10b981",
+            "ACCENT_PURPLE_HOVER": "#34d399",
+            "ACCENT_PURPLE_PRESSED": "#059669",
+            "WIDGET_BG": "#0a1a13",
+            "LIST_ITEM_HOVER": "#17382b",
+            "HOVER_NEUTRAL": "#17382b",
+            "CANCEL_BTN_BG": "#122b20",
+            "CANCEL_BTN_HOVER": "#1a3d2e",
+            "SHADOW_COLOR": "rgba(0, 0, 0, 0.6)",
+            "STATUS_HEADER_BG": "#122e22",
+            "SIDEBAR_BG": "#0a1a13",
+            "SIDEBAR_HOVER_BG": "#1a3d2e",
+            "SIDEBAR_COLOR": "#a7f3d0",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#fbbf24"
+        },
+        "light": {
+            "IS_DARK": False,
+            "BG_NEUTRAL": "#f0fdf4",
+            "BG_SECONDARY": "#ffffff",
+            "CARD_NEUTRAL": "#ffffff",
+            "BORDER_NEUTRAL": "#c6f6d5",
+            "TEXT_PRIMARY": "#064e3b",
+            "TEXT_SECONDARY": "#047857",
+            "HEADER_TEXT": "#047857",
+            "ACCENT_PURPLE": "#059669",
+            "ACCENT_PURPLE_HOVER": "#047857",
+            "ACCENT_PURPLE_PRESSED": "#065f46",
+            "WIDGET_BG": "#ffffff",
+            "LIST_ITEM_HOVER": "#f0fdf4",
+            "HOVER_NEUTRAL": "#f0fdf4",
+            "CANCEL_BTN_BG": "#f0fdf4",
+            "CANCEL_BTN_HOVER": "#d1fae5",
+            "SHADOW_COLOR": "rgba(5, 150, 105, 0.12)",
+            "STATUS_HEADER_BG": "#f0fdf4",
+            "SIDEBAR_BG": "#d1fae5",
+            "SIDEBAR_HOVER_BG": "#c6f6d5",
+            "SIDEBAR_COLOR": "#047857",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#f59e0b"
+        }
+    }
+}
 
-def refresh_theme_colors(theme_override: str = None):
+PALETTE_LABELS = {k: v["label"] for k, v in PALETTES.items()}
+
+def get_colors(theme_override: str = None, palette_override: str = None) -> dict:
+    theme = theme_override
+    palette = palette_override
+    if not theme or not palette:
+        from utils.config_loader import get_config
+        try:
+            config = get_config()
+            if not theme:
+                theme = config.get("behavior.theme", "light")
+            if not palette:
+                palette = config.get("behavior.color_palette", "iron_ember")
+        except Exception:
+            if not theme:
+                theme = "light"
+            if not palette:
+                palette = "iron_ember"
+
+    if theme == "system":
+        is_dark = is_system_dark_mode()
+    elif theme == "dark":
+        is_dark = True
+    else:
+        is_dark = False
+
+    if palette not in PALETTES:
+        palette = "iron_ember"
+
+    mode_key = "dark" if is_dark else "light"
+    return PALETTES[palette][mode_key]
+
+def refresh_theme_colors(theme_override: str = None, palette_override: str = None):
     global BG_NEUTRAL, CARD_NEUTRAL, BORDER_NEUTRAL, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT_PURPLE, ACCENT_PURPLE_HOVER, ACCENT_PURPLE_PRESSED
-    c = get_colors(theme_override)
+    c = get_colors(theme_override, palette_override)
     BG_NEUTRAL = c["BG_NEUTRAL"]
     CARD_NEUTRAL = c["CARD_NEUTRAL"]
     BORDER_NEUTRAL = c["BORDER_NEUTRAL"]
@@ -148,9 +338,9 @@ def refresh_theme_colors(theme_override: str = None):
 
 def get_sidebar_qss(c: dict) -> str:
     is_dark = c.get("IS_DARK", False)
-    sidebar_bg = "#110f1c" if is_dark else "#ede9fe"
-    sidebar_color = "#cbd5e1" if is_dark else "#4c4664"
-    sidebar_hover_bg = "#27223e" if is_dark else "#e5dbff"
+    sidebar_bg = c.get("SIDEBAR_BG", "#191510" if is_dark else "#f3e7da")
+    sidebar_color = c.get("SIDEBAR_COLOR", "#d9d2c7" if is_dark else "#6b5b4a")
+    sidebar_hover_bg = c.get("SIDEBAR_HOVER_BG", "#332c22" if is_dark else "#e8d5bf")
     
     return f"""
         QListWidget#sidebar {{
@@ -420,15 +610,19 @@ def get_theme_qss(theme_override: str = None) -> str:
             height: 0px;
             background: transparent;
         }}
-        QComboBox QAbstractItemView {{
-            background-color: {c["CARD_NEUTRAL"]};
-            border: 1px solid {c["BORDER_NEUTRAL"]};
+        QComboBoxPrivateContainer {{
+            background: transparent;
+            border: none;
+        }}
+        QComboBox QAbstractItemView, QComboBox QAbstractItemView::viewport, QComboBox QAbstractItemView QWidget#qt_scrollarea_viewport {{
+            background-color: {c["CARD_NEUTRAL"]} !important;
+            border: 1.5px solid {c["BORDER_NEUTRAL"]};
             color: {c["TEXT_PRIMARY"]};
             selection-background-color: {c["ACCENT_PURPLE"]};
             selection-color: #ffffff;
             outline: none;
             padding: 4px;
-            border-radius: 8px;
+            border-radius: 10px;
         }}
         QComboBox QAbstractItemView::item {{
             background-color: {c["CARD_NEUTRAL"]};
@@ -493,12 +687,9 @@ def get_theme_qss(theme_override: str = None) -> str:
             padding: 6px;
             color: {c["TEXT_PRIMARY"]};
         }}
-        QScrollArea, QScrollArea > QWidget, QAbstractScrollArea, QAbstractScrollArea > QWidget {{
+        QScrollArea, QScrollArea > QWidget#qt_scrollarea_viewport {{
             background-color: transparent;
             border: none;
-        }}
-        QWidget#qt_scrollarea_viewport {{
-            background-color: transparent;
         }}
         QStackedWidget, QStackedWidget > QWidget {{
             background-color: transparent;
@@ -525,13 +716,13 @@ def get_card_qss(importance: str = "normal", colors: dict = None) -> str:
     border_color = colors["BORDER_NEUTRAL"]
     text_color = colors["TEXT_PRIMARY"]
     text_sec = colors["TEXT_SECONDARY"]
-    header_color = colors.get("HEADER_TEXT", "#c084fc")
+    header_color = colors.get("HEADER_TEXT", "#fb923c")
     accent = colors["ACCENT_PURPLE"]
-    accent_hover = colors.get("ACCENT_PURPLE_HOVER", "#6d28d9")
+    accent_hover = colors.get("ACCENT_PURPLE_HOVER", "#9a3412")
     danger = colors.get("DANGER_RED", "#ef4444")
-    widget_bg = colors.get("WIDGET_BG", "#110f1c")
-    cancel_bg = colors.get("CANCEL_BTN_BG", "#f1f5f9")
-    cancel_hover = colors.get("CANCEL_BTN_HOVER", "#e2e8f0")
+    widget_bg = colors.get("WIDGET_BG", "#191510")
+    cancel_bg = colors.get("CANCEL_BTN_BG", "#f5f4f0")
+    cancel_hover = colors.get("CANCEL_BTN_HOVER", "#e5ddd0")
     
     if importance == "danger":
         border_qss = f"border-left: 4px solid {danger}; border-top: 1px solid {border_color}; border-right: 1px solid {border_color}; border-bottom: 1px solid {border_color};"
@@ -675,6 +866,11 @@ class AnimatedItemDelegate(QStyledItemDelegate):
         is_hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
 
         rect = option.rect
+
+        # 1. Fill base item rect with solid card neutral background to eliminate transparency gaps
+        bg_card = QColor(c["CARD_NEUTRAL"])
+        painter.fillRect(rect, bg_card)
+
         padded_rect = rect.adjusted(4, 2, -4, -2)
 
         if is_selected:
@@ -684,22 +880,39 @@ class AnimatedItemDelegate(QStyledItemDelegate):
             bg_color = QColor(c["LIST_ITEM_HOVER"])
             text_color = QColor(c["TEXT_PRIMARY"])
         else:
-            bg_color = QColor(c["CARD_NEUTRAL"])
+            bg_color = bg_card
             text_color = QColor(c["TEXT_PRIMARY"])
 
+        # Draw rounded rectangle background for ALL items (selected, hovered, and unselected)
         painter.setBrush(QBrush(bg_color))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(padded_rect, 6, 6)
 
+        # 2. Draw decoration icon if present
+        icon = index.data(Qt.ItemDataRole.DecorationRole)
+        has_icon = False
+        if icon:
+            if isinstance(icon, QIcon) and not icon.isNull():
+                icon_size = option.decorationSize if (hasattr(option, "decorationSize") and option.decorationSize.isValid()) else QSize(18, 18)
+                icon_rect = QRect(padded_rect.x() + 10, int(padded_rect.center().y() - icon_size.height() / 2), icon_size.width(), icon_size.height())
+                icon.paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
+                has_icon = True
+            elif isinstance(icon, QPixmap) and not icon.isNull():
+                pm_rect = QRect(padded_rect.x() + 10, int(padded_rect.center().y() - 9), 18, 18)
+                painter.drawPixmap(pm_rect, icon)
+                has_icon = True
+
+        left_offset = 36 if has_icon else 12
         text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
         painter.setFont(option.font)
         painter.setPen(text_color)
-        text_rect = padded_rect.adjusted(12, 0, -32, 0)
+        text_rect = padded_rect.adjusted(left_offset, 0, -32, 0)
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
 
         if is_selected:
-            painter.setPen(QPen(QColor("#ffffff"), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-            chk_x = padded_rect.right() - 20
+            chk_color = QColor("#ffffff")
+            painter.setPen(QPen(chk_color, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            chk_x = padded_rect.right() - 18
             chk_y = padded_rect.center().y()
             path = QPainterPath()
             path.moveTo(chk_x, chk_y - 1)
@@ -711,6 +924,11 @@ class AnimatedItemDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex):
         size = super().sizeHint(option, index)
+        text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        from PySide6.QtGui import QFontMetrics
+        fm = QFontMetrics(option.font)
+        text_w = fm.horizontalAdvance(text) + (80 if index.data(Qt.ItemDataRole.DecorationRole) else 60)
+        size.setWidth(max(size.width(), text_w))
         size.setHeight(max(36, size.height()))
         return size
 
@@ -726,6 +944,47 @@ class AnimatedComboBox(QComboBox):
         view.setItemDelegate(AnimatedItemDelegate(view))
         view.setFrameShape(QFrame.Shape.NoFrame)
         self.setView(view)
+        self._apply_view_style()
+
+    def _apply_view_style(self):
+        from ui.theme import get_colors
+        c = get_colors()
+        view = self.view()
+        if view:
+            container = view.parentWidget()
+            if container:
+                container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+                container.setStyleSheet("background: transparent; border: none; padding: 2px;")
+            
+            view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+            view.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+            view.setAutoFillBackground(True)
+            
+            vp = view.viewport()
+            if vp:
+                vp.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+                vp.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+                vp.setAutoFillBackground(True)
+                vp.setStyleSheet(f"background-color: {c['CARD_NEUTRAL']} !important;")
+            
+            view.setStyleSheet(f"""
+                QListView, QListView::viewport {{
+                    background-color: {c["CARD_NEUTRAL"]} !important;
+                    color: {c["TEXT_PRIMARY"]};
+                }}
+                QListView {{
+                    border: 1.5px solid {c["BORDER_NEUTRAL"]};
+                    border-radius: 10px;
+                    padding: 4px;
+                    outline: none;
+                }}
+                QListView::item {{
+                    background-color: {c["CARD_NEUTRAL"]};
+                    color: {c["TEXT_PRIMARY"]};
+                    padding: 8px 12px;
+                    border-radius: 6px;
+                }}
+            """)
 
     @Property(float)
     def arrow_rotation(self):
@@ -737,6 +996,12 @@ class AnimatedComboBox(QComboBox):
         self.update()
 
     def showPopup(self):
+        self._apply_view_style()
+        view = self.view()
+        if view and view.parentWidget():
+            container = view.parentWidget()
+            container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            container.setStyleSheet("background: transparent; border: none;")
         if self.anim:
             self.anim.stop()
         self.anim = QPropertyAnimation(self, b"arrow_rotation")
@@ -745,6 +1010,16 @@ class AnimatedComboBox(QComboBox):
         self.anim.setEndValue(180.0)
         self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.anim.start()
+
+        # Ensure popup view is wide enough so item text is never truncated
+        view = self.view()
+        fm = self.fontMetrics()
+        max_w = self.width()
+        for i in range(self.count()):
+            w = fm.horizontalAdvance(self.itemText(i)) + 64
+            if w > max_w:
+                max_w = w
+        view.setMinimumWidth(max_w)
         super().showPopup()
 
     def hidePopup(self):
@@ -852,10 +1127,10 @@ class AnimatedCheckBox(QCheckBox):
         box_rect = QRectF(0, box_y, box_size, box_size)
 
         bg_inactive = QColor(c.get("WIDGET_BG", "#ffffff"))
-        bg_active = QColor(c.get("ACCENT_PURPLE", "#7c3aed"))
+        bg_active = QColor(c.get("ACCENT_PURPLE", "#c2410c"))
         
-        border_inactive = QColor(c.get("BORDER_NEUTRAL", "#cbd5e1"))
-        border_active = QColor(c.get("ACCENT_PURPLE", "#7c3aed"))
+        border_inactive = QColor(c.get("BORDER_NEUTRAL", "#d9d2c7"))
+        border_active = QColor(c.get("ACCENT_PURPLE", "#c2410c"))
 
         p = max(0.0, min(1.0, self._check_progress))
 
@@ -1179,13 +1454,20 @@ class SlidingThemeToggle(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # Smooth color transition based on knob position
-        r = int(124 + (168 - 124) * self._knob_position)
-        g = int(58 + (85 - 58) * self._knob_position)
-        b = int(237 + (247 - 237) * self._knob_position)
+        from ui.theme import get_colors
+        c_light = get_colors("light")
+        c_dark = get_colors("dark")
+        
+        accent_light = QColor(c_light.get("ACCENT_PURPLE", "#c2410c"))
+        accent_dark = QColor(c_dark.get("ACCENT_PURPLE", "#f97316"))
+        
+        r = int(accent_light.red() + (accent_dark.red() - accent_light.red()) * self._knob_position)
+        g = int(accent_light.green() + (accent_dark.green() - accent_light.green()) * self._knob_position)
+        b = int(accent_light.blue() + (accent_dark.blue() - accent_light.blue()) * self._knob_position)
         active_color = QColor(r, g, b)
         
-        track_color = active_color if self._knob_position > 0.5 else QColor("#cbd5e1")
+        inactive_color = QColor(c_light.get("BORDER_NEUTRAL", "#d9d2c7"))
+        track_color = active_color if self._knob_position > 0.5 else inactive_color
         painter.setBrush(track_color)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(0, 0, self.width(), self.height(), self.height() / 2, self.height() / 2)

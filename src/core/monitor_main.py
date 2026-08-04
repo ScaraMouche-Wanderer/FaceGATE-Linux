@@ -197,7 +197,7 @@ class FaceGateApplication(QObject):
                 self.monitor.poll_interval = poll_interval
                 self.monitor.clear_seen_pids()
             if hasattr(self, 'tray') and self.tray:
-                self.tray.update_tray_state()
+                self.tray.refresh_icon_style()
             logging.info("FaceGateApplication: Configuration hot-reloaded successfully live.")
             return True
         except Exception as e:
@@ -664,16 +664,18 @@ def run_auth_launch(desktop_name: str, exec_args: list):
             sys.exit(1)
 
     logging.info(f"Launcher: Requesting auth for app '{desktop_name}'...")
-    raw_reply = interface.call("RequestAuth", desktop_name)
+    from PySide6.QtDBus import QDBus
+    raw_reply = interface.callWithArgumentList(
+        QDBus.CallMode.Block,
+        "RequestAuth",
+        [desktop_name],
+        300000  # 5-minute timeout so authentication dialog won't time out prematurely
+    )
     reply = QDBusReply(raw_reply)
 
     if not reply.isValid():
-        logging.error(f"Launcher: D-Bus method call failed ({reply.error().message()}). Falling back to direct launch.")
-        try:
-            subprocess.Popen(exec_args, close_fds=True, start_new_session=True)
-            sys.exit(0)
-        except Exception:
-            sys.exit(1)
+        logging.error(f"Launcher: D-Bus method call failed ({reply.error().message()}). Blocking execution for security.")
+        sys.exit(1)
 
     authorized = reply.value()
     if authorized:
@@ -864,8 +866,14 @@ def main():
                 )
                 if interface.isValid():
                     dbus_active = True
+                    from PySide6.QtDBus import QDBus
                     logging.info("Requesting Settings Access authorization via running FaceGate daemon...")
-                    raw_reply = interface.call("RequestAuth", "Settings Access")
+                    raw_reply = interface.callWithArgumentList(
+                        QDBus.CallMode.Block,
+                        "RequestAuth",
+                        ["Settings Access"],
+                        300000
+                    )
                     reply = QDBusReply(raw_reply)
                     if reply.isValid():
                         dbus_success = reply.value()
@@ -933,8 +941,14 @@ def main():
                 )
                 if interface.isValid():
                     dbus_active = True
+                    from PySide6.QtDBus import QDBus
                     logging.info("Requesting Enrollment Access authorization via running FaceGate daemon...")
-                    raw_reply = interface.call("RequestAuth", "Enrollment Access")
+                    raw_reply = interface.callWithArgumentList(
+                        QDBus.CallMode.Block,
+                        "RequestAuth",
+                        ["Enrollment Access"],
+                        300000
+                    )
                     reply = QDBusReply(raw_reply)
                     if reply.isValid():
                         dbus_success = reply.value()
@@ -997,9 +1011,14 @@ def main():
         logging.info(f"Recognition subprocess launching in '{mode}' mode (Face Recognition first).")
         
         dialog = AuthDialog(app_name, mode=mode, timeout_seconds=timeout_sec)
+        dialog.setWindowState(Qt.WindowState.WindowActive)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+        
+        # Ensure window stays on top & takes active focus across Linux desktop managers
+        QTimer.singleShot(50, lambda: (dialog.setWindowState(Qt.WindowState.WindowActive), dialog.raise_(), dialog.activateWindow()))
+        
         result = dialog.exec()
         
         if result == QDialog.DialogCode.Accepted:
