@@ -170,3 +170,92 @@ def test_sha256_hash_collision_ignored_when_name_mismatches():
             mock_os_kill.assert_not_called()
             assert "/opt/unrelated/launcher" in monitor._negative_hash_cache
 
+
+def test_session_manager_id_normalization():
+    from core.session_manager import SessionManager
+    mock_config = MagicMock()
+    mock_config.get.return_value = True
+    protected_apps = [
+        {"id": "kitty", "name": "Kitty Terminal", "desktop_name": "kitty.desktop", "executable": "kitty"}
+    ]
+    sm = SessionManager(config=mock_config, protected_apps_provider=lambda: protected_apps)
+
+    # Test normalization in get_app_id_from_desktop
+    assert sm.get_app_id_from_desktop("kitty.desktop") == "kitty"
+    assert sm.get_app_id_from_desktop("kitty") == "kitty"
+
+    # Test authorization via desktop name and query via app_id
+    sm.authorize_app("kitty.desktop")
+    assert sm.is_app_authorized("kitty") is True
+    assert sm.is_app_authorized("kitty.desktop") is True
+    assert "kitty" in sm.auth_timestamps
+
+    # Test relock via app_id and query via desktop name
+    sm.relock_app("kitty")
+    assert sm.is_app_authorized("kitty") is False
+    assert sm.is_app_authorized("kitty.desktop") is False
+    assert "kitty" not in sm.auth_timestamps
+
+
+def test_app_monitor_authorized_zero_timestamp_does_not_relock():
+    mock_main_app = MagicMock()
+    mock_main_app.is_active.return_value = True
+    mock_main_app.get_protected_apps.return_value = [
+        {"id": "kitty", "executable": "kitty", "desktop_name": "kitty.desktop"}
+    ]
+    mock_main_app.get_app_id_from_desktop.side_effect = lambda x: "kitty"
+    mock_main_app.is_app_authorized.return_value = True
+    # Simulate missing auth timestamp (0)
+    mock_main_app.auth_timestamps = {}
+    mock_main_app.config = {"security.session_timeout_seconds": 300}
+
+    monitor = AppMonitor(mock_main_app, poll_interval=0.1)
+    monitor._canonical_map = {
+        "/usr/bin/kitty": {"id": "kitty", "executable": "kitty", "desktop_name": "kitty.desktop"}
+    }
+
+    mock_proc = MagicMock()
+    mock_proc.info = {
+        "pid": 8888,
+        "name": "kitty",
+        "exe": "/usr/bin/kitty"
+    }
+    mock_proc.is_running.return_value = True
+
+    with patch("psutil.process_iter", return_value=[mock_proc]), \
+         patch("psutil.pids", return_value=[8888]), \
+         patch("os.stat") as mock_stat:
+
+        mock_stat_res = MagicMock()
+        mock_stat_res.st_mtime = 100.0
+        mock_stat_res.st_size = 500
+        mock_stat.return_value = mock_stat_res
+
+        monitor.running = True
+        def mock_sleep(interval):
+            monitor.running = False
+
+        with patch("time.sleep", side_effect=mock_sleep):
+            monitor._monitor_loop()
+
+            # Verify relock_app was NOT called
+            mock_main_app.relock_app.assert_not_called()
+            # Verify PID was added to _seen_pids
+            assert any(k[0] == 8888 for k in monitor._seen_pids)
+            # Verify auth_timestamp was initialized
+            assert mock_main_app.auth_timestamps.get("kitty", 0) > 0
+
+
+def test_get_process_display_env():
+    from core.auth_coordinator import get_process_display_env
+    dummy_environ_data = b"DISPLAY=:0\0WAYLAND_DISPLAY=wayland-0\0FOO=BAR\0XAUTHORITY=/home/user/.Xauthority\0"
+    with patch("os.path.exists", return_value=True), \
+         patch("builtins.open", MagicMock(return_value=MagicMock(__enter__=lambda s: MagicMock(read=lambda: dummy_environ_data), __exit__=lambda s, a, b, c: None))):
+        env = get_process_display_env(1234)
+        assert env.get("DISPLAY") == ":0"
+        assert env.get("WAYLAND_DISPLAY") == "wayland-0"
+        assert env.get("XAUTHORITY") == "/home/user/.Xauthority"
+        assert "FOO" not in env
+
+
+

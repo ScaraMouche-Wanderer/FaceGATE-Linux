@@ -13,8 +13,14 @@ import pytest
 from unittest.mock import patch, MagicMock
 import numpy as np
 
-# Patch the EMBEDDING_FILE and OLD_EMBEDDING_FILE paths to use temp directory
-# before importing the module under test.
+# Ensure recognition.cli_enroll module exists in sys.modules so patch("recognition.cli_enroll.enroll_user") works without triggering cv2 imports
+if "recognition.cli_enroll" not in sys.modules:
+    import types
+    mod = types.ModuleType("recognition.cli_enroll")
+    mod.enroll_user = MagicMock()
+    sys.modules["recognition.cli_enroll"] = mod
+    if "recognition" in sys.modules:
+        sys.modules["recognition"].cli_enroll = mod
 
 
 @pytest.fixture(autouse=True)
@@ -306,12 +312,51 @@ class TestDBusSecurityHardening:
         assert result is False, "SetAdminUser must fail when admin face verification fails"
         mock_app.verify_admin_face.assert_called_once()
 
+    def test_dbus_adaptor_exposes_request_admin_auth(self):
+        """RequestAdminAuth and RequestAdminAuthWithEnv must be exposed on FaceGateAdaptor."""
+        from locking.ipc_service import FaceGateAdaptor
+        assert hasattr(FaceGateAdaptor, "RequestAdminAuth"), \
+            "RequestAdminAuth must be exposed on FaceGateAdaptor"
+        assert hasattr(FaceGateAdaptor, "RequestAdminAuthWithEnv"), \
+            "RequestAdminAuthWithEnv must be exposed on FaceGateAdaptor"
+
+    def test_request_admin_auth_does_not_cache_session_authorization(self):
+        """RequestAdminAuth must call verify_admin_face and never cache in authorized_apps."""
+        from locking.ipc_service import FaceGateService
+        mock_app = MagicMock()
+        mock_app.verify_admin_face.return_value = True
+        service = FaceGateService(main_app=mock_app)
+
+        result = service.request_admin_auth_internal("Settings Access")
+        assert result is True
+        mock_app.verify_admin_face.assert_called_once_with("Settings Access")
+        # Ensure authorize_app was NEVER called
+        mock_app.authorize_app.assert_not_called()
+
+    def test_session_manager_rejects_pseudo_apps(self):
+        """SessionManager.authorize_app must ignore pseudo-apps not in get_protected_apps()."""
+        from core.session_manager import SessionManager
+        mock_config = {}
+        protected_provider = lambda: [{"id": "firefox.desktop", "name": "Firefox"}]
+        sm = SessionManager(mock_config, protected_provider)
+
+        sm.authorize_app("Settings Access")
+        assert sm.is_app_authorized("Settings Access") is False
+        assert "Settings Access" not in sm.authorized_apps
+
+        sm.authorize_app("Enrollment Access")
+        assert sm.is_app_authorized("Enrollment Access") is False
+        assert "Enrollment Access" not in sm.authorized_apps
+
+        sm.authorize_app("firefox.desktop")
+        assert sm.is_app_authorized("firefox.desktop") is True
+
 
 class TestCLIEnrollmentAuthentication:
     """Tests for facegate --enroll CLI authentication gate."""
 
     @patch("sys.exit", side_effect=SystemExit(1))
-    @patch("recognition.cli_enroll.enroll_user")
+    @patch("recognition.cli_enroll.enroll_user", create=True)
     @patch("security.credential_store.verify_password", return_value=False)
     @patch("sys.stdin.isatty", return_value=True)
     @patch("getpass.getpass", return_value="wrong_password")
@@ -337,7 +382,7 @@ class TestCLIEnrollmentAuthentication:
         mock_enroll.assert_not_called()
 
     @patch("sys.exit", side_effect=SystemExit(1))
-    @patch("recognition.cli_enroll.enroll_user")
+    @patch("recognition.cli_enroll.enroll_user", create=True)
     @patch("PySide6.QtDBus.QDBusConnection.sessionBus")
     @patch("PySide6.QtDBus.QDBusInterface")
     @patch("PySide6.QtDBus.QDBusReply")
@@ -367,7 +412,7 @@ class TestCLIEnrollmentAuthentication:
         mock_enroll.assert_not_called()
 
     @patch("sys.exit", side_effect=SystemExit(0))
-    @patch("recognition.cli_enroll.enroll_user")
+    @patch("recognition.cli_enroll.enroll_user", create=True)
     @patch("PySide6.QtDBus.QDBusConnection.sessionBus")
     @patch("PySide6.QtDBus.QDBusInterface")
     @patch("PySide6.QtDBus.QDBusReply")
@@ -457,9 +502,19 @@ class TestPersistentLockoutManager:
 class TestKeyPersistence:
     """Tests for persistent vault key storage and restoration."""
 
-    def test_key_persistence_roundtrip(self, temp_embedding_paths):
-        from database.embedding_store import set_cached_key, get_cached_key, clear_cached_key
+    def test_key_persistence_roundtrip(self, temp_embedding_paths, monkeypatch):
+        from database.embedding_store import set_cached_key, get_cached_key
         import database.embedding_store as es
+        from utils.config_loader import get_config
+
+        config = get_config()
+        monkeypatch.setitem(config.settings.setdefault("security", {}), "persist_vault_key", True)
+
+        mock_storage = {}
+        mock_keyring = MagicMock()
+        mock_keyring.set_password.side_effect = lambda service, name, pwd: mock_storage.__setitem__((service, name), pwd)
+        mock_keyring.get_password.side_effect = lambda service, name: mock_storage.get((service, name))
+        monkeypatch.setitem(sys.modules, "keyring", mock_keyring)
 
         test_key = os.urandom(32)
         set_cached_key(test_key)
@@ -472,9 +527,30 @@ class TestKeyPersistence:
         if os.path.exists(ram_file):
             os.remove(ram_file)
 
-        # get_cached_key should restore from persistent storage
+        # get_cached_key should restore from persistent storage when enabled
         restored = get_cached_key()
-        assert restored == test_key, "get_cached_key() must restore the key from persistent storage"
+        assert restored == test_key, "get_cached_key() must restore the key from persistent storage when persist_vault_key=True"
+
+    def test_key_persistence_disabled_by_default(self, temp_embedding_paths, monkeypatch):
+        from database.embedding_store import set_cached_key, get_cached_key
+        import database.embedding_store as es
+        from utils.config_loader import get_config
+
+        config = get_config()
+        monkeypatch.setitem(config.settings.setdefault("security", {}), "persist_vault_key", False)
+
+        test_key = os.urandom(32)
+        set_cached_key(test_key)
+
+        with es._cached_key_lock:
+            es._cached_key = None
+
+        ram_file = es._get_ram_key_file()
+        if os.path.exists(ram_file):
+            os.remove(ram_file)
+
+        # When persist_vault_key is False, get_cached_key must return None after RAM clearing
+        assert get_cached_key() is None
 
 
 

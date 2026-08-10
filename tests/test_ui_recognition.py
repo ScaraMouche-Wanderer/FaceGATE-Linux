@@ -296,27 +296,29 @@ class TestAuthDialog(unittest.TestCase):
 
     def test_password_mode_lockout_after_3_failures(self):
         """Password dialog should impose lockout after 3 failed attempts (tracked per app)."""
+        import tempfile
         from ui.auth_dialog import AuthDialog
-
-        # Reset persistent lockout state for test app
-        app_name = "Test App"
         from security.lockout_manager import reset_lockout, is_locked_out
-        reset_lockout(app_name)
 
-        dialog = AuthDialog(app_name, mode="password")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            lockout_path = os.path.join(tmp_dir, "lockout.json")
+            with patch("security.lockout_manager.LOCKOUT_FILE", lockout_path):
+                app_name = "Test App"
+                reset_lockout(app_name)
 
-        # Simulate 3 failed password attempts
-        with patch('security.credential_store.verify_password', return_value=False):
-            for _ in range(3):
-                dialog.password_input.setText("wrong")
-                dialog.handle_unlock()
+                dialog = AuthDialog(app_name, mode="password")
 
-        is_locked, remaining = is_locked_out(app_name)
-        self.assertTrue(is_locked)
-        self.assertGreater(remaining, 0.0)
+                # Simulate 3 failed password attempts
+                with patch('security.credential_store.verify_password', return_value=False):
+                    for _ in range(3):
+                        dialog.password_input.setText("wrong")
+                        dialog.handle_unlock()
 
-        # Clean up state
-        reset_lockout(app_name)
+                is_locked, remaining = is_locked_out(app_name)
+                self.assertTrue(is_locked)
+                self.assertGreater(remaining, 0.0)
+
+                reset_lockout(app_name)
 
 
 class TestSettingsWindow(unittest.TestCase):

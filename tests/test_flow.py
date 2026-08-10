@@ -42,6 +42,10 @@ class MockFaceGateAdaptor(QDBusAbstractAdaptor):
     def RequestAuth(self, app_identifier: str) -> bool:
         return self.service.request_auth_internal(app_identifier)
 
+    @Slot(str, dict, result=bool)
+    def RequestAuthWithEnv(self, app_identifier: str, env: dict) -> bool:
+        return self.service.request_auth_internal(app_identifier)
+
 
 def run_test():
     print("=== Starting D-Bus IPC Integration Test ===")
@@ -88,6 +92,15 @@ def run_test():
     print(f"Result: {reply.value()} (Pass: {reply.value() == True})")
     assert reply.value() == True, f"Expected True, got {reply.value()}"
 
+    # --- Scenario A2: RequestAuthWithEnv Success ---
+    print("\nScenario A2: Testing RequestAuthWithEnv Success (Expected: True)...")
+    from PySide6.QtDBus import QDBus
+    reply_env = QDBusReply(interface.callWithArgumentList(QDBus.CallMode.Block, "RequestAuthWithEnv", ["kitty.desktop", {"DISPLAY": ":0"}]))
+    if not reply_env.isValid():
+        print(f"D-Bus Call Failed: {reply_env.error().message()}")
+        sys.exit(1)
+    assert reply_env.value() == True
+
     # --- Scenario B: Auth Failure ---
     MOCK_AUTH_RESULT = False
     print("\nScenario B: Testing Authentication Failure (Expected: False)...")
@@ -106,8 +119,8 @@ def run_test():
         assert reply.isValid(), f"Call {i} failed: {reply.error().message()}"
         assert reply.value() == True
 
-    assert service_obj.auth_call_count == 7, \
-        f"Expected 7 total auth calls, got {service_obj.auth_call_count}"
+    assert service_obj.auth_call_count == 8, \
+        f"Expected 8 total auth calls, got {service_obj.auth_call_count}"
     print(f"Total auth calls processed: {service_obj.auth_call_count} ✓")
 
     print("\n=== All D-Bus Integration Tests Passed! ===")

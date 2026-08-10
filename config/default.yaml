@@ -26,6 +26,12 @@ security:
   pbkdf2_iterations: 600000
   salt_length_bytes: 16
   lock_settings_window: true
+  persist_vault_key: false
+  # deny_on_missing_state: If true (default), missing critical state files
+  # (embeddings.enc, lockout.json, etc.) after initial setup are treated as
+  # tamper attacks — the daemon locks down rather than failing open.
+  # Set to false only if you want legacy "fail-open" behavior.
+  deny_on_missing_state: true
 behavior:
   launcher_recheck_interval_minutes: 10
   notify_on_auth: true
@@ -36,8 +42,8 @@ behavior:
   uninstall_protection: true
   lock_on_sleep_or_lock: true
   theme: light
-  # color_palette: preset color scheme (iron_ember, violet_slate, amber_espresso, emerald_obsidian)
-  color_palette: iron_ember
+  sound_effects: true
+  sound_volume: 0.15
   # tray_icon_style: which preset glyph to use for the system tray icon.
   # One of: circle, square, shield, lock, gate. See src/ui/tray.py TRAY_ICON_STYLES.
   tray_icon_style: circle

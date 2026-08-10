@@ -44,10 +44,12 @@ For a full discussion of the security model, see the [README](README.md#security
 
 - **Mechanism**: FaceGATE-Linux enforces locking via a dual-layer approach:
   1. **Launcher Substitution**: It shadows the application's desktop entry (`.desktop` file) to run a helper wrapper that authenticates before executing the binary.
-  2. **Process Polling Monitor**: A background monitor (`AppMonitor`) polls running system processes at a configurable interval (default `0.4s`) to detect and suspend (via `SIGSTOP`) unauthorized instances of protected apps.
+-   2. **Process Polling Monitor**: A background monitor (`AppMonitor`) polls running system processes at a configurable interval (default `0.2s`) to detect and suspend (via `SIGSTOP`) unauthorized instances of protected apps.
 - **Direct-Launch Exposure**: Because process monitoring relies on a polling thread, there is a sub-second window of exposure between a process spawning and it being detected and suspended.
 - **Direct Binary Launch Bypass**: Processes launched directly via their absolute or relative binary paths (e.g. from a terminal, a custom script, or an IDE run configuration) completely bypass the launcher substitution hook. In these cases, protection relies solely on the background process monitor, meaning the application will launch and briefly execute for up to the duration of the polling interval before being suspended and gated by the authentication dialog.
 - **Fail-Closed Daemon Signals**: Terminal signals (`SIGTERM`, `SIGINT`) received by the daemon fail closed. Launcher substitutions remain active on disk to ensure protected applications are not exposed by killing the daemon process without prior biometric or password authentication.
+- **Environment Inheritance in Backstop Interception**: The process monitor backstop authentication path (`_process_auth_request`) inspects `/proc/<pid>/environ` of the target application to extract session environment variables (`DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`, `XDG_RUNTIME_DIR`, `QT_QPA_PLATFORM`, `XDG_SESSION_TYPE`, `DESKTOP_SESSION`) required to render the authentication GUI dialog within the user's active graphical session. As a result, the gated application has indirect influence over which display or X server the authentication prompt displays on.
+- **Profile Transfer Authorization**: Profile export and import operations (`.fgxfer`) re-encrypt face embeddings with PBKDF2-HMAC-SHA256 under a user-defined transfer passphrase. Export and import invocations are strictly gated behind admin face or master password authentication across both CLI and GUI interfaces to prevent unauthorized profile extraction even when the vault key is cached in RAM or keyring.
 
 ### Liveness Verification (Anti-Spoofing)
 
@@ -61,3 +63,4 @@ FaceGATE-Linux includes a basic motion-based liveness check to prevent static ph
 - **Key Derivation**: PBKDF2-HMAC-SHA256 with 600,000 iterations (OWASP 2024 recommendation)
 - **Salt**: 16 bytes, cryptographically random (`os.urandom`)
 - **Nonce**: 12 bytes (96-bit), fresh per encryption operation
+- **Vault Key Lifetime**: By default (`security.persist_vault_key: false`), the derived AES key is held exclusively in process RAM and user-private session RAM (`/run/user/{uid}/facegate.key`), cleared automatically upon session logout or system reboot. Enabling `persist_vault_key` allows key caching to OS keyring.

@@ -1,0 +1,36 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Run Ruff Linter
+        run: poetry run ruff check .
+
+      - name: Run Ruff Formatter Check
+        run: poetry run ruff format --check .
+
+      - name: Run Mypy Type Checks
+        run: poetry run mypy src/security/
+
+      - name: Run Pytest Suite
+        run: poetry run pytest tests/ -v
