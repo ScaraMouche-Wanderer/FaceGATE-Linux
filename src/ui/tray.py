@@ -195,8 +195,12 @@ class FaceGateTray(QSystemTrayIcon):
         """Re-renders tray icons after a config change (e.g. the user picked a
         different tray icon style in Settings) and applies the correct one for
         the current active/inactive state. Safe to call at any time."""
-        self._render_icons()
-        self.update_tray_state()
+        try:
+            self._render_icons()
+            self.update_tray_state()
+        except Exception as e:
+            import logging
+            logging.warning(f"Error refreshing tray icon style: {e}")
 
     def update_tray_state(self):
         """Updates the tray icon image depending on active status."""

@@ -186,21 +186,25 @@ class AuthDialog(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
         
-        # Determine screen-based size
-        from PySide6.QtGui import QGuiApplication
-        screen = QGuiApplication.primaryScreen()
-        if screen:
-            screen_size = screen.size()
+        # Determine screen-based size & center on cursor screen
+        from PySide6.QtGui import QGuiApplication, QCursor
+        target_screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+        if target_screen:
+            geom = target_screen.availableGeometry()
             if self.mode == "face":
-                width = max(420, min(int(screen_size.width() * 0.35), 600))
-                height = max(480, min(int(screen_size.height() * 0.55), 700))
+                width = max(420, min(int(geom.width() * 0.35), 600))
+                height = max(480, min(int(geom.height() * 0.55), 700))
                 self.resize(width, height)
                 self.setMinimumSize(400, 420)
             else:
-                width = max(380, min(int(screen_size.width() * 0.3), 500))
-                height = max(260, min(int(screen_size.height() * 0.35), 350))
+                width = max(380, min(int(geom.width() * 0.3), 500))
+                height = max(260, min(int(geom.height() * 0.35), 350))
                 self.resize(width, height)
                 self.setMinimumSize(360, 265)
+            self.move(
+                geom.x() + (geom.width() - self.width()) // 2,
+                geom.y() + (geom.height() - self.height()) // 2
+            )
         else:
             if self.mode == "face":
                 self.resize(440, 500)
@@ -630,15 +634,37 @@ class AuthDialog(QDialog):
                         total_dist += math.hypot(c2[0] - c1[0], c2[1] - c1[1])
                 
                 # Check liveness micro-motion unless explicitly disabled
+                # Check liveness micro-motion and passive texture check unless explicitly disabled
+                texture_passed = True
+                texture_reason = ""
+                if not liveness_disabled and matched_face:
+                    from recognition.liveness import check_texture_liveness
+                    x1, y1, x2, y2 = [int(v) for v in matched_face['bbox']]
+                    h, w, _ = frame.shape
+                    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
+                    if x2 > x1 and y2 > y1:
+                        crop = frame[y1:y2, x1:x2]
+                        texture_passed, tex_score, texture_reason = check_texture_liveness(crop)
+
                 if not liveness_disabled and total_dist < min_motion:
                     logging.info(f"Liveness motion check waiting: total motion {total_dist:.4f} < threshold {min_motion}")
                     self.status_label.setText("Verifying... slight movement recommended")
+                elif not liveness_disabled and not texture_passed:
+                    logging.warning(f"Passive texture liveness failed: {texture_reason}")
+                    self.status_label.setText("Verifying... adjust position / lighting")
                 else:
                     logging.info(f"Subprocess Auth: Matched enrolled user '{matched_user}' (Similarity: {matched_score:.4f}, Motion: {total_dist:.4f})")
-                    self.authenticated = True
                     self.final_score = matched_score
                     self.matched_user = matched_user
-                    self.accept()
+                    if self.mode == "face+password":
+                        logging.info("2FA Dual-Factor Auth: Face matched! Prompting for master password step.")
+                        self.face_verified = True
+                        if hasattr(self, "sub_label") and self.sub_label:
+                            self.sub_label.setText(f"👤 Face Verified ({matched_user})! Enter Master Password for 2FA:")
+                        self.switch_to_password_mode()
+                    else:
+                        self.authenticated = True
+                        self._show_success_overlay()
             else:
                 self.status_label.setText("Verifying face match…")
                 self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
@@ -653,7 +679,9 @@ class AuthDialog(QDialog):
                     self.status_label.setText("Scanning face... Click 'Use Password Instead' if needed.")
                     self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
                 if self.unknown_face_ticks >= 90: # ~3 seconds of continuous face scanning
-                    logging.info("Face recognition scan complete. Falling back to password.")
+                    logging.info("Face recognition scan complete. Recording biometric attempt & falling back to password.")
+                    from security.lockout_manager import record_failed_attempt
+                    record_failed_attempt(self.app_name)
                     self.switch_to_password_mode()
                     return
 
@@ -673,7 +701,9 @@ class AuthDialog(QDialog):
                     self.status_label.setStyleSheet(f"color: {c['WARNING_AMBER']}; font-size: 13px; font-weight: bold;")
                     self.close_match_attempts += 1
                     if self.close_match_attempts >= 3:
-                        logging.info("Too many close mismatch attempts. Falling back to password.")
+                        logging.info("Too many close mismatch attempts. Recording biometric attempt & falling back to password.")
+                        from security.lockout_manager import record_failed_attempt
+                        record_failed_attempt(self.app_name)
                         self.switch_to_password_mode()
                 else:
                     self.status_label.setText("Position your face in the camera view...")
@@ -729,8 +759,10 @@ class AuthDialog(QDialog):
                 print(key.hex())
                 sys.stdout.flush()
                 
-            self.accept()
+            self._show_success_overlay()
         else:
+            from ui.sound_effects import SoundManager
+            SoundManager.play_failure()
             attempts, lockout_until, remaining = record_failed_attempt(self.app_name)
             self.failed_pwd_attempts += 1
             self.password_input.selectAll()
@@ -839,6 +871,28 @@ class AuthDialog(QDialog):
             logging.info(f"Intruder selfie captured and saved to: {filepath}")
         except Exception as e:
             logging.error(f"Failed to save intruder selfie: {e}")
+
+    def _show_success_overlay(self):
+        """Shows animated green checkmark overlay before accepting dialog."""
+        try:
+            from ui.sound_effects import SoundManager
+            SoundManager.play_success()
+            # If running inside pytest unit test suite, accept immediately
+            import os, sys
+            if "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules:
+                self.cleanup_camera()
+                super().accept()
+                return
+
+            from ui.auth_overlays import AuthSuccessOverlay
+            # Stop camera to free resources while overlay plays
+            self.cleanup_camera()
+            overlay = AuthSuccessOverlay(self.main_container)
+            overlay.show_and_dismiss(callback=lambda: super(AuthDialog, self).accept(), delay_ms=900)
+        except Exception as e:
+            logging.error(f"Auth overlay error: {e}")
+            self.cleanup_camera()
+            super().accept()
 
     def accept(self):
         self.cleanup_camera()

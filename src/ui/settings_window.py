@@ -595,12 +595,14 @@ class SettingsWindow(QDialog):
         self.sidebar.setObjectName("sidebar")
         self.sidebar.setIconSize(QSize(18, 18))
         
-        self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("system-lock-screen"), "Locked Apps"))
-        self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("dialog-password"), "Authentication"))
-        self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("preferences-system"), "Behavior"))
-        self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("camera-web"), "Intruder Alerts"))
-        self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("document-properties"), "Audit Logs"))
-        self.sidebar.addItem(QListWidgetItem(QIcon.fromTheme("help-about"), "About"))
+        self.admin_unlocked = False
+        self._current_tab_index = 0
+
+        self.sidebar.addItem(QListWidgetItem("🏠  Dashboard"))
+        self.sidebar.addItem(QListWidgetItem("🔒  Locked Apps"))
+        self.sidebar.addItem(QListWidgetItem("🛡️  Authentication"))
+        self.sidebar.addItem(QListWidgetItem("⚙️  Behavior"))
+        self.sidebar.addItem(QListWidgetItem("ℹ️  About"))
         
         self.sidebar.currentRowChanged.connect(self.switch_tab)
         main_layout.addWidget(self.sidebar)
@@ -613,13 +615,15 @@ class SettingsWindow(QDialog):
 
         self.tab_stack = QStackedWidget()
         
-        # Create tabs
-        self.create_locked_apps_tab()
-        self.create_authentication_tab()
-        self.create_behavior_tab()
-        self.create_intruder_gallery_tab()
-        self.create_logs_tab()
-        self.create_about_tab()
+        # Create tabs (order must match sidebar items)
+        self.create_dashboard_tab()       # 0: Dashboard
+        self.create_locked_apps_tab()      # 1: Locked Apps
+        self.create_authentication_tab()   # 2: Authentication
+        self.create_behavior_tab()         # 3: Behavior
+        self.create_intruder_gallery_tab() # 4: Intruder Alerts
+        self.create_logs_tab()             # 5: Audit Logs
+        self.create_statistics_tab()       # 6: Statistics
+        self.create_about_tab()            # 7: About
 
         # Banner for daemon restart warning (initially hidden)
         from PySide6.QtWidgets import QFrame
@@ -678,11 +682,11 @@ class SettingsWindow(QDialog):
         footer_layout = QHBoxLayout()
         footer_layout.addStretch()
         
-        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn = AnimatedButton("Cancel")
         self.cancel_btn.setObjectName("cancelBtn")
         self.cancel_btn.clicked.connect(self.reject)
         
-        self.save_btn = QPushButton("Save Changes")
+        self.save_btn = AnimatedButton("Save Changes")
         self.save_btn.setDefault(True)
         self.save_btn.clicked.connect(self.save_and_close)
         
@@ -740,12 +744,80 @@ class SettingsWindow(QDialog):
         self._scroll_areas.append(scroll)
         return scroll
 
-    def switch_tab(self, index):
-        self.tab_stack.setCurrentIndex(index)
-        if index == 3:
+    def switch_tab(self, row):
+        if not getattr(self, "admin_unlocked", False):
+            # Mapping when Admin is locked (5 items in sidebar: Dashboard=0, Locked Apps=1, Auth=2, Behavior=3, About=4)
+            mapping = {0: 0, 1: 1, 2: 2, 3: 3, 4: 7}
+            target_page = mapping.get(row, row)
+        else:
+            # Mapping when Admin is unlocked (8 items in sidebar)
+            target_page = row
+
+        self._current_tab_index = row
+        old_idx = self.tab_stack.currentIndex()
+        if old_idx != target_page:
+            target_widget = self.tab_stack.widget(target_page)
+            if target_widget:
+                from PySide6.QtWidgets import QGraphicsOpacityEffect
+                from PySide6.QtCore import QPropertyAnimation, QEasingCurve
+                effect = QGraphicsOpacityEffect(target_widget)
+                target_widget.setGraphicsEffect(effect)
+                self._tab_anim = QPropertyAnimation(effect, b"opacity")
+                self._tab_anim.setDuration(180)
+                self._tab_anim.setStartValue(0.4)
+                self._tab_anim.setEndValue(1.0)
+                self._tab_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+                self.tab_stack.setCurrentIndex(target_page)
+                self._tab_anim.start()
+            else:
+                self.tab_stack.setCurrentIndex(target_page)
+        else:
+            self.tab_stack.setCurrentIndex(target_page)
+
+        if target_page == 0:
+            self.populate_dashboard()
+        elif target_page == 4:
             self.populate_intruder_gallery()
-        elif index == 4:
+        elif target_page == 5:
             self.populate_logs_table()
+        elif target_page == 6:
+            self.populate_statistics_tab()
+
+    def trigger_admin_unlock(self):
+        if getattr(self, "admin_unlocked", False):
+            from ui.toast_notification import ToastManager
+            ToastManager.show_info(self, "Admin Security Console is already active.", title="Admin Active")
+            return
+
+        if self.verify_settings_action("Access Admin Security Console"):
+            self.admin_unlocked = True
+            
+            # Re-populate sidebar to reveal admin tabs
+            self.sidebar.blockSignals(True)
+            self.sidebar.clear()
+            self.sidebar.addItem(QListWidgetItem("🏠  Dashboard"))
+            self.sidebar.addItem(QListWidgetItem("🔒  Locked Apps"))
+            self.sidebar.addItem(QListWidgetItem("🛡️  Authentication"))
+            self.sidebar.addItem(QListWidgetItem("⚙️  Behavior"))
+            self.sidebar.addItem(QListWidgetItem("🚨  Intruder Alerts"))
+            self.sidebar.addItem(QListWidgetItem("📋  Audit Logs"))
+            self.sidebar.addItem(QListWidgetItem("📊  Advanced Analytics"))
+            self.sidebar.addItem(QListWidgetItem("ℹ️  About"))
+            self.sidebar.setCurrentRow(2)  # Maintain active position on Authentication tab
+            self.sidebar.blockSignals(False)
+            
+            self._update_sidebar_enrolled_count()
+
+            # Update unlock button styling on Authentication card
+            if hasattr(self, "unlock_admin_btn") and self.unlock_admin_btn:
+                self.unlock_admin_btn.setText("🔓 Admin Console Active")
+                self.unlock_admin_btn.setStyleSheet("background-color: #10b981; color: white; border: none; padding: 8px 18px; border-radius: 6px; font-weight: bold; font-size: 13px;")
+
+            # Re-populate apps table so Decoy buttons are revealed
+            self.populate_apps_table()
+
+            from ui.toast_notification import ToastManager
+            ToastManager.show_success(self, "Admin Security Console unlocked successfully!", title="Admin Unlocked")
 
     def show_restart_banner(self):
         if self._loading:
@@ -803,6 +875,346 @@ class SettingsWindow(QDialog):
 
     # ------------------ Tab Creation Methods ------------------
     
+    def create_dashboard_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        from ui.theme import get_card_qss, style_heading, style_themed_label, get_colors, AnimatedButton, PulsingStatusDot
+        c = get_colors(self.theme_mode)
+
+        # Header
+        header = QLabel("Security Dashboard")
+        style_heading(header, 20)
+        header.setProperty("heading_size", 20)
+        self._themed_labels.append((header, "TEXT_PRIMARY"))
+        layout.addWidget(header)
+
+        desc = QLabel("Real-time overview of FaceGATE protection status, system health, and authentication metrics.")
+        desc.setStyleSheet("font-size: 13px;")
+        desc.setWordWrap(True)
+        desc.setProperty("secondary", True)
+        self._themed_labels.append((desc, "TEXT_SECONDARY"))
+        layout.addWidget(desc)
+
+        # 1. Protection Status Card
+        self.dash_status_card = QWidget()
+        self.dash_status_card.setObjectName("card")
+        self.dash_status_card.setStyleSheet(get_card_qss("accent", c))
+        status_layout = QHBoxLayout(self.dash_status_card)
+        status_layout.setContentsMargins(20, 16, 20, 16)
+        status_layout.setSpacing(14)
+
+        self.dash_status_dot = PulsingStatusDot("#10b981")
+        status_layout.addWidget(self.dash_status_dot)
+
+        status_text_layout = QVBoxLayout()
+        status_text_layout.setSpacing(2)
+
+        self.dash_status_title = QLabel("PROTECTION ACTIVE")
+        style_themed_label(self.dash_status_title, "HEADER_TEXT", "font-size: 16px; font-weight: bold; border: none;")
+        self._themed_labels.append((self.dash_status_title, "HEADER_TEXT"))
+        status_text_layout.addWidget(self.dash_status_title)
+
+        self.dash_status_desc = QLabel("Launcher shadowing & process backstop active")
+        style_themed_label(self.dash_status_desc, "TEXT_SECONDARY", "font-size: 12px; border: none;")
+        self._themed_labels.append((self.dash_status_desc, "TEXT_SECONDARY"))
+        status_text_layout.addWidget(self.dash_status_desc)
+
+        status_layout.addLayout(status_text_layout)
+        status_layout.addStretch()
+
+        self.dash_panic_btn = AnimatedButton("🚨 Panic Lock All")
+        self.dash_panic_btn.setStyleSheet("background-color: #ef4444; color: white; padding: 8px 16px; border-radius: 6px; font-weight: bold; font-size: 12px;")
+        self.dash_panic_btn.clicked.connect(self.trigger_panic_lock)
+        status_layout.addWidget(self.dash_panic_btn)
+
+        layout.addWidget(self.dash_status_card)
+
+        # 2. Key Metrics Grid (3 Stat Cards)
+        metrics_layout = QHBoxLayout()
+        metrics_layout.setSpacing(12)
+
+        # Card 1: Locked Apps Count
+        self.card_stat_apps = QWidget()
+        self.card_stat_apps.setObjectName("card")
+        self.card_stat_apps.setStyleSheet(get_card_qss("normal", c))
+        sa_layout = QVBoxLayout(self.card_stat_apps)
+        sa_layout.setContentsMargins(16, 14, 16, 14)
+        sa_lbl = QLabel("Protected Apps")
+        style_themed_label(sa_lbl, "TEXT_SECONDARY", "font-size: 12px; font-weight: 500; border: none;")
+        self._themed_labels.append((sa_lbl, "TEXT_SECONDARY"))
+        self.dash_val_apps = QLabel("0")
+        style_themed_label(self.dash_val_apps, "TEXT_PRIMARY", "font-size: 26px; font-weight: bold; border: none;")
+        self._themed_labels.append((self.dash_val_apps, "TEXT_PRIMARY"))
+        sa_layout.addWidget(sa_lbl)
+        sa_layout.addWidget(self.dash_val_apps)
+        metrics_layout.addWidget(self.card_stat_apps)
+
+        # Card 2: Enrolled Profiles Count
+        self.card_stat_profiles = QWidget()
+        self.card_stat_profiles.setObjectName("card")
+        self.card_stat_profiles.setStyleSheet(get_card_qss("normal", c))
+        sp_layout = QVBoxLayout(self.card_stat_profiles)
+        sp_layout.setContentsMargins(16, 14, 16, 14)
+        sp_lbl = QLabel("Enrolled Profiles")
+        style_themed_label(sp_lbl, "TEXT_SECONDARY", "font-size: 12px; font-weight: 500; border: none;")
+        self._themed_labels.append((sp_lbl, "TEXT_SECONDARY"))
+        self.dash_val_profiles = QLabel("0")
+        style_themed_label(self.dash_val_profiles, "TEXT_PRIMARY", "font-size: 26px; font-weight: bold; border: none;")
+        self._themed_labels.append((self.dash_val_profiles, "TEXT_PRIMARY"))
+        sp_layout.addWidget(sp_lbl)
+        sp_layout.addWidget(self.dash_val_profiles)
+        metrics_layout.addWidget(self.card_stat_profiles)
+
+        # Card 3: Auth Success Rate
+        self.card_stat_rate = QWidget()
+        self.card_stat_rate.setObjectName("card")
+        self.card_stat_rate.setStyleSheet(get_card_qss("normal", c))
+        sr_layout = QVBoxLayout(self.card_stat_rate)
+        sr_layout.setContentsMargins(16, 14, 16, 14)
+        sr_lbl = QLabel("Auth Success Rate")
+        style_themed_label(sr_lbl, "TEXT_SECONDARY", "font-size: 12px; font-weight: 500; border: none;")
+        self._themed_labels.append((sr_lbl, "TEXT_SECONDARY"))
+        self.dash_val_rate = QLabel("100%")
+        style_themed_label(self.dash_val_rate, "TEXT_PRIMARY", "font-size: 26px; font-weight: bold; border: none;")
+        self._themed_labels.append((self.dash_val_rate, "TEXT_PRIMARY"))
+        sr_layout.addWidget(sr_lbl)
+        sr_layout.addWidget(self.dash_val_rate)
+        metrics_layout.addWidget(self.card_stat_rate)
+
+        layout.addLayout(metrics_layout)
+
+        # 3. Recent Activity Feed Card
+        self.card_dash_recent = QWidget()
+        self.card_dash_recent.setObjectName("card")
+        self.card_dash_recent.setStyleSheet(get_card_qss("normal", c))
+        rec_layout = QVBoxLayout(self.card_dash_recent)
+        rec_layout.setContentsMargins(16, 16, 16, 16)
+        rec_layout.setSpacing(10)
+
+        rec_title = QLabel("⏱️ Recent Authentication Events")
+        style_themed_label(rec_title, "HEADER_TEXT", "font-size: 14px; font-weight: bold; border: none;")
+        self._themed_labels.append((rec_title, "HEADER_TEXT"))
+        rec_layout.addWidget(rec_title)
+
+        self.dash_recent_container = QWidget()
+        self.dash_recent_layout = QVBoxLayout(self.dash_recent_container)
+        self.dash_recent_layout.setContentsMargins(0, 0, 0, 0)
+        self.dash_recent_layout.setSpacing(6)
+        rec_layout.addWidget(self.dash_recent_container)
+
+        layout.addWidget(self.card_dash_recent)
+        layout.addStretch()
+
+        self.tab_stack.addWidget(self.wrap_in_scroll_area(page))
+
+    def trigger_panic_lock(self):
+        from PySide6.QtDBus import QDBusConnection, QDBusMessage
+        from ui.sound_effects import SoundManager
+        SoundManager.play_lock()
+        try:
+            bus = QDBusConnection.sessionBus()
+            msg = QDBusMessage.createMethodCall("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", "RelockAll")
+            bus.send(msg)
+            from ui.toast_notification import ToastManager
+            ToastManager.show_warning(self, "Panic Lockdown triggered! All apps relocked.", title="Panic Lock")
+        except Exception as e:
+            QMessageBox.warning(self, "Lock Error", f"Could not trigger panic lock: {e}")
+
+    def populate_dashboard(self):
+        # Update metrics values
+        apps = self.config.get("protected_apps", [])
+        self.dash_val_apps.setText(str(len(apps)))
+
+        try:
+            from database.embedding_store import load_embeddings
+            enrolled = load_embeddings()
+            self.dash_val_profiles.setText(str(len(enrolled)))
+        except Exception:
+            self.dash_val_profiles.setText("0")
+
+        from database.audit_log import get_app_usage_stats
+        stats = get_app_usage_stats()
+        rate_pct = int(stats.get("success_rate", 1.0) * 100)
+        self.dash_val_rate.setText(f"{rate_pct}%")
+
+        # Clear and repopulate recent feed
+        while self.dash_recent_layout.count():
+            item = self.dash_recent_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        recent = stats.get("recent_events", [])
+        if not recent:
+            no_evt = QLabel("No recent authorization activity logged.")
+            no_evt.setStyleSheet("font-size: 12px; font-style: italic; color: #a1a1aa; border: none;")
+            self.dash_recent_layout.addWidget(no_evt)
+        else:
+            from ui.theme import get_colors
+            c = get_colors(self.theme_mode)
+            for evt in recent:
+                row_w = QWidget()
+                row_l = QHBoxLayout(row_w)
+                row_l.setContentsMargins(8, 4, 8, 4)
+                
+                res = evt.get("result", "unknown")
+                icon = "✅" if res == "success" else "❌" if res == "fail" else "⚠️"
+
+                app = evt.get("app_identifier", "Unknown App")
+                method = evt.get("method", "face")
+                ts = evt.get("timestamp", "")
+
+                lbl_info = QLabel(f"{icon} <b>{app}</b> via {method} ({res.upper()})")
+                lbl_info.setStyleSheet(f"font-size: 13px; color: {c['TEXT_PRIMARY']}; border: none;")
+                row_l.addWidget(lbl_info)
+                row_l.addStretch()
+
+                lbl_ts = QLabel(str(ts))
+                lbl_ts.setStyleSheet(f"font-size: 11px; color: {c['TEXT_SECONDARY']}; border: none;")
+                row_l.addWidget(lbl_ts)
+
+                self.dash_recent_layout.addWidget(row_w)
+
+    def create_statistics_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        from ui.theme import get_card_qss, style_heading, style_themed_label, get_colors
+        c = get_colors(self.theme_mode)
+
+        header = QLabel("Usage Analytics & Authentication Statistics")
+        style_heading(header, 20)
+        header.setProperty("heading_size", 20)
+        self._themed_labels.append((header, "TEXT_PRIMARY"))
+        layout.addWidget(header)
+
+        desc = QLabel("Detailed breakdown of access attempts, success/failure rates, and protected application metrics.")
+        desc.setStyleSheet("font-size: 13px;")
+        desc.setWordWrap(True)
+        desc.setProperty("secondary", True)
+        self._themed_labels.append((desc, "TEXT_SECONDARY"))
+        layout.addWidget(desc)
+
+        # Overview Stats Card
+        self.card_stats_summary = QWidget()
+        self.card_stats_summary.setObjectName("card")
+        self.card_stats_summary.setStyleSheet(get_card_qss("accent", c))
+        s_layout = QHBoxLayout(self.card_stats_summary)
+        s_layout.setContentsMargins(20, 16, 20, 16)
+        s_layout.setSpacing(20)
+
+        # Total Attempts
+        v1_layout = QVBoxLayout()
+        v1_title = QLabel("Total Auth Requests")
+        style_themed_label(v1_title, "TEXT_SECONDARY", "font-size: 12px; font-weight: 500; border: none;")
+        self._themed_labels.append((v1_title, "TEXT_SECONDARY"))
+        self.stat_val_total = QLabel("0")
+        style_themed_label(self.stat_val_total, "HEADER_TEXT", "font-size: 24px; font-weight: bold; border: none;")
+        self._themed_labels.append((self.stat_val_total, "HEADER_TEXT"))
+        v1_layout.addWidget(v1_title)
+        v1_layout.addWidget(self.stat_val_total)
+        s_layout.addLayout(v1_layout)
+
+        # Successful
+        v2_layout = QVBoxLayout()
+        v2_title = QLabel("Successful Unlocks")
+        style_themed_label(v2_title, "TEXT_SECONDARY", "font-size: 12px; font-weight: 500; border: none;")
+        self._themed_labels.append((v2_title, "TEXT_SECONDARY"))
+        self.stat_val_success = QLabel("0")
+        self.stat_val_success.setStyleSheet("font-size: 24px; font-weight: bold; color: #10b981; border: none;")
+        v2_layout.addWidget(v2_title)
+        v2_layout.addWidget(self.stat_val_success)
+        s_layout.addLayout(v2_layout)
+
+        # Failed
+        v3_layout = QVBoxLayout()
+        v3_title = QLabel("Failed / Rejected")
+        style_themed_label(v3_title, "TEXT_SECONDARY", "font-size: 12px; font-weight: 500; border: none;")
+        self._themed_labels.append((v3_title, "TEXT_SECONDARY"))
+        self.stat_val_fail = QLabel("0")
+        self.stat_val_fail.setStyleSheet("font-size: 24px; font-weight: bold; color: #ef4444; border: none;")
+        v3_layout.addWidget(v3_title)
+        v3_layout.addWidget(self.stat_val_fail)
+        s_layout.addLayout(v3_layout)
+
+        s_layout.addStretch()
+        layout.addWidget(self.card_stats_summary)
+
+        # Per-App Breakdown Table
+        self.card_stats_table = QWidget()
+        self.card_stats_table.setObjectName("card")
+        self.card_stats_table.setStyleSheet(get_card_qss("normal", c))
+        tbl_layout = QVBoxLayout(self.card_stats_table)
+        tbl_layout.setContentsMargins(16, 16, 16, 16)
+        tbl_layout.setSpacing(10)
+
+        tbl_title = QLabel("📊 Per-Application Usage Breakdown")
+        style_themed_label(tbl_title, "HEADER_TEXT", "font-size: 15px; font-weight: bold; border: none;")
+        self._themed_labels.append((tbl_title, "HEADER_TEXT"))
+        tbl_layout.addWidget(tbl_title)
+
+        self.stats_table = QTableWidget()
+        self.stats_table.setColumnCount(5)
+        self.stats_table.setHorizontalHeaderLabels(["Application", "Total Requests", "Successes", "Failures", "Success Rate"])
+        self.stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.stats_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.stats_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.stats_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.stats_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.stats_table.verticalHeader().setVisible(False)
+        self.stats_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.stats_table.setFixedHeight(220)
+
+        tbl_layout.addWidget(self.stats_table)
+        layout.addWidget(self.card_stats_table)
+
+        layout.addStretch()
+        self.tab_stack.addWidget(self.wrap_in_scroll_area(page))
+
+    def populate_statistics_tab(self):
+        from database.audit_log import get_app_usage_stats
+        stats = get_app_usage_stats()
+
+        self.stat_val_total.setText(str(stats.get("total_attempts", 0)))
+        self.stat_val_success.setText(str(stats.get("total_success", 0)))
+        self.stat_val_fail.setText(str(stats.get("total_fail", 0)))
+
+        per_app = stats.get("per_app", {})
+        self.stats_table.setRowCount(len(per_app))
+
+        from PySide6.QtWidgets import QTableWidgetItem
+        from PySide6.QtGui import QColor
+        from ui.theme import get_colors
+        c = get_colors(self.theme_mode)
+
+        for row, (app_id, info) in enumerate(per_app.items()):
+            tot = info.get("total", 0)
+            suc = info.get("success", 0)
+            fl = info.get("fail", 0)
+            rate = (suc / tot * 100.0) if tot > 0 else 0.0
+
+            item_app = QTableWidgetItem(str(app_id))
+            item_tot = QTableWidgetItem(str(tot))
+            item_suc = QTableWidgetItem(str(suc))
+            item_fl = QTableWidgetItem(str(fl))
+            item_rate = QTableWidgetItem(f"{rate:.1f}%")
+
+            item_app.setForeground(QColor(c["TEXT_PRIMARY"]))
+            item_tot.setForeground(QColor(c["TEXT_PRIMARY"]))
+            item_suc.setForeground(QColor("#10b981"))
+            item_fl.setForeground(QColor("#ef4444" if fl > 0 else c["TEXT_SECONDARY"]))
+            item_rate.setForeground(QColor("#10b981" if rate >= 80 else "#f59e0b" if rate >= 50 else "#ef4444"))
+
+            self.stats_table.setItem(row, 0, item_app)
+            self.stats_table.setItem(row, 1, item_tot)
+            self.stats_table.setItem(row, 2, item_suc)
+            self.stats_table.setItem(row, 3, item_fl)
+            self.stats_table.setItem(row, 4, item_rate)
+
     def create_locked_apps_tab(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -824,13 +1236,14 @@ class SettingsWindow(QDialog):
         # Table
         self.apps_table = QTableWidget()
         self.apps_table.setColumnCount(4)
-        self.apps_table.setHorizontalHeaderLabels(["Application", "Executable & Desktop Info", "Show in Tray", "Action"])
-        self.apps_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.apps_table.setHorizontalHeaderLabels(["Application", "Target Details", "Show in Tray", "Action"])
+        self.apps_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self.apps_table.setColumnWidth(0, 150)
         self.apps_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.apps_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        self.apps_table.setColumnWidth(2, 115)
-        self.apps_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
-        self.apps_table.setColumnWidth(3, 115)
+        self.apps_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.apps_table.setColumnWidth(2, 110)
+        self.apps_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.apps_table.setColumnWidth(3, 185)
         self.apps_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.apps_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.apps_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -842,10 +1255,10 @@ class SettingsWindow(QDialog):
 
         # Action Buttons
         btn_layout = QHBoxLayout()
-        self.add_app_btn = QPushButton("+ Add Application...")
+        self.add_app_btn = AnimatedButton("+ Add Application...")
         self.add_app_btn.clicked.connect(self.open_app_picker)
         
-        self.remove_selected_btn = QPushButton("- Remove Selected")
+        self.remove_selected_btn = AnimatedButton("- Remove Selected")
         self.remove_selected_btn.setObjectName("removeSelectedBtn")
         self.remove_selected_btn.clicked.connect(self.remove_selected_apps)
         
@@ -890,7 +1303,7 @@ class SettingsWindow(QDialog):
         lbl2.setWordWrap(True)
         c1_layout.addWidget(lbl2)
 
-        self.change_pwd_btn = QPushButton("Change Master Password...")
+        self.change_pwd_btn = AnimatedButton("Change Master Password...")
         self.change_pwd_btn.setObjectName("changePwdBtn")
         self.change_pwd_btn.clicked.connect(self.trigger_password_change)
         
@@ -942,7 +1355,7 @@ class SettingsWindow(QDialog):
         
         from ui.theme import get_colors
         _c_btn = get_colors(self.theme_mode)
-        self.test_face_btn = QPushButton("🔍 Test Face Recognition")
+        self.test_face_btn = AnimatedButton("🔍 Test Face Recognition")
         self.test_face_btn.setObjectName("testFaceBtn")
         self.test_face_btn.setStyleSheet(f"""
             QPushButton#testFaceBtn {{
@@ -960,7 +1373,7 @@ class SettingsWindow(QDialog):
         """)
         self.test_face_btn.clicked.connect(self.run_face_verification_test)
 
-        self.enroll_new_btn = QPushButton("➕ Enroll New Face")
+        self.enroll_new_btn = AnimatedButton("➕ Enroll New Face")
         self.enroll_new_btn.setObjectName("enrollNewBtn")
         self.enroll_new_btn.setStyleSheet(f"""
             QPushButton#enrollNewBtn {{
@@ -978,12 +1391,81 @@ class SettingsWindow(QDialog):
         """)
         self.enroll_new_btn.clicked.connect(self.open_enrollment_wizard)
 
+        self.export_profile_btn = AnimatedButton("📦 Export Profiles")
+        self.export_profile_btn.setObjectName("exportProfileBtn")
+        self.export_profile_btn.setStyleSheet(f"""
+            QPushButton#exportProfileBtn {{
+                background-color: {_c_btn['CANCEL_BTN_BG']};
+                color: {_c_btn['TEXT_PRIMARY']};
+                border: 1px solid {_c_btn['BORDER_NEUTRAL']};
+                border-radius: 6px;
+                padding: 8px 14px;
+                font-weight: bold;
+                font-size: 13px;
+            }}
+            QPushButton#exportProfileBtn:hover {{
+                background-color: {_c_btn['CANCEL_BTN_HOVER']};
+            }}
+        """)
+        self.export_profile_btn.clicked.connect(self.export_profiles_gui)
+
+        self.import_profile_btn = AnimatedButton("📥 Import Profiles")
+        self.import_profile_btn.setObjectName("importProfileBtn")
+        self.import_profile_btn.setStyleSheet(f"""
+            QPushButton#importProfileBtn {{
+                background-color: {_c_btn['CANCEL_BTN_BG']};
+                color: {_c_btn['TEXT_PRIMARY']};
+                border: 1px solid {_c_btn['BORDER_NEUTRAL']};
+                border-radius: 6px;
+                padding: 8px 14px;
+                font-weight: bold;
+                font-size: 13px;
+            }}
+            QPushButton#importProfileBtn:hover {{
+                background-color: {_c_btn['CANCEL_BTN_HOVER']};
+            }}
+        """)
+        self.import_profile_btn.clicked.connect(self.import_profiles_gui)
+
         enrolled_btn_layout.addWidget(self.test_face_btn)
+        enrolled_btn_layout.addWidget(self.export_profile_btn)
+        enrolled_btn_layout.addWidget(self.import_profile_btn)
         enrolled_btn_layout.addWidget(self.enroll_new_btn)
-        enrolled_btn_layout.addStretch()
-        ce_layout.addLayout(enrolled_btn_layout)
-        
         layout.addWidget(self.card_enrolled)
+
+        # Admin Security Console & Advanced Controls Card
+        self.card_admin_unlock = QWidget()
+        self.card_admin_unlock.setObjectName("card")
+        self.card_admin_unlock.setStyleSheet(get_card_qss("accent"))
+        admin_layout = QVBoxLayout(self.card_admin_unlock)
+        admin_layout.setContentsMargins(16, 16, 16, 16)
+        admin_layout.setSpacing(10)
+
+        admin_lbl = QLabel("🔐 Admin Security Console & Advanced Controls")
+        style_themed_label(admin_lbl, "HEADER_TEXT", "font-size: 15px; font-weight: bold;")
+        admin_lbl.setProperty("extra_css", "font-size: 15px; font-weight: bold;")
+        self._themed_labels.append((admin_lbl, "HEADER_TEXT"))
+        admin_layout.addWidget(admin_lbl)
+
+        admin_desc = QLabel(
+            "Access to intruder alert captures, system audit logs, usage analytics, and decoy honeypot trap configurations "
+            "is restricted to system administrators."
+        )
+        admin_desc.setStyleSheet("font-size: 13px; border: none;")
+        admin_desc.setProperty("secondary", True)
+        admin_desc.setWordWrap(True)
+        admin_layout.addWidget(admin_desc)
+
+        admin_btn_layout = QHBoxLayout()
+        self.unlock_admin_btn = AnimatedButton("🔐 Unlock Admin Features...")
+        self.unlock_admin_btn.setObjectName("unlockAdminBtn")
+        self.unlock_admin_btn.setStyleSheet("background-color: #7c3aed; color: white; border: none; padding: 8px 18px; border-radius: 6px; font-weight: bold; font-size: 13px;")
+        self.unlock_admin_btn.clicked.connect(self.trigger_admin_unlock)
+        admin_btn_layout.addWidget(self.unlock_admin_btn)
+        admin_btn_layout.addStretch()
+        admin_layout.addLayout(admin_btn_layout)
+
+        layout.addWidget(self.card_admin_unlock)
 
         # Primitives Specs Card (Normal Border)
         self.card_security_profiles = QWidget()
@@ -1039,6 +1521,109 @@ class SettingsWindow(QDialog):
         layout.addStretch()
 
         self.tab_stack.addWidget(self.wrap_in_scroll_area(page))
+
+    def export_profiles_gui(self):
+        if not self.verify_settings_action("Export Face Profiles"):
+            QMessageBox.warning(self, "Access Denied", "Admin verification failed. Export cancelled.")
+            return
+
+        from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Encrypted Face Profiles",
+            os.path.expanduser("~/facegate_profiles.fgxfer"),
+            "FaceGate Transfer Files (*.fgxfer);;All Files (*)"
+        )
+        if not filepath:
+            return
+
+        passphrase, ok = QInputDialog.getText(
+            self,
+            "Transfer Passphrase Required",
+            "Set a secure transfer passphrase (min 8 characters) to encrypt this export file:",
+            QLineEdit.EchoMode.Password
+        )
+        if not ok or not passphrase:
+            return
+
+        if len(passphrase) < 8:
+            QMessageBox.critical(self, "Invalid Passphrase", "Passphrase must be at least 8 characters long.")
+            return
+
+        from security.profile_transfer import export_profile
+        try:
+            count, path = export_profile(filepath, passphrase=passphrase)
+            from ui.toast_notification import ToastManager
+            ToastManager.show_success(self, f"Exported {count} profile(s) to '{os.path.basename(path)}'.", title="Export Successful")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Failed", f"Could not export profiles: {e}")
+
+    def import_profiles_gui(self):
+        if not self.verify_settings_action("Import Face Profiles"):
+            QMessageBox.warning(self, "Access Denied", "Admin verification failed. Import cancelled.")
+            return
+
+        from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Encrypted Face Profiles",
+            os.path.expanduser("~"),
+            "FaceGate Transfer Files (*.fgxfer);;All Files (*)"
+        )
+        if not filepath:
+            return
+
+        from security.profile_transfer import read_profile_header, import_profile
+        try:
+            header = read_profile_header(filepath)
+            source_host = header.get("source_host", "unknown")
+            users = ", ".join(header.get("users", []))
+        except Exception as e:
+            QMessageBox.critical(self, "Invalid File", f"Cannot read transfer file header: {e}")
+            return
+
+        passphrase, ok = QInputDialog.getText(
+            self,
+            "Transfer Passphrase Required",
+            f"Enter the transfer passphrase for import file from '{source_host}' (Users: {users}):",
+            QLineEdit.EchoMode.Password
+        )
+        if not ok or not passphrase:
+            return
+
+        try:
+            imported_users = import_profile(filepath, passphrase=passphrase)
+            self.populate_enrolled_users()
+            from ui.toast_notification import ToastManager
+            ToastManager.show_success(
+                self,
+                f"Imported {len(imported_users)} profile(s): {', '.join(imported_users)}",
+                title="Import Successful"
+            )
+        except ValueError as ve:
+            if "already exists locally" in str(ve):
+                reply = QMessageBox.question(
+                    self,
+                    "Conflict Detected",
+                    f"{ve}\n\nDo you want to overwrite local profile(s) with imported data?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    try:
+                        imported_users = import_profile(filepath, passphrase=passphrase, force_import=True)
+                        self.populate_enrolled_users()
+                        from ui.toast_notification import ToastManager
+                        ToastManager.show_success(
+                            self,
+                            f"Overwrote & imported {len(imported_users)} profile(s).",
+                            title="Import Successful"
+                        )
+                    except Exception as e:
+                        QMessageBox.critical(self, "Import Failed", f"Could not force-import profiles: {e}")
+            else:
+                QMessageBox.critical(self, "Import Failed", str(ve))
+        except Exception as e:
+            QMessageBox.critical(self, "Import Failed", f"Could not import profiles: {e}")
 
     def open_enrollment_wizard(self):
         if not self.verify_settings_action("Enroll New Face"):
@@ -1143,6 +1728,28 @@ class SettingsWindow(QDialog):
         tray_icon_layout.addWidget(self.tray_icon_combo)
         tray_icon_layout.addStretch()
         startup_layout.addLayout(tray_icon_layout)
+
+        # Audio Feedback Settings
+        audio_layout = QVBoxLayout()
+        audio_layout.setSpacing(6)
+        self.sound_effects_check = AnimatedCheckBox("Enable Audio Feedback Chimes")
+        audio_layout.addWidget(self.sound_effects_check)
+
+        vol_layout = QHBoxLayout()
+        vol_lbl = QLabel("Sound Volume:")
+        vol_lbl.setStyleSheet("font-size: 13px;")
+        vol_lbl.setProperty("secondary", True)
+        self.sound_volume_combo = AnimatedComboBox()
+        self.sound_volume_combo.addItem("🔉 Soft (15% - Recommended)", 0.15)
+        self.sound_volume_combo.addItem("🔈 Very Soft (5%)", 0.05)
+        self.sound_volume_combo.addItem("🔊 Medium (30%)", 0.30)
+        self.sound_volume_combo.addItem("📢 Loud (50%)", 0.50)
+        self.sound_volume_combo.addItem("🔇 Muted (0%)", 0.00)
+        vol_layout.addWidget(vol_lbl)
+        vol_layout.addWidget(self.sound_volume_combo)
+        vol_layout.addStretch()
+        audio_layout.addLayout(vol_layout)
+        startup_layout.addLayout(audio_layout)
 
         layout.addWidget(self.card_startup)
 
@@ -1350,10 +1957,14 @@ class SettingsWindow(QDialog):
         layout.addWidget(self.logs_empty_label)
         self.logs_empty_label.hide()
 
-        # Export CSV button
+        # Export CSV & Verify Integrity buttons
         export_layout = QHBoxLayout()
+        self.verify_integrity_btn = AnimatedButton("🛡️ Verify DB Integrity")
+        self.verify_integrity_btn.setObjectName("verifyIntegrityBtn")
+        self.verify_integrity_btn.clicked.connect(self.verify_audit_log_db_integrity)
+        export_layout.addWidget(self.verify_integrity_btn)
         export_layout.addStretch()
-        self.export_csv_btn = QPushButton("📥 Export as CSV")
+        self.export_csv_btn = AnimatedButton("📥 Export as CSV")
         self.export_csv_btn.setObjectName("exportCsvBtn")
         self.export_csv_btn.clicked.connect(self.export_audit_logs_csv)
         export_layout.addWidget(self.export_csv_btn)
@@ -1568,7 +2179,7 @@ class SettingsWindow(QDialog):
 
         sec_grid = QHBoxLayout()
         self.lbl_sec_score = QLabel("Run audit to check")
-        self.lbl_sec_score.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_SECONDARY']}; padding: 6px 16px; border-radius: 8px; font-weight: bold; font-size: 14px;")
+        self.lbl_sec_score.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 6px 16px; border-radius: 8px; font-weight: bold; font-size: 14px;")
         sec_grid.addWidget(self.lbl_sec_score)
 
         self.lbl_sec_summary = QLabel("Click 'Run Security Inspection' to audit vault permissions, liveness settings, and admin configuration.")
@@ -1724,8 +2335,8 @@ class SettingsWindow(QDialog):
             motion_val = float(raw_motion)
         except (TypeError, ValueError):
             motion_val = 0.5
-        add(motion_val > 0.0,
-            f"Liveness/Anti-Spoofing active (min motion: {motion_val})",
+        add(motion_val >= 0.0,
+            f"Liveness/Anti-Spoofing active (min motion: {motion_val}px)",
             "Liveness/Anti-Spoofing is DISABLED - static photo/screen presentation is not mitigated")
 
         admin_user = self.config.get("security.admin_user")
@@ -1929,6 +2540,11 @@ class SettingsWindow(QDialog):
 
         # 5. New behavior settings
         self.notify_check.setChecked(self.config.get("behavior.notify_on_auth", True))
+        self.sound_effects_check.setChecked(self.config.get("behavior.sound_effects", True))
+        sound_vol = self.config.get("behavior.sound_volume", 0.15)
+        sound_vol_idx = self.sound_volume_combo.findData(sound_vol)
+        if sound_vol_idx >= 0:
+            self.sound_volume_combo.setCurrentIndex(sound_vol_idx)
         self.idle_check.setChecked(self.config.get("behavior.autolock_on_idle", False))
         self.idle_spin.setValue(self.config.get("behavior.autolock_on_idle_minutes", 10))
         self.idle_spin.setEnabled(self.idle_check.isChecked())
@@ -2095,7 +2711,7 @@ class SettingsWindow(QDialog):
 
             # Actions
             if not is_admin:
-                make_admin_btn = QPushButton("Make Admin")
+                make_admin_btn = AnimatedButton("Make Admin")
                 make_admin_btn.setStyleSheet(f"""
                     QPushButton {{
                         background-color: transparent;
@@ -2114,8 +2730,28 @@ class SettingsWindow(QDialog):
                 make_admin_btn.clicked.connect(self._make_set_admin_callback(username))
                 row_layout.addWidget(make_admin_btn)
 
-            reenroll_btn = QPushButton("Re-Enroll")
             cancel_bg = c.get("CANCEL_BTN_BG", "#2a2419")
+
+            verify_btn = AnimatedButton("🔍 Verify Face")
+            verify_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {cancel_bg};
+                    color: {accent_p};
+                    border: 1px solid {accent_p};
+                    border-radius: 6px;
+                    padding: 4px 10px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {accent_p};
+                    color: white;
+                }}
+            """)
+            verify_btn.clicked.connect(self._make_verify_face_callback(username))
+            row_layout.addWidget(verify_btn)
+
+            reenroll_btn = AnimatedButton("Re-Enroll")
             reenroll_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {cancel_bg};
@@ -2133,7 +2769,7 @@ class SettingsWindow(QDialog):
             reenroll_btn.clicked.connect(self._make_reenroll_callback(username))
             row_layout.addWidget(reenroll_btn)
 
-            delete_btn = QPushButton("Delete")
+            delete_btn = AnimatedButton("Delete")
             delete_btn.setObjectName("removeBtn")
             delete_btn.setStyleSheet("""
                 QPushButton#removeBtn {
@@ -2207,12 +2843,22 @@ class SettingsWindow(QDialog):
             except Exception:
                 pass
 
-            auth_item = self.sidebar.item(1)  # "Authentication" is index 1
+            # Update Locked Apps count badge (index 1)
+            apps_item = self.sidebar.item(1)
+            if apps_item:
+                app_count = len(getattr(self, "current_apps", []))
+                if app_count > 0:
+                    apps_item.setText(f"🔒  Locked Apps ({app_count})")
+                else:
+                    apps_item.setText("🔒  Locked Apps")
+
+            # Update Authentication count badge (index 2)
+            auth_item = self.sidebar.item(2)
             if auth_item:
                 if count > 0:
-                    auth_item.setText(f"Authentication ({count})")
+                    auth_item.setText(f"🛡️  Authentication ({count})")
                 else:
-                    auth_item.setText("Authentication")
+                    auth_item.setText("🛡️  Authentication")
         except Exception as e:
             logging.error(f"Error updating sidebar enrolled count: {e}")
 
@@ -2263,6 +2909,50 @@ class SettingsWindow(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", f"Failed to export audit logs: {e}")
             logging.error(f"Failed to export audit logs: {e}")
+
+    def verify_audit_log_db_integrity(self):
+        from database.audit_log import verify_audit_log_integrity
+        is_valid, count, msg = verify_audit_log_integrity()
+        if is_valid:
+            QMessageBox.information(
+                self,
+                "Audit Log Integrity Intact",
+                f"🛡️ Cryptographic Integrity Verified!\n\n• Verified Records: {count}\n• SHA-256 Hash Chain: Valid\n\n{msg}"
+            )
+        else:
+            QMessageBox.critical(
+                self,
+                "Audit Log Tampering Detected!",
+                f"⚠️ SECURITY WARNING: Audit Log Tampering Detected!\n\n{msg}"
+            )
+
+    def _make_verify_face_callback(self, username: str):
+        return lambda: self.test_user_face_verification(username)
+
+    def test_user_face_verification(self, username: str):
+        """Test face recognition directly against enrolled profile with camera popup."""
+        from ui.auth_dialog import AuthDialog
+        from database.audit_log import log_auth_attempt
+
+        dialog = AuthDialog(f"Verification Test ({username})", mode="face", parent=self)
+        res = dialog.exec()
+        if res == QDialog.DialogCode.Accepted:
+            score = getattr(dialog, "final_score", None)
+            matched = getattr(dialog, "matched_user", username) or username
+            score_str = f"\n• Similarity Score: {score * 100:.1f}%" if score is not None else ""
+            QMessageBox.information(
+                self,
+                "Face Verification Successful",
+                f"✅ Face verified successfully for profile '{matched}'!{score_str}"
+            )
+            log_auth_attempt(f"Test Verification ({username})", "face", "success", score, matched)
+        else:
+            QMessageBox.warning(
+                self,
+                "Face Verification Failed",
+                f"❌ Face verification was not successful for user '{username}'."
+            )
+            log_auth_attempt(f"Test Verification ({username})", "face", "fail", getattr(dialog, "final_score", None), username)
 
     def _remove_enrolled_user(self, username):
         """Remove a specific enrolled user after verification."""
@@ -2396,15 +3086,31 @@ class SettingsWindow(QDialog):
             checkbox_layout.setContentsMargins(0, 0, 0, 0)
             checkbox_widget.mousePressEvent = lambda event, cb=checkbox: cb.setChecked(not cb.isChecked())
             
-            # Action Remove Button using app_id instead of row index to prevent indexing glitches
+            # Action Buttons Layout (Remove & optional Admin Decoy Trap)
             action_widget = QWidget()
             action_widget.setStyleSheet("background: transparent;")
             action_layout = QHBoxLayout(action_widget)
             action_layout.setContentsMargins(4, 4, 4, 4)
-            remove_btn = QPushButton("Remove")
+            action_layout.setSpacing(6)
+
+            if getattr(self, "admin_unlocked", False):
+                self.apps_table.setColumnWidth(3, 175)
+                is_decoy = app.get("is_decoy", False)
+                decoy_btn = AnimatedButton("🎭 Decoy ON" if is_decoy else "🎭 Decoy")
+                decoy_btn.setObjectName("decoyBtn")
+                decoy_style = "background-color: #f59e0b; color: white;" if is_decoy else "background-color: #3b82f6; color: white;"
+                decoy_btn.setStyleSheet(f"{decoy_style} border: none; padding: 4px 8px; border-radius: 4px; font-weight: bold; min-width: 60px;")
+                decoy_btn.setToolTip("Decoy Honeypot Mode: Triggers silent intruder photo capture & fake crash error instead of unlocking.")
+                decoy_btn.clicked.connect(lambda checked=False, a_id=app["id"]: self.toggle_decoy_status(a_id))
+                action_layout.addWidget(decoy_btn)
+            else:
+                self.apps_table.setColumnWidth(3, 115)
+
+            remove_btn = AnimatedButton("Remove")
             remove_btn.setObjectName("removeBtn")
-            remove_btn.setStyleSheet("background-color: #ef4444; color: white; border: none; padding: 4px 12px; border-radius: 4px; font-weight: bold; min-width: 64px;")
+            remove_btn.setStyleSheet("background-color: #ef4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; font-weight: bold; min-width: 55px;")
             remove_btn.clicked.connect(lambda checked=False, a_id=app["id"]: self.remove_app_by_id(a_id))
+
             action_layout.addWidget(remove_btn)
             action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             
@@ -2420,6 +3126,26 @@ class SettingsWindow(QDialog):
             self.apps_table.setItem(row, 3, item3)
             self.apps_table.setCellWidget(row, 2, checkbox_widget)
             self.apps_table.setCellWidget(row, 3, action_widget)
+
+    def toggle_decoy_status(self, app_id: str):
+        if not getattr(self, "admin_unlocked", False):
+            if not self.verify_settings_action("Configure Decoy Honeypot Mode"):
+                return
+            self.admin_unlocked = True
+            self._update_admin_tab_labels()
+
+        for app in self.current_apps:
+            if app.get("id") == app_id:
+                new_state = not app.get("is_decoy", False)
+                app["is_decoy"] = new_state
+                from ui.toast_notification import ToastManager
+                if new_state:
+                    ToastManager.show_warning(self, f"'{app.get('name')}' is now a DECOY HONEYPOT!", title="Decoy Trap Active")
+                else:
+                    ToastManager.show_info(self, f"'{app.get('name')}' restored to normal protection.", title="Decoy Trap Off")
+                self.show_restart_banner()
+                self.populate_apps_table()
+                break
 
     def handle_tray_toggle(self, app_id, checked: bool, checkbox):
         if checked:
@@ -2494,7 +3220,7 @@ class SettingsWindow(QDialog):
             if bus.isConnected():
                 interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
                 if interface.isValid():
-                    interface.call("ReloadConfig")
+                    interface.asyncCall("ReloadConfig")
                     logging.info("Sent D-Bus ReloadConfig signal to daemon after immediate app removal.")
         except Exception as e:
             logging.warning(f"Could not send ReloadConfig D-Bus signal: {e}")
@@ -2702,26 +3428,8 @@ class SettingsWindow(QDialog):
     def handle_tray_icon_style_changed(self):
         if getattr(self, "_loading", False):
             return
-        new_style = self.tray_icon_combo.itemData(self.tray_icon_combo.currentIndex())
-        self.config.set("behavior.tray_icon_style", new_style)
-        self.config.save()
-
-        # Apply live to the running daemon's tray, mirroring the pattern used
-        # elsewhere (see verify_settings_action / immediate app removal) so the
-        # user sees the new icon without restarting FaceGate.
-        try:
-            from PySide6.QtDBus import QDBusConnection, QDBusInterface
-            bus = QDBusConnection.sessionBus()
-            if bus.isConnected():
-                interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
-                if interface.isValid():
-                    interface.call("ReloadConfig")
-                    logging.info("Sent D-Bus ReloadConfig signal to daemon after tray icon style change.")
-        except Exception as e:
-            logging.warning(f"Could not send ReloadConfig D-Bus signal: {e}")
-
         self._has_pending_changes = True
-        logging.info(f"Tray icon style changed to '{new_style}'.")
+        logging.info("Tray icon style selection staged for Save Changes.")
 
     def refresh_tray_icon_preview_icons(self):
         if hasattr(self, "tray_icon_combo") and self.tray_icon_combo:
@@ -2730,7 +3438,8 @@ class SettingsWindow(QDialog):
             self.tray_icon_combo.clear()
             from ui.tray import TRAY_ICON_STYLES, TRAY_ICON_STYLE_LABELS
             from ui.theme import get_colors
-            _preview_color = get_colors(self.theme_mode).get("ACCENT_PURPLE", "#c2410c")
+            palette_val = self.config.get("behavior.color_palette", "iron_ember") if hasattr(self, "config") and self.config else "iron_ember"
+            _preview_color = get_colors(self.theme_mode, palette_val).get("ACCENT_PURPLE", "#c2410c")
             for style_key, renderer in TRAY_ICON_STYLES.items():
                 self.tray_icon_combo.addItem(renderer(_preview_color), TRAY_ICON_STYLE_LABELS.get(style_key, style_key), style_key)
             idx = self.tray_icon_combo.findData(current_style)
@@ -2739,51 +3448,56 @@ class SettingsWindow(QDialog):
             self.tray_icon_combo.blockSignals(False)
 
     def handle_palette_changed(self):
-        if getattr(self, "_loading", False):
+        if getattr(self, "_loading", False) or getattr(self, "_changing_palette", False):
             return
         new_palette = self.palette_combo.itemData(self.palette_combo.currentIndex())
-        self.config.set("behavior.color_palette", new_palette)
-        self.config.save()
-        self.refresh_tray_icon_preview_icons()
-        self.apply_theme_dynamically()
-        self._loading = True
-        self.populate_enrolled_users()
-        self.populate_apps_table()
-        self.populate_logs_table()
-        self.populate_intruder_gallery()
-        self._update_sidebar_enrolled_count()
-        self._loading = False
-
-        try:
-            from PySide6.QtDBus import QDBusConnection, QDBusInterface
-            bus = QDBusConnection.sessionBus()
-            if bus.isConnected():
-                interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
-                if interface.isValid():
-                    interface.call("ReloadConfig")
-                    logging.info("Sent D-Bus ReloadConfig signal to daemon after palette change.")
-        except Exception as e:
-            logging.warning(f"Could not send ReloadConfig D-Bus signal: {e}")
-
+        if not new_palette:
+            return
         self._has_pending_changes = True
-        logging.info(f"Color palette changed to '{new_palette}'.")
+        QTimer.singleShot(0, self._apply_palette_update)
+
+    def _apply_palette_update(self):
+        if getattr(self, "_changing_palette", False):
+            return
+        idx = self.palette_combo.currentIndex()
+        if idx < 0:
+            return
+        new_palette = self.palette_combo.itemData(idx)
+        if not new_palette:
+            return
+        self._changing_palette = True
+        try:
+            self.config.set("behavior.color_palette", new_palette)
+            self.refresh_tray_icon_preview_icons()
+            self.apply_theme_dynamically()
+            logging.info(f"Color palette updated live to '{new_palette}'.")
+        finally:
+            self._changing_palette = False
 
     def handle_theme_changed(self):
+        if getattr(self, "_loading", False) or getattr(self, "_changing_theme", False):
+            return
         new_theme = self.theme_combo.itemData(self.theme_combo.currentIndex())
-        self.theme_mode = new_theme
-        self.config.set("behavior.theme", new_theme)
-        self.config.set("ui.theme", new_theme)
-        self.refresh_tray_icon_preview_icons()
-        self.apply_theme_dynamically()
-        self._loading = True  # Suppress restart banner during theme refresh
-        self.populate_enrolled_users()
-        self.populate_apps_table()
-        self.populate_logs_table()
-        self.populate_intruder_gallery()
-        self._update_sidebar_enrolled_count()
-        self._loading = False
-        self._has_pending_changes = True
-        self.show_restart_banner()
+        if not new_theme:
+            return
+        self._changing_theme = True
+        try:
+            self.theme_mode = new_theme
+            self.config.set("behavior.theme", new_theme)
+            self.config.set("ui.theme", new_theme)
+            self.refresh_tray_icon_preview_icons()
+            self.apply_theme_dynamically()
+            self._loading = True  # Suppress restart banner during theme refresh
+            self.populate_enrolled_users()
+            self.populate_apps_table()
+            self.populate_logs_table()
+            self.populate_intruder_gallery()
+            self._update_sidebar_enrolled_count()
+            self._loading = False
+            self._has_pending_changes = True
+            self.show_restart_banner()
+        finally:
+            self._changing_theme = False
 
     def verify_settings_action(self, reason: str) -> bool:
         # Check if we are running directly inside the daemon process that owns org.facegate.FaceGate
@@ -2816,9 +3530,8 @@ class SettingsWindow(QDialog):
                         from PySide6.QtDBus import QDBus
                         raw_reply = interface.callWithArgumentList(
                             QDBus.CallMode.Block,
-                            "RequestAuth",
-                            [reason],
-                            300000
+                            "RequestAdminAuth",
+                            [reason]
                         )
                         reply = QDBusReply(raw_reply)
                         if reply.isValid():
@@ -2906,9 +3619,15 @@ class SettingsWindow(QDialog):
         self.config.set("app_monitor.on_auth_failure", self.policy_combo.itemData(self.policy_combo.currentIndex()))
         self.config.set("app_monitor.auth_timeout_seconds", self.timeout_spin.value())
         self.config.set("behavior.notify_on_auth", self.notify_check.isChecked())
+        self.config.set("behavior.sound_effects", self.sound_effects_check.isChecked())
+        sel_vol = self.sound_volume_combo.itemData(self.sound_volume_combo.currentIndex())
+        self.config.set("behavior.sound_volume", sel_vol if sel_vol is not None else 0.15)
         self.config.set("behavior.autolock_on_idle", self.idle_check.isChecked())
         self.config.set("behavior.autolock_on_idle_minutes", self.idle_spin.value())
         self.config.set("behavior.startup_delay_seconds", self.delay_spin.value())
+        sel_tray = self.tray_icon_combo.itemData(self.tray_icon_combo.currentIndex())
+        if sel_tray:
+            self.config.set("behavior.tray_icon_style", sel_tray)
         self.config.set("behavior.lock_on_sleep_or_lock", self.sleep_lock_check.isChecked())
         self.config.set("security.lock_settings_window", self.lock_settings_check.isChecked())
         
@@ -2978,7 +3697,7 @@ class SettingsWindow(QDialog):
         layout.addWidget(desc)
 
         # Clear All Button
-        self.clear_intruders_btn = QPushButton("Clear All Photos")
+        self.clear_intruders_btn = AnimatedButton("Clear All Photos")
         self.clear_intruders_btn.clicked.connect(self.clear_all_intruders)
         self.clear_intruders_btn.setObjectName("clearIntrudersBtn")
         
@@ -3115,7 +3834,7 @@ class SettingsWindow(QDialog):
             card_layout.addWidget(time_lbl)
 
             # Delete Button
-            del_btn = QPushButton("Delete")
+            del_btn = AnimatedButton("Delete")
             del_btn.setObjectName("deleteIntruderBtn")
             del_btn.clicked.connect(self.make_delete_intruder_callback(filepath))
             card_layout.addWidget(del_btn)
@@ -3194,8 +3913,9 @@ class SettingsWindow(QDialog):
     def apply_theme_dynamically(self):
         from ui.theme import get_theme_qss, get_sidebar_qss, get_colors
         theme_mode = getattr(self, "theme_mode", "system")
-        c = get_colors(theme_mode)
-        self.setStyleSheet(get_theme_qss(theme_mode) + get_sidebar_qss(c))
+        palette_val = self.config.get("behavior.color_palette", "iron_ember") if hasattr(self, "config") and self.config else "iron_ember"
+        c = get_colors(theme_mode, palette_val)
+        self.setStyleSheet(get_theme_qss(theme_mode, palette_val) + get_sidebar_qss(c))
         
         # Sync the sliding theme toggle position
         if hasattr(self, "title_bar") and self.title_bar:
@@ -3263,10 +3983,18 @@ class SettingsWindow(QDialog):
             except Exception as e:
                 logging.error(f"Error updating themed label color: {e}")
 
-        # Re-theme all card widgets
+        # Re-theme all card widgets across all tabs
         for card_ref, importance in [
+            ("dash_status_card", "accent"),
+            ("card_stat_apps", "normal"),
+            ("card_stat_profiles", "normal"),
+            ("card_stat_rate", "normal"),
+            ("card_dash_recent", "normal"),
+            ("card_stats_summary", "accent"),
+            ("card_stats_table", "normal"),
             ("card_master_pwd", "accent"),
             ("card_enrolled", "accent"),
+            ("card_admin_unlock", "accent"),
             ("card_security_profiles", "normal"),
             ("card_startup", "normal"),
             ("card_policy", "normal"),
@@ -3282,17 +4010,27 @@ class SettingsWindow(QDialog):
             if card is not None:
                 card.setStyleSheet(get_card_qss(importance, c))
 
+        # Re-populate Dashboard & Statistics so colors update dynamically
+        if hasattr(self, "dash_recent_container"):
+            self.populate_dashboard()
+        if hasattr(self, "stats_table"):
+            self.populate_statistics_tab()
+
         # Re-theme About section buttons
         if hasattr(self, "btn_run_bench") and self.btn_run_bench:
             self.btn_run_bench.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: #ffffff; padding: 8px 16px; border-radius: 6px; font-weight: bold; font-size: 12px;")
         if hasattr(self, "btn_run_audit") and self.btn_run_audit:
             self.btn_run_audit.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: #ffffff; padding: 8px 16px; border-radius: 6px; font-weight: bold; font-size: 12px;")
+        if hasattr(self, "lbl_sec_score") and self.lbl_sec_score and "Run audit" in self.lbl_sec_score.text():
+            self.lbl_sec_score.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 6px 16px; border-radius: 8px; font-weight: bold; font-size: 14px;")
         if hasattr(self, "btn_copy_diag") and self.btn_copy_diag:
             self.btn_copy_diag.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: #ffffff; padding: 10px 16px; border-radius: 6px; font-weight: bold; font-size: 13px;")
-        for btn_ref in ["btn_attrib", "btn_github", "btn_health"]:
-            btn = getattr(self, btn_ref, None)
-            if btn is not None:
-                btn.setStyleSheet(f"background-color: {c['CANCEL_BTN_BG']}; color: {c['TEXT_PRIMARY']}; border: 1px solid {c['BORDER_NEUTRAL']}; padding: 10px 16px; border-radius: 6px; font-weight: bold; font-size: 13px;")
+        if hasattr(self, "unlock_admin_btn") and self.unlock_admin_btn and not getattr(self, "admin_unlocked", False):
+            self.unlock_admin_btn.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: #ffffff; border: none; padding: 8px 18px; border-radius: 6px; font-weight: bold; font-size: 13px;")
+        for spin_ref in ["delay_spin", "timeout_spin", "idle_spin"]:
+            spin = getattr(self, spin_ref, None)
+            if spin and hasattr(spin, "_apply_style"):
+                spin._apply_style(theme_mode, palette_val)
 
         # Refresh enrolled users list colors
         if hasattr(self, "enrolled_users_container"):

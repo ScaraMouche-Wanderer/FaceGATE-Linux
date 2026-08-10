@@ -1,8 +1,8 @@
 import os
 import subprocess
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QBrush, QPainterPath, QFont
-from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSize, QVariantAnimation, QEasingCurve, QAbstractAnimation, Property, QPropertyAnimation, QModelIndex
-from PySide6.QtWidgets import QSpinBox, QComboBox, QCheckBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QListView, QFrame
+from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSize, QVariantAnimation, QEasingCurve, QAbstractAnimation, Property, QPropertyAnimation, QModelIndex, Signal
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QSpinBox, QComboBox, QCheckBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QListView, QFrame, QPushButton
 
 # Global constants initialized to default light mode
 BG_NEUTRAL = "#f5f4f2"
@@ -265,10 +265,10 @@ PALETTES = {
         },
         "light": {
             "IS_DARK": False,
-            "BG_NEUTRAL": "#f0fdf4",
+            "BG_NEUTRAL": "#f4fbf7",
             "BG_SECONDARY": "#ffffff",
             "CARD_NEUTRAL": "#ffffff",
-            "BORDER_NEUTRAL": "#c6f6d5",
+            "BORDER_NEUTRAL": "#d1fae5",
             "TEXT_PRIMARY": "#064e3b",
             "TEXT_SECONDARY": "#047857",
             "HEADER_TEXT": "#047857",
@@ -278,13 +278,68 @@ PALETTES = {
             "WIDGET_BG": "#ffffff",
             "LIST_ITEM_HOVER": "#f0fdf4",
             "HOVER_NEUTRAL": "#f0fdf4",
-            "CANCEL_BTN_BG": "#f0fdf4",
+            "CANCEL_BTN_BG": "#e6f7ed",
             "CANCEL_BTN_HOVER": "#d1fae5",
             "SHADOW_COLOR": "rgba(5, 150, 105, 0.12)",
-            "STATUS_HEADER_BG": "#f0fdf4",
-            "SIDEBAR_BG": "#d1fae5",
-            "SIDEBAR_HOVER_BG": "#c6f6d5",
-            "SIDEBAR_COLOR": "#047857",
+            "STATUS_HEADER_BG": "#e6f7ed",
+            "SIDEBAR_BG": "#e6f7ed",
+            "SIDEBAR_HOVER_BG": "#d1fae5",
+            "SIDEBAR_COLOR": "#065f46",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#f59e0b"
+        }
+    },
+    "cyber_neon": {
+        "label": "Cyber Neon (Electric Cyan)",
+        "dark": {
+            "IS_DARK": True,
+            "BG_NEUTRAL": "#0a0a0f",
+            "BG_SECONDARY": "#0f0f1a",
+            "CARD_NEUTRAL": "#12121f",
+            "BORDER_NEUTRAL": "#1e1e3a",
+            "TEXT_PRIMARY": "#e8eaf6",
+            "TEXT_SECONDARY": "#9fa8da",
+            "HEADER_TEXT": "#00d4ff",
+            "ACCENT_PURPLE": "#00b8d4",
+            "ACCENT_PURPLE_HOVER": "#00e5ff",
+            "ACCENT_PURPLE_PRESSED": "#0097a7",
+            "WIDGET_BG": "#0d0d18",
+            "LIST_ITEM_HOVER": "#1a1a30",
+            "HOVER_NEUTRAL": "#1a1a30",
+            "CANCEL_BTN_BG": "#161625",
+            "CANCEL_BTN_HOVER": "#222238",
+            "SHADOW_COLOR": "rgba(0, 212, 255, 0.15)",
+            "STATUS_HEADER_BG": "#141422",
+            "SIDEBAR_BG": "#0d0d18",
+            "SIDEBAR_HOVER_BG": "#1e1e34",
+            "SIDEBAR_COLOR": "#9fa8da",
+            "SUCCESS_GREEN": "#00e676",
+            "DANGER_RED": "#ff1744",
+            "WARNING_AMBER": "#ffea00"
+        },
+        "light": {
+            "IS_DARK": False,
+            "BG_NEUTRAL": "#f0faff",
+            "BG_SECONDARY": "#ffffff",
+            "CARD_NEUTRAL": "#ffffff",
+            "BORDER_NEUTRAL": "#b2ebf2",
+            "TEXT_PRIMARY": "#0d2137",
+            "TEXT_SECONDARY": "#37474f",
+            "HEADER_TEXT": "#00838f",
+            "ACCENT_PURPLE": "#0097a7",
+            "ACCENT_PURPLE_HOVER": "#00838f",
+            "ACCENT_PURPLE_PRESSED": "#006064",
+            "WIDGET_BG": "#ffffff",
+            "LIST_ITEM_HOVER": "#e0f7fa",
+            "HOVER_NEUTRAL": "#e0f7fa",
+            "CANCEL_BTN_BG": "#e0f7fa",
+            "CANCEL_BTN_HOVER": "#b2ebf2",
+            "SHADOW_COLOR": "rgba(0, 151, 167, 0.12)",
+            "STATUS_HEADER_BG": "#e0f7fa",
+            "SIDEBAR_BG": "#b2ebf2",
+            "SIDEBAR_HOVER_BG": "#80deea",
+            "SIDEBAR_COLOR": "#006064",
             "SUCCESS_GREEN": "#10b981",
             "DANGER_RED": "#ef4444",
             "WARNING_AMBER": "#f59e0b"
@@ -348,25 +403,29 @@ def get_sidebar_qss(c: dict) -> str:
             border: none;
             border-bottom-left-radius: 12px;
             border-right: 1px solid {c["BORDER_NEUTRAL"]};
-            padding-top: 10px;
+            padding-top: 12px;
             color: {sidebar_color};
             font-size: 13px;
             font-weight: 500;
+            outline: none;
         }}
         QListWidget#sidebar::item {{
-            padding: 10px 16px;
-            border-radius: 6px;
-            margin: 4px 8px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin: 3px 8px;
             color: {sidebar_color};
+            border: 1px solid transparent;
         }}
         QListWidget#sidebar::item:hover {{
             background-color: {sidebar_hover_bg};
             color: {c["TEXT_PRIMARY"]};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
         }}
         QListWidget#sidebar::item:selected {{
             background-color: {c["ACCENT_PURPLE"]};
             color: #ffffff;
             font-weight: bold;
+            border: 1px solid {c["ACCENT_PURPLE_HOVER"]};
         }}
         QPushButton#removeBtn {{
             background-color: transparent;
@@ -383,9 +442,9 @@ def get_sidebar_qss(c: dict) -> str:
         }}
     """
 
-def get_theme_qss(theme_override: str = None) -> str:
-    refresh_theme_colors(theme_override)
-    c = get_colors(theme_override)
+def get_theme_qss(theme_override: str = None, palette_override: str = None) -> str:
+    refresh_theme_colors(theme_override, palette_override)
+    c = get_colors(theme_override, palette_override)
     
     return f"""
         QDialog, QMainWindow {{
@@ -576,13 +635,22 @@ def get_theme_qss(theme_override: str = None) -> str:
             background-color: {c["ACCENT_PURPLE"]};
             color: white;
         }}
-        QHeaderView::section {{
-            background-color: {c["STATUS_HEADER_BG"]};
+        QHeaderView {{
+            background-color: {c["CANCEL_BTN_BG"]};
+            border: none;
+            outline: none;
+        }}
+        QHeaderView::section, QHeaderView::section:horizontal {{
+            background-color: {c["CANCEL_BTN_BG"]};
             color: {c["TEXT_PRIMARY"]};
-            padding: 8px;
-            border: 1px solid {c["BORDER_NEUTRAL"]};
-            font-weight: bold;
+            font-family: {FONT_FAMILY};
+            font-weight: 600;
             font-size: 13px;
+            padding: 8px 12px;
+            min-height: 28px;
+            border: none;
+            border-bottom: 2px solid {c["BORDER_NEUTRAL"]};
+            outline: none;
         }}
         QComboBox {{
             background-color: {c["WIDGET_BG"]};
@@ -592,23 +660,24 @@ def get_theme_qss(theme_override: str = None) -> str:
             color: {c["TEXT_PRIMARY"]};
             font-family: {FONT_FAMILY};
             font-size: 13px;
+            min-height: 24px;
         }}
-        QComboBox:focus {{
+        QComboBox:focus, QComboBox:hover {{
             border: 1px solid {c["ACCENT_PURPLE"]};
         }}
         QComboBox::drop-down {{
             subcontrol-origin: padding;
             subcontrol-position: top right;
             width: 28px;
-            border-left: none;
+            border: none;
             background: transparent;
         }}
         QComboBox::down-arrow {{
-            image: none;
-            border: none;
             width: 0px;
             height: 0px;
+            border: none;
             background: transparent;
+            image: none;
         }}
         QComboBoxPrivateContainer {{
             background: transparent;
@@ -635,31 +704,79 @@ def get_theme_qss(theme_override: str = None) -> str:
             background-color: {c["ACCENT_PURPLE"]};
             color: #ffffff;
         }}
-        QSpinBox {{
+        QSpinBox, QDoubleSpinBox {{
             background-color: {c["WIDGET_BG"]};
             border: 1px solid {c["BORDER_NEUTRAL"]};
             border-radius: 6px;
-            padding: 6px 12px;
+            padding: 6px 28px 6px 12px;
             color: {c["TEXT_PRIMARY"]};
             font-family: {FONT_FAMILY};
             font-size: 13px;
+            min-height: 24px;
         }}
-        QSpinBox:focus {{
+        QSpinBox:focus, QDoubleSpinBox:focus, QSpinBox:hover, QDoubleSpinBox:hover {{
             border: 1px solid {c["ACCENT_PURPLE"]};
         }}
+        QSpinBox::up-button, QDoubleSpinBox::up-button {{
+            subcontrol-origin: border;
+            subcontrol-position: top right;
+            width: 20px;
+            height: 12px;
+            border: none;
+            background: transparent;
+            margin-right: 4px;
+            margin-top: 2px;
+        }}
+        QSpinBox::down-button, QDoubleSpinBox::down-button {{
+            subcontrol-origin: border;
+            subcontrol-position: bottom right;
+            width: 20px;
+            height: 12px;
+            border: none;
+            background: transparent;
+            margin-right: 4px;
+            margin-bottom: 2px;
+        }}
+        QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+            width: 0;
+            height: 0;
+            border-left: 3px solid transparent;
+            border-right: 3px solid transparent;
+            border-bottom: 4px solid {c["TEXT_PRIMARY"]};
+        }}
+        QSpinBox::up-button:hover QSpinBox::up-arrow, QDoubleSpinBox::up-button:hover QDoubleSpinBox::up-arrow {{
+            border-bottom-color: {c["ACCENT_PURPLE"]};
+        }}
+        QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+            width: 0;
+            height: 0;
+            border-left: 3px solid transparent;
+            border-right: 3px solid transparent;
+            border-top: 4px solid {c["TEXT_PRIMARY"]};
+        }}
+        QSpinBox::down-button:hover QSpinBox::down-arrow, QDoubleSpinBox::down-button:hover QDoubleSpinBox::down-arrow {{
+            border-top-color: {c["ACCENT_PURPLE"]};
+        }}
         QCheckBox {{
-            spacing: 8px;
+            spacing: 10px;
             color: {c["TEXT_PRIMARY"]};
             font-family: {FONT_FAMILY};
             font-size: 13px;
         }}
         QCheckBox::indicator {{
-            width: 0px;
-            height: 0px;
-            border: none;
-            background: transparent;
-            margin: 0px;
-            padding: 0px;
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            border: 1.5px solid {c["BORDER_NEUTRAL"]};
+            background-color: {c["WIDGET_BG"]};
+        }}
+        QCheckBox::indicator:hover {{
+            border-color: {c["ACCENT_PURPLE"]};
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {c["ACCENT_PURPLE"]};
+            border-color: {c["ACCENT_PURPLE"]};
+            image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
         }}
         QProgressBar {{
             border: 1px solid {c["BORDER_NEUTRAL"]};
@@ -682,6 +799,23 @@ def get_theme_qss(theme_override: str = None) -> str:
             border-radius: 8px;
             font-family: {FONT_FAMILY};
             font-size: 13px;
+        }}
+        QHeaderView {{
+            background-color: {c["CANCEL_BTN_BG"]};
+            border: none;
+            outline: none;
+        }}
+        QHeaderView::section, QHeaderView::section:horizontal {{
+            background-color: {c["CANCEL_BTN_BG"]};
+            color: {c["TEXT_PRIMARY"]};
+            font-family: {FONT_FAMILY};
+            font-weight: 600;
+            font-size: 13px;
+            padding: 8px 12px;
+            min-height: 28px;
+            border: none;
+            border-bottom: 2px solid {c["BORDER_NEUTRAL"]};
+            outline: none;
         }}
         QTableWidget::item {{
             padding: 6px;
@@ -752,16 +886,91 @@ def get_card_qss(importance: str = "normal", colors: dict = None) -> str:
             border: none;
             background-color: transparent;
         }}
-        QLineEdit, QSpinBox, QComboBox {{
+        QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
             background-color: {widget_bg};
             border: 1px solid {border_color};
             border-radius: 6px;
-            padding: 6px 12px;
+            padding: 6px 32px 6px 12px;
+            color: {text_color};
+            font-size: 13px;
+            min-height: 24px;
+        }}
+        QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QComboBox:hover {{
+            border: 1px solid {accent};
+        }}
+        QComboBox::drop-down {{
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 28px;
+            border: none;
+            background: transparent;
+        }}
+        QComboBox::down-arrow {{
+            width: 0px;
+            height: 0px;
+            border: none;
+            background: transparent;
+            image: none;
+        }}
+        QSpinBox::up-button, QDoubleSpinBox::up-button {{
+            subcontrol-origin: border;
+            subcontrol-position: top right;
+            width: 20px;
+            height: 12px;
+            border: none;
+            background: transparent;
+            margin-right: 4px;
+            margin-top: 2px;
+        }}
+        QSpinBox::down-button, QDoubleSpinBox::down-button {{
+            subcontrol-origin: border;
+            subcontrol-position: bottom right;
+            width: 20px;
+            height: 12px;
+            border: none;
+            background: transparent;
+            margin-right: 4px;
+            margin-bottom: 2px;
+        }}
+        QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+            width: 0;
+            height: 0;
+            border-left: 3px solid transparent;
+            border-right: 3px solid transparent;
+            border-bottom: 4px solid {text_color};
+        }}
+        QSpinBox::up-button:hover QSpinBox::up-arrow, QDoubleSpinBox::up-button:hover QDoubleSpinBox::up-arrow {{
+            border-bottom-color: {accent};
+        }}
+        QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+            width: 0;
+            height: 0;
+            border-left: 3px solid transparent;
+            border-right: 3px solid transparent;
+            border-top: 4px solid {text_color};
+        }}
+        QSpinBox::down-button:hover QSpinBox::down-arrow, QDoubleSpinBox::down-button:hover QDoubleSpinBox::down-arrow {{
+            border-top-color: {accent};
+        }}
+        QCheckBox {{
+            spacing: 10px;
             color: {text_color};
             font-size: 13px;
         }}
-        QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{
-            border: 1px solid {accent};
+        QCheckBox::indicator {{
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            border: 1.5px solid {border_color};
+            background-color: {widget_bg};
+        }}
+        QCheckBox::indicator:hover {{
+            border-color: {accent};
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {accent};
+            border-color: {accent};
+            image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
         }}
         QPushButton#enrollBtn, QPushButton#enrollNewBtn {{
             background-color: {accent};
@@ -832,25 +1041,144 @@ def create_status_icon(color_hex: str) -> QIcon:
     painter.end()
     return QIcon(pixmap)
 
-class AnimatedSpinBox(QSpinBox):
+class AnimatedSpinBox(QWidget):
+    """
+    A modern, animated numerical input widget with smooth [-] and [+] spring-bounce buttons
+    and a clean center value display with micro-animations.
+    """
+    valueChanged = Signal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.anim = None
+        self._min = 0
+        self._max = 999999
+        self._value = 0
+        self._step = 1
 
-    def stepBy(self, steps):
-        target = self.value() + steps * self.singleStep()
-        target = max(self.minimum(), min(self.maximum(), target))
-        
-        if self.anim and self.anim.state() == QAbstractAnimation.State.Running:
-            self.anim.stop()
-            
-        self.anim = QVariantAnimation(self)
-        self.anim.setDuration(200)
-        self.anim.setStartValue(self.value())
-        self.anim.setEndValue(target)
-        self.anim.setEasingCurve(QEasingCurve.Type.OutQuad)
-        self.anim.valueChanged.connect(lambda val: self.setValue(int(val)))
-        self.anim.start()
+        self.setFixedHeight(34)
+        self.setFixedWidth(136)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        self.dec_btn = AnimatedButton("-", self)
+        self.dec_btn.setFixedSize(32, 32)
+        self.dec_btn.setObjectName("spinDecBtn")
+        self.dec_btn.clicked.connect(self._decrement)
+
+        self.input_edit = QLineEdit(str(self._value), self)
+        self.input_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.input_edit.setFixedSize(60, 32)
+        self.input_edit.editingFinished.connect(self._on_edit_finished)
+
+        self.inc_btn = AnimatedButton("+", self)
+        self.inc_btn.setFixedSize(32, 32)
+        self.inc_btn.setObjectName("spinIncBtn")
+        self.inc_btn.clicked.connect(self._increment)
+
+        layout.addWidget(self.dec_btn)
+        layout.addWidget(self.input_edit)
+        layout.addWidget(self.inc_btn)
+        self._apply_style()
+
+    def _apply_style(self, theme_mode=None, palette_val=None):
+        from ui.theme import get_colors, FONT_FAMILY
+        c = get_colors(theme_mode, palette_val)
+        bg = c.get("CARD_NEUTRAL", "#ffffff")
+        btn_bg = c.get("CANCEL_BTN_BG", "#e6f7ed")
+        btn_hover = c.get("CANCEL_BTN_HOVER", "#d1fae5")
+        text = c.get("TEXT_PRIMARY", "#064e3b")
+        border = c.get("BORDER_NEUTRAL", "#d1fae5")
+        accent = c.get("ACCENT_PURPLE", "#059669")
+
+        self.dec_btn.setStyleSheet(f"""
+            QPushButton#spinDecBtn {{
+                background-color: {btn_bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 15px;
+                padding: 0px;
+                margin: 0px;
+            }}
+            QPushButton#spinDecBtn:hover {{
+                background-color: {btn_hover};
+                border-color: {accent};
+                color: {accent};
+            }}
+        """)
+        self.inc_btn.setStyleSheet(f"""
+            QPushButton#spinIncBtn {{
+                background-color: {btn_bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 15px;
+                padding: 0px;
+                margin: 0px;
+            }}
+            QPushButton#spinIncBtn:hover {{
+                background-color: {btn_hover};
+                border-color: {accent};
+                color: {accent};
+            }}
+        """)
+        self.input_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {bg};
+                color: {text};
+                border: 1.5px solid {border};
+                border-radius: 8px;
+                font-family: {FONT_FAMILY};
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0px 4px;
+                margin: 0px;
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {accent};
+            }}
+        """)
+
+    def setRange(self, min_val: int, max_val: int):
+        self._min = min_val
+        self._max = max_val
+        self.setValue(self._value)
+
+    def setSingleStep(self, step: int):
+        self._step = max(1, step)
+
+    def value(self) -> int:
+        return self._value
+
+    def setValue(self, val: int):
+        try:
+            v = int(val)
+        except (ValueError, TypeError):
+            v = self._min
+        v = max(self._min, min(self._max, v))
+        if self._value != v:
+            self._value = v
+            self.input_edit.setText(str(self._value))
+            self.valueChanged.emit(self._value)
+        else:
+            self.input_edit.setText(str(self._value))
+
+    def _decrement(self):
+        self.setValue(self._value - self._step)
+
+    def _increment(self):
+        self.setValue(self._value + self._step)
+
+    def _on_edit_finished(self):
+        try:
+            val = int(self.input_edit.text())
+            self.setValue(val)
+        except ValueError:
+            self.input_edit.setText(str(self._value))
 
 class AnimatedItemDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
@@ -1559,16 +1887,19 @@ class WindowDragResizeFilter(QObject):
         return edges
 
     def _update_cursor(self, edges: str):
-        if edges in ("TL", "BR"):
-            self.window.setCursor(Qt.CursorShape.SizeFDiagCursor)
-        elif edges in ("TR", "BL"):
-            self.window.setCursor(Qt.CursorShape.SizeBDiagCursor)
-        elif "L" in edges or "R" in edges:
-            self.window.setCursor(Qt.CursorShape.SizeHorCursor)
-        elif "T" in edges or "B" in edges:
-            self.window.setCursor(Qt.CursorShape.SizeVertCursor)
-        else:
-            self.window.unsetCursor()
+        try:
+            if edges in ("TL", "BR"):
+                self.window.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            elif edges in ("TR", "BL"):
+                self.window.setCursor(Qt.CursorShape.SizeBDiagCursor)
+            elif "L" in edges or "R" in edges:
+                self.window.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif "T" in edges or "B" in edges:
+                self.window.setCursor(Qt.CursorShape.SizeVerCursor)
+            else:
+                self.window.unsetCursor()
+        except Exception:
+            pass
 
     def _handle_resize(self, global_pos: QPoint):
         diff = global_pos - self.drag_start_pos
@@ -1678,6 +2009,26 @@ class AnimatedButton(QPushButton):
         self._animate_scale(1.025 if self.underMouse() else 1.0)
         super().mouseReleaseEvent(event)
 
+    def paintEvent(self, event):
+        if abs(self._scale - 1.0) < 0.001:
+            super().paintEvent(event)
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        
+        rect = self.rect()
+        cx = rect.width() / 2.0
+        cy = rect.height() / 2.0
+
+        painter.translate(cx, cy)
+        painter.scale(self._scale, self._scale)
+        painter.translate(-cx, -cy)
+
+        super().paintEvent(event)
+        painter.end()
+
     def _animate_scale(self, target):
         if self.anim:
             self.anim.stop()
@@ -1685,6 +2036,6 @@ class AnimatedButton(QPushButton):
         self.anim.setDuration(160)
         self.anim.setStartValue(self._scale)
         self.anim.setEndValue(target)
-        self.anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutBack if target > 1.0 else QEasingCurve.Type.OutQuad)
         self.anim.start()
 
