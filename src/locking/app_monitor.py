@@ -24,7 +24,9 @@ CRITICAL_PROCESS_DENYLIST = {
     "pipewire-pulse", "wireplumber", "NetworkManager", "polkitd",
     "gvfsd", "gvfs-daemon", "ibus-daemon", "xdg-desktop-portal",
     "xdg-desktop-portal-gnome", "xdg-desktop-portal-kde", "ssh-agent",
-    "gnome-keyring-daemon", "at-spi2-registryd",
+    "gnome-keyring-daemon", "at-spi2-registryd", "facegate",
+    "python", "python3", "python3.10", "python3.11", "python3.12",
+    "python3.13", "python3.14",
 }
 
 def calculate_sha256(filepath):
@@ -88,6 +90,20 @@ class AppMonitor:
         
         for app in protected_apps:
             exec_name = app.get("executable")
+            if not exec_name:
+                desktop_name = app.get("desktop_name")
+                if desktop_name:
+                    from locking.launcher_manager import get_system_desktop_path, extract_primary_executable
+                    sys_path = get_system_desktop_path(desktop_name)
+                    if sys_path and os.path.exists(sys_path):
+                        try:
+                            with open(sys_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                for line in f:
+                                    if line.strip().startswith("Exec="):
+                                        exec_name = extract_primary_executable(line.strip()[5:])
+                                        break
+                        except Exception:
+                            pass
             if exec_name:
                 path = shutil.which(exec_name)
                 if path:
@@ -239,14 +255,30 @@ class AppMonitor:
                             # If app is globally authorized, check if session timeout elapsed
                             if self.main_app.is_app_authorized(app_id):
                                 timeout = int(self.main_app.config.get("security.session_timeout_seconds", 300))
-                                auth_time = self.main_app.auth_timestamps.get(app_id, 0)
-                                if timeout > 0 and (time.time() - auth_time) > timeout:
-                                    logging.info(f"AppMonitor: Session timeout elapsed for '{app_id}' (PID: {pid}). Relocking app.")
-                                    self.main_app.relock_app(app_id)
-                                    self._seen_pids.discard(proc_key)
+                                canonical_id = self.main_app.get_app_id_from_desktop(app_id)
+                                auth_time = self.main_app.auth_timestamps.get(canonical_id, 0)
+                                if auth_time and auth_time > 0:
+                                    if timeout > 0 and (time.time() - auth_time) > timeout:
+                                        logging.info(f"AppMonitor: Session timeout elapsed for '{app_id}' (PID: {pid}). Relocking app.")
+                                        self.main_app.relock_app(app_id)
+                                        self._seen_pids.discard(proc_key)
+                                        continue
                                 else:
-                                    self._seen_pids.add(proc_key)
-                                    continue
+                                    self.main_app.auth_timestamps[canonical_id] = time.time()
+                                self._seen_pids.add(proc_key)
+                                continue
+
+                            # Check if target app is marked as a Decoy Honeypot
+                            if match_app.get("is_decoy", False):
+                                logging.warning(f"AppMonitor: Detected Decoy Honeypot process '{name}' (PID: {pid}). Terminating process and triggering trap.")
+                                try:
+                                    os.kill(pid, signal.SIGKILL)
+                                except OSError:
+                                    pass
+                                self._seen_pids.add(proc_key)
+                                from security.decoy_mode import handle_decoy_trigger
+                                handle_decoy_trigger(desktop_name or app_id)
+                                continue
 
                             logging.info(f"AppMonitor: Detected target process '{name}' (PID: {pid}). Suspending via SIGSTOP.")
                             

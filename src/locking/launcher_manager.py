@@ -123,6 +123,11 @@ def get_facegate_cmd() -> List[str]:
     Resolves execution command array for FaceGate (as a list of command tokens).
     Supports standalone binary ('facegate'), python script execution, or venv binary.
     """
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    monitor_main_path = os.path.abspath(os.path.join(current_dir, "..", "core", "monitor_main.py"))
+    if os.path.exists(monitor_main_path):
+        return [sys.executable, monitor_main_path]
+
     python_bin_dir = os.path.dirname(sys.executable)
     fg_in_py = os.path.join(python_bin_dir, "facegate")
     if os.path.exists(fg_in_py) and os.access(fg_in_py, os.X_OK):
@@ -135,11 +140,6 @@ def get_facegate_cmd() -> List[str]:
     facegate_bin = shutil.which("facegate")
     if facegate_bin:
         return [os.path.abspath(facegate_bin)]
-
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    monitor_main_path = os.path.abspath(os.path.join(current_dir, "..", "core", "monitor_main.py"))
-    if os.path.exists(monitor_main_path):
-        return [sys.executable, monitor_main_path]
 
     if sys.argv and sys.argv[0]:
         argv_abs = os.path.abspath(sys.argv[0])

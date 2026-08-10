@@ -18,83 +18,56 @@ from locking.app_monitor import AppMonitor
 from ui.tray import FaceGateTray
 from ui.auth_dialog import AuthDialog
 
+from core.session_manager import SessionManager
+from core.auth_coordinator import AuthCoordinator
+from core.lifecycle_controller import LifecycleController
+from core.window_manager import WindowManager
+
 class FaceGateApplication(QObject):
     def __init__(self, config, parent=None):
         super().__init__(parent)
         self.config = config
-        self.active = True
-        self.disabled_until = None
-        self.authorized_apps = {}  # app_id -> bool
-        self.auth_timestamps = {}  # app_id -> float (timestamp)
+        self.tray = None
 
-        # Serialization state for handle_monitor_auth. See _process_auth_queue().
-        self._auth_queue = []
-        self._auth_busy = False
-        
-        # Initialize authorized state for all protected apps as False
-        for app in self.get_protected_apps():
-            self.authorized_apps[app["id"]] = False
-
-        # Timer for handling disabled duration auto-resumption
-        self.disabled_timer = QTimer(self)
-        self.disabled_timer.setSingleShot(True)
-        self.disabled_timer.timeout.connect(self.resume)
-
-        # Setup periodic recheck of desktop launcher shadowing
-        recheck_interval = int(self.config.get("behavior.launcher_recheck_interval_minutes", 10))
-        if recheck_interval > 0:
-            self.recheck_timer = QTimer(self)
-            self.recheck_timer.timeout.connect(self.recheck_launcher_shadowing)
-            self.recheck_timer.start(recheck_interval * 60 * 1000)
+        # Domain Controllers
+        self.session_manager = SessionManager(
+            config,
+            protected_apps_provider=self.get_protected_apps,
+            tray_provider=lambda: self.tray,
+            parent=self
+        )
+        self.auth_coordinator = AuthCoordinator(
+            config,
+            session_manager=self.session_manager,
+            parent=self
+        )
+        self.lifecycle_controller = LifecycleController(
+            config,
+            session_manager_provider=self.session_manager,
+            protected_apps_provider=self.get_protected_apps,
+            parent=self
+        )
+        self.window_manager = WindowManager(
+            config,
+            auth_coordinator=self.auth_coordinator,
+            parent=self
+        )
 
         # Setup AppMonitor
         poll_interval = float(self.config.get("app_monitor.poll_interval_seconds", 1.5))
         self.monitor = AppMonitor(self, poll_interval=poll_interval)
-        self.monitor.signals.request_auth.connect(self.handle_monitor_auth, Qt.ConnectionType.QueuedConnection)
+        self.monitor.signals.request_auth.connect(self.auth_coordinator.handle_monitor_auth, Qt.ConnectionType.QueuedConnection)
 
-        # D-Bus sleep & lock monitors for preventing trespassing
-        from PySide6.QtDBus import QDBusConnection
-        
-        # Connect to systemd-logind PrepareForSleep signal on system bus
-        system_bus = QDBusConnection.systemBus()
-        if system_bus.isConnected():
-            system_bus.connect(
-                "org.freedesktop.login1",
-                "/org/freedesktop/login1",
-                "org.freedesktop.login1.Manager",
-                "PrepareForSleep",
-                self, "handle_prepare_for_sleep"
+        # Setup Geofence Network Monitor if enabled
+        if self.config.get("security.geofence_enabled", False):
+            from security.geofence import GeofenceMonitor
+            trusted = self.config.get("security.trusted_networks", [])
+            self.geofence = GeofenceMonitor(check_interval_sec=15, parent=self)
+            self.geofence.set_trusted_ssids(trusted, enabled=True)
+            self.geofence.untrusted_network_detected.connect(
+                lambda ssid: (logging.warning(f"Geofence: Relocking all apps due to untrusted network '{ssid}'"), self.relock_all())
             )
-            logging.info("Connected to systemd PrepareForSleep D-Bus signal.")
-            
-        # Connect to GNOME, KDE, and Xfce Screensaver signals on session bus
-        session_bus = QDBusConnection.sessionBus()
-        if session_bus.isConnected():
-            # GNOME ScreenSaver
-            session_bus.connect(
-                "org.gnome.ScreenSaver",
-                "/org/gnome/ScreenSaver",
-                "org.gnome.ScreenSaver",
-                "ActiveChanged",
-                self, "handle_screensaver_active_changed"
-            )
-            # KDE / FreeDesktop ScreenSaver
-            session_bus.connect(
-                "org.freedesktop.ScreenSaver",
-                "/ScreenSaver",
-                "org.freedesktop.ScreenSaver",
-                "ActiveChanged",
-                self, "handle_screensaver_active_changed"
-            )
-            # Xfce ScreenSaver
-            session_bus.connect(
-                "org.xfce.ScreenSaver",
-                "/org/xfce/ScreenSaver",
-                "org.xfce.ScreenSaver",
-                "ActiveChanged",
-                self, "handle_screensaver_active_changed"
-            )
-            logging.info("Connected to ScreenSaver ActiveChanged D-Bus signals (GNOME/KDE/Xfce).")
+            logging.info("Geofence session awareness monitor initialized.")
 
         # Register D-Bus Service
         self.dbus_service = FaceGateService(self)
@@ -106,6 +79,14 @@ class FaceGateApplication(QObject):
         from locking.launcher_manager import get_launcher_manager
         get_launcher_manager().startup_recovery(self.get_protected_apps())
 
+        startup_delay = int(self.config.get("behavior.startup_delay_seconds", 0))
+        if startup_delay > 0:
+            logging.info(f"Daemon: Delaying tray and background monitoring startup by {startup_delay} seconds...")
+            QTimer.singleShot(startup_delay * 1000, self._deferred_startup)
+        else:
+            self._deferred_startup()
+
+    def _deferred_startup(self):
         # Startup Consistency Check & Launcher Substitution
         if self.is_active():
             logging.info("FaceGate daemon starting in ACTIVE mode. Applying launcher substitutions...")
@@ -115,218 +96,110 @@ class FaceGateApplication(QObject):
             logging.info("FaceGate daemon starting in INACTIVE mode. Restoring launchers...")
             restore_substitution(self.get_protected_apps())
 
-        # Try to initialize Tray Icon (with retry loop for desktop env startup races)
-        self.tray = None
+        # State Integrity Watchdog — detects file-deletion bypass attacks
+        from security.state_watchdog import StateWatchdog
+        if not hasattr(self, 'state_watchdog') or self.state_watchdog is None:
+            self.state_watchdog = StateWatchdog(
+                on_tamper_callback=self._handle_state_tamper,
+                check_interval=30.0,
+            )
+            self.state_watchdog.start()
+
+        # Initialize Tray Icon
         self.check_tray_and_start(attempts=0)
+
+    # Properties & Forwarding Methods for Interface Compatibility
+    @property
+    def disabled_until(self):
+        return self.session_manager.disabled_until
+
+    @disabled_until.setter
+    def disabled_until(self, val):
+        self.session_manager.disabled_until = val
+
+    @property
+    def _auth_queue(self):
+        return self.auth_coordinator._auth_queue
+
+    @property
+    def _auth_busy(self):
+        return self.auth_coordinator._auth_busy
+
+    @_auth_busy.setter
+    def _auth_busy(self, val):
+        self.auth_coordinator._auth_busy = val
+
+    def _process_auth_request(self, desktop_name: str, pid: int):
+        self.auth_coordinator._process_auth_request(desktop_name, pid)
+
+    def _run_recognition_subprocess(self, reason: str) -> tuple[bool, str, float, str]:
+        return self.auth_coordinator._run_recognition_subprocess(reason)
+
+    @Slot(bool)
+    def handle_prepare_for_sleep(self, starting_sleep: bool):
+        self.lifecycle_controller.handle_prepare_for_sleep(starting_sleep)
+
+    @Slot(bool)
+    def handle_screensaver_active_changed(self, active: bool):
+        self.lifecycle_controller.handle_screensaver_active_changed(active)
+
+    @property
+    def authorized_apps(self):
+        return self.session_manager.authorized_apps
+
+    @property
+    def auth_timestamps(self):
+        return self.session_manager.auth_timestamps
 
     def get_protected_apps(self):
         return self.config.get("protected_apps", [])
 
     def is_active(self) -> bool:
-        return self.active
+        return self.session_manager.is_active()
 
     def is_app_authorized(self, app_id: str) -> bool:
-        return self.authorized_apps.get(app_id, False)
+        return self.session_manager.is_app_authorized(app_id)
 
     def get_app_id_from_desktop(self, desktop_name: str) -> str:
-        for app in self.get_protected_apps():
-            if app.get("desktop_name") == desktop_name:
-                return app.get("id")
-        return desktop_name
+        return self.session_manager.get_app_id_from_desktop(desktop_name)
 
     def get_app_name(self, identifier: str) -> str:
-        for app in self.get_protected_apps():
-            if app.get("id") == identifier or app.get("desktop_name") == identifier:
-                return app.get("name", identifier)
-        return identifier
+        return self.session_manager.get_app_name(identifier)
 
     def authorize_app(self, app_identifier: str):
-        app_id = self.get_app_id_from_desktop(app_identifier)
-        was_authorized = self.authorized_apps.get(app_id, False)
-        self.authorized_apps[app_id] = True
-        self.auth_timestamps[app_id] = time.time()
-        logging.info(f"State updated: Application '{app_id}' is UNLOCKED.")
-        from PySide6.QtWidgets import QSystemTrayIcon
-        if not was_authorized and self.config.get("behavior.notify_on_auth", True) and self.tray:
-            app_name = self.get_app_name(app_id)
-            self.tray.showMessage("Application Unlocked", f"Access to '{app_name}' has been authorized.", QSystemTrayIcon.MessageIcon.Information, 3000)
+        self.session_manager.authorize_app(app_identifier)
 
     def relock_app(self, app_id: str):
-        was_authorized = self.authorized_apps.get(app_id, False)
-        self.authorized_apps[app_id] = False
-        logging.info(f"State updated: Application '{app_id}' is LOCKED.")
-        # Force monitor to recheck active PIDs for this app if it is running
-        self.monitor.clear_seen_pids()
-        from PySide6.QtWidgets import QSystemTrayIcon
-        if was_authorized and self.config.get("behavior.notify_on_auth", True) and self.tray:
-            app_name = self.get_app_name(app_id)
-            self.tray.showMessage("Application Locked", f"Access to '{app_name}' has been re-locked.", QSystemTrayIcon.MessageIcon.Information, 3000)
+        self.session_manager.relock_app(app_id, monitor=self.monitor)
 
     @Slot()
     def relock_all(self):
-        for app in self.get_protected_apps():
-            self.relock_app(app["id"])
-
-    @Slot(bool)
-    def handle_prepare_for_sleep(self, starting_sleep: bool):
-        if starting_sleep:
-            if self.config.get("behavior.lock_on_sleep_or_lock", True):
-                logging.info("System preparing for sleep/suspend. Relocking all applications to prevent trespassing.")
-                self.relock_all()
-
-    @Slot(bool)
-    def handle_screensaver_active_changed(self, active: bool):
-        if active:
-            if self.config.get("behavior.lock_on_sleep_or_lock", True):
-                logging.info("Screensaver/Lock screen activated. Relocking all applications to prevent trespassing.")
-                self.relock_all()
-
-    def recheck_launcher_shadowing(self):
-        from locking.launcher_sub import check_and_fix_substitutions
-        check_and_fix_substitutions(self.get_protected_apps())
-        logging.info("All applications re-locked.")
-
-    @Slot()
-    def reload_config(self) -> bool:
-        """Hot-reloads configuration settings live without restarting the application or daemon."""
-        try:
-            self.config.reload()
-            apply_substitution(self.get_protected_apps())
-            poll_interval = float(self.config.get("app_monitor.poll_interval_seconds", 1.5))
-            if hasattr(self, 'monitor') and self.monitor:
-                self.monitor.poll_interval = poll_interval
-                self.monitor.clear_seen_pids()
-            if hasattr(self, 'tray') and self.tray:
-                self.tray.refresh_icon_style()
-            logging.info("FaceGateApplication: Configuration hot-reloaded successfully live.")
-            return True
-        except Exception as e:
-            logging.error(f"Error hot-reloading configuration: {e}")
-            return False
+        self.session_manager.relock_all(monitor=self.monitor)
 
     @Slot()
     def resume(self):
-        self.disabled_timer.stop()
-        self.disabled_until = None
-        self.active = True
-
-        # Re-apply launcher substitutions on resume
-        try:
-            apply_substitution(self.get_protected_apps())
-            logging.info("Re-applied launcher substitutions on resume.")
-        except Exception as e:
-            logging.error(f"Error re-applying launcher substitutions on resume: {e}")
-
-        if hasattr(self, 'monitor') and self.monitor:
-            self.monitor.clear_seen_pids()
-            if not self.monitor.isRunning():
-                self.monitor.start()
-
-        if self.tray:
-            self.tray.update_tray_state()
-        logging.info("FaceGate monitor is now ACTIVE.")
-
-    def _run_recognition_subprocess(self, reason: str) -> tuple[bool, str, float, str]:
-        """Spawns the isolated recognition subprocess for admin face verification."""
-        from database.embedding_store import get_cached_key, set_cached_key
-        from locking.ipc_service import run_recognition_helper
-        cached_key = get_cached_key()
-
-        exit_code, stdout_data = run_recognition_helper(reason, cached_key)
-        success = (exit_code == 0)
-
-        actual_method = "face"
-        score = None
-        matched_user = None
-        if stdout_data:
-            for line in stdout_data.splitlines():
-                line = line.strip()
-                if line.startswith("FACEGATE_METHOD:"):
-                    actual_method = line.split(":")[1]
-                elif line.startswith("FACEGATE_SCORE:"):
-                    try:
-                        score = float(line.split(":")[1])
-                    except ValueError:
-                        pass
-                elif line.startswith("FACEGATE_USER:"):
-                    matched_user = line.split(":")[1]
-                elif len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
-                    try:
-                        key_bytes = bytes.fromhex(line)
-                        if len(key_bytes) == 32:
-                            set_cached_key(key_bytes)
-                            logging.info("Successfully cached key returned from recognition subprocess.")
-                    except Exception as ex:
-                        logging.error(f"Failed to parse key returned from subprocess: {ex}")
-
-        method = actual_method
-        return success, method, score, matched_user
-
-    def verify_admin_face(self, reason: str) -> bool:
-        """
-        Authenticates using face recognition.
-        If there are no enrolled faces (first setup), returns True immediately.
-        """
-        from security.lockout_manager import is_locked_out
-        locked_out, remaining = is_locked_out(reason)
-        if locked_out:
-            logging.warning(f"Admin verification for '{reason}' REJECTED due to active lockout ({remaining}s remaining).")
-            from database.audit_log import log_auth_attempt
-            log_auth_attempt(reason, "lockout", "fail")
-            return False
-
-        from database.embedding_store import load_embeddings, EMBEDDING_FILE
-        import os
-        try:
-            enrolled = load_embeddings()
-        except Exception:
-            enrolled = {}
-
-        if not enrolled and not os.path.exists(EMBEDDING_FILE):
-            logging.info("Admin verification: No enrolled faces found and no database exists. Bypassing check.")
-            return True
-
-        success, actual_method, score, matched_user = self._run_recognition_subprocess(reason)
-
-        from database.audit_log import log_auth_attempt
-        log_auth_attempt(reason, actual_method, "success" if success else "fail", score, matched_user)
-        return success
+        self.session_manager.resume(monitor=self.monitor)
 
     def disable_for(self, minutes: int):
-        if not self.verify_admin_face("Disable FaceGate"):
-            logging.warning("Disable FaceGate: Verification failed.")
-            return
-
-        self.disabled_until = time.time() + (minutes * 60)
-        self.active = False
-        self.disabled_timer.start(minutes * 60 * 1000)
-
-        # 1. Restore all launchers BEFORE stopping monitor or DBus
-        from locking.launcher_manager import get_launcher_manager
-        try:
-            get_launcher_manager().restore_all_launchers()
-            logging.info("Restored all launchers before stopping monitor on disable.")
-        except Exception as e:
-            logging.error(f"Error restoring launchers on disable: {e}")
-
-        # 2. Stop monitor
-        if hasattr(self, 'monitor') and self.monitor:
-            self.monitor.stop()
-
-        # 3. Clear runtime locks and suspended process list
-        self.authorized_apps.clear()
-        self.auth_timestamps.clear()
-        if hasattr(self, 'monitor') and self.monitor:
-            self.monitor.clear_seen_pids()
-
-        if self.tray:
-            self.tray.update_tray_state()
-        logging.info(f"FaceGate monitor PAUSED for {minutes} minutes.")
+        self.session_manager.disable_for(minutes, verify_admin_cb=self.verify_admin_face, monitor=self.monitor)
 
     def get_remaining_disabled_seconds(self) -> float:
-        if self.disabled_until:
-            return max(0.0, self.disabled_until - time.time())
-        return 0.0
+        return self.session_manager.get_remaining_disabled_seconds()
+
+    def verify_admin_face(self, reason: str) -> bool:
+        return self.auth_coordinator.verify_admin_face(reason)
+
+    @Slot(str, int)
+    def handle_monitor_auth(self, desktop_name: str, pid: int):
+        self.auth_coordinator.handle_monitor_auth(desktop_name, pid)
+
+    @Slot()
+    def open_settings(self):
+        self.window_manager.open_settings()
+
+    @Slot()
+    def open_enrollment(self):
+        self.window_manager.open_enrollment()
 
     def check_tray_and_start(self, attempts: int = 0):
         if self.tray is not None:
@@ -340,237 +213,85 @@ class FaceGateApplication(QObject):
                 logging.info(f"System tray not available yet. Retrying... (Attempt {attempts + 1})")
             QTimer.singleShot(1000, lambda: self.check_tray_and_start(attempts + 1))
 
-    @Slot(str, int)
-    def handle_monitor_auth(self, desktop_name: str, pid: int):
-        """Triggered when background thread suspends a protected process.
-
-        IMPORTANT: this only enqueues the request. The actual work (spawning
-        the recognition subprocess and pumping the event loop while we wait
-        for it) happens in _process_auth_queue(), which guarantees only ONE
-        auth flow is ever active at a time. Without this guard, launching a
-        second protected app (or the same app twice) while an auth dialog was
-        already in flight would re-enter handle_monitor_auth() from inside
-        the processEvents() pump below, stacking up multiple concurrent
-        recognition subprocesses (each loading the full face-recognition
-        model into memory). That reentrant stacking is a primary cause of
-        random app crashes and, under memory pressure, the OOM killer taking
-        down unrelated session processes (perceived as a "sudden logout").
-        """
-        logging.info(f"Queuing auth request for '{desktop_name}' (PID: {pid})")
-        self._auth_queue.append((desktop_name, pid))
-        if not self._auth_busy:
-            self._process_auth_queue()
-
-    def _process_auth_queue(self):
-        if not self._auth_queue:
-            self._auth_busy = False
-            return
-        self._auth_busy = True
-        desktop_name, pid = self._auth_queue.pop(0)
+    @Slot()
+    def reload_config(self) -> bool:
         try:
-            self._process_auth_request(desktop_name, pid)
-        finally:
-            # Always continue draining the queue, even if this request raised.
-            # Defer via singleShot(0, ...) instead of recursing directly so we
-            # unwind the current call stack first.
-            QTimer.singleShot(0, self._process_auth_queue)
-
-    def _process_auth_request(self, desktop_name: str, pid: int):
-        logging.info(f"Handling AppMonitor suspension for '{desktop_name}' (PID: {pid})")
-        
-        try:
-            import psutil
-            if not psutil.pid_exists(pid):
-                logging.warning(f"Process PID {pid} died before auth was shown.")
-                return
-
-            from security.lockout_manager import is_locked_out
-            locked_out, remaining = is_locked_out(desktop_name)
-            if locked_out:
-                logging.warning(f"Backstop recognition for '{desktop_name}' BLOCKED due to active brute-force lockout ({remaining}s remaining).")
-                policy = self.config.get("app_monitor.on_auth_failure", "kill")
-                if policy == "kill":
-                    try:
-                        os.kill(pid, signal.SIGKILL)
-                        logging.info(f"Killed process (PID: {pid}) due to active brute-force lockout.")
-                    except ProcessLookupError:
-                        pass
-                from database.audit_log import log_auth_attempt
-                log_auth_attempt(desktop_name, "lockout", "fail")
-                return
-
-            from database.embedding_store import get_cached_key
-            cached_key = get_cached_key()
-
-            from locking.launcher_sub import get_facegate_cmd
-            cmd = list(get_facegate_cmd())
-            cmd.extend(["--recognize", desktop_name])
-            pass_fds = []
-            w = None
-            
-            if cached_key is not None:
-                r, w = os.pipe()
-                os.set_inheritable(r, True)
-                cmd.extend(["--key-fd", str(r)])
-                pass_fds.append(r)
-                
-            logging.info(f"Spawning recognition subprocess for backstop: {' '.join(cmd)}")
-            
-            # Start the subprocess asynchronously so we can poll the PID and check if it is still alive!
-            # If the target process is killed while we wait, we terminate the subprocess.
-            proc = subprocess.Popen(cmd, pass_fds=pass_fds, stdout=subprocess.PIPE, text=True, close_fds=True)
-            
-            if cached_key is not None:
-                os.close(r)
-                try:
-                    os.write(w, cached_key)
-                finally:
-                    os.close(w)
-            
-            # Watchdog timer to kill subprocess if target PID exits
-            watch_timer = QTimer(self)
-            def check_process_alive():
-                # Check if target process was terminated
-                if not psutil.pid_exists(pid):
-                    logging.info(f"Target process PID {pid} died externally. Terminating recognition subprocess.")
-                    proc.terminate()
-                    watch_timer.stop()
-                # Check if subprocess finished
-                elif proc.poll() is not None:
-                    watch_timer.stop()
-            
-            watch_timer.timeout.connect(check_process_alive)
-            watch_timer.start(100) # Check every 100ms
-            
-            # Wait for subprocess while keeping Qt event loop alive
-            while proc.poll() is None:
-                QApplication.processEvents()
-                time.sleep(0.05)
-
-            stdout_data, _ = proc.communicate()
-            exit_code = proc.returncode
-            watch_timer.stop()
-            
-            logging.info(f"Backstop recognition subprocess exited with code {exit_code}")
-            
-            # Parse similarity score, user, and method if present
-            score = None
-            matched_user = None
-            returned_key = None
-            actual_method = None
-            if stdout_data:
-                for line in stdout_data.splitlines():
-                    line = line.strip()
-                    if line.startswith("FACEGATE_SCORE:"):
-                        try:
-                            score = float(line.split(":")[1])
-                        except ValueError:
-                            pass
-                    elif line.startswith("FACEGATE_USER:"):
-                        matched_user = line.split(":")[1]
-                    elif line.startswith("FACEGATE_METHOD:"):
-                        actual_method = line.split(":")[1]
-                    elif len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
-                        try:
-                            returned_key = bytes.fromhex(line)
-                        except Exception:
-                            pass
-
-            success = False
-            method = "face"
-            result = "fail"
-            confidence = score
-            username = None
-
-            if exit_code == 0:
-                success = True
-                result = "success"
-                username = matched_user
-                if returned_key and len(returned_key) == 32:
-                    from database.embedding_store import set_cached_key
-                    set_cached_key(returned_key)
-                    logging.info("Successfully cached key returned from backstop recognition subprocess.")
-                if actual_method:
-                    method = actual_method
-                else:
-                    method = "password" if (returned_key and len(returned_key) == 32) else "face"
-            elif exit_code == 2:
-                result = "timeout"
-            else:
-                result = "fail"
-
-            # Write to SQLite audit log
-            from database.audit_log import log_auth_attempt
-            log_auth_attempt(desktop_name, method, result, confidence, username)
-            
-            if success:
-                # Resume process
-                os.kill(pid, signal.SIGCONT)
-                logging.info(f"Resumed process (PID: {pid}) after successful authentication.")
-                app_id = self.get_app_id_from_desktop(desktop_name)
-                self.authorize_app(app_id)
-            else:
-                policy = self.config.get("app_monitor.on_auth_failure", "kill")
-                if policy == "kill":
-                    try:
-                        os.kill(pid, signal.SIGKILL)
-                        logging.info(f"Killed process (PID: {pid}) due to authentication failure.")
-                    except ProcessLookupError:
-                        pass
-                else:
-                    logging.info(f"Process (PID: {pid}) remains suspended according to policy '{policy}'.")
-                    
+            self.config.reload()
+            apply_substitution(self.get_protected_apps())
+            poll_interval = float(self.config.get("app_monitor.poll_interval_seconds", 1.5))
+            if hasattr(self, 'monitor') and self.monitor:
+                self.monitor.poll_interval = poll_interval
+                self.monitor.clear_seen_pids()
+            if hasattr(self, 'tray') and self.tray:
+                QTimer.singleShot(0, self.tray.refresh_icon_style)
+            logging.info("FaceGateApplication: Configuration hot-reloaded successfully live.")
+            return True
         except Exception as e:
-            logging.error(f"Error managing process lifecycle: {e}")
+            logging.error(f"Error hot-reloading configuration: {e}")
+            return False
 
     def trigger_manual_auth(self, desktop_name: str):
-        """Called when user clicks a locked app in the tray menu."""
         self.dbus_service.request_auth_internal(desktop_name)
 
-    @Slot()
-    def open_settings(self):
-        """Opens the Settings Window after face verification."""
-        if not self.verify_admin_face("Settings Access"):
-            logging.warning("Settings Access: Verification failed.")
-            return
-            
-        from ui.settings_window import SettingsWindow
-        if not hasattr(self, "_settings_window") or self._settings_window is None:
-            self._settings_window = SettingsWindow(self.config, parent=None)
-            self._settings_window.finished.connect(self.cleanup_settings_window)
-        self._settings_window.setWindowState(Qt.WindowState.WindowActive)
-        self._settings_window.show()
-        self._settings_window.raise_()
-        self._settings_window.activateWindow()
+    def _handle_state_tamper(self, issues: list):
+        """
+        Emergency lockdown handler invoked by StateWatchdog when critical
+        state files are deleted or modified after initialization.
+        
+        Actions:
+        1. Re-lock all apps (force re-authentication)
+        2. Re-apply launcher substitutions (restore protection)
+        3. Log CRITICAL audit entries
+        4. Show tray notification
+        """
+        logging.critical(
+            "STATE TAMPER LOCKDOWN: %d critical file(s) affected. "
+            "Emergency lockdown initiated.",
+            len(issues),
+        )
 
-    def cleanup_settings_window(self, result):
-        self._settings_window = None
+        # Re-lock all apps
+        try:
+            self.relock_all()
+        except Exception as e:
+            logging.error(f"State tamper lockdown: Error relocking apps: {e}")
 
-    @Slot()
-    def open_enrollment(self):
-        """Opens the Guided Enrollment Wizard after verification."""
-        if not self.verify_admin_face("Enrollment Access"):
-            logging.warning("Enrollment Access: Verification failed.")
-            return
+        # Re-apply launcher substitutions (in case manifest/backups were deleted)
+        try:
+            apply_substitution(self.get_protected_apps())
+        except Exception as e:
+            logging.error(f"State tamper lockdown: Error re-applying substitutions: {e}")
 
-        # 3. Open Enrollment Wizard
-        from ui.enrollment_wizard import EnrollmentWizard
-        if not hasattr(self, "_enrollment_wizard") or self._enrollment_wizard is None:
-            self._enrollment_wizard = EnrollmentWizard(parent=None)
-            self._enrollment_wizard.finished.connect(self.cleanup_enrollment_wizard)
-        self._enrollment_wizard.setWindowState(Qt.WindowState.WindowActive)
-        self._enrollment_wizard.show()
-        self._enrollment_wizard.raise_()
-        self._enrollment_wizard.activateWindow()
+        # Log audit entries
+        try:
+            from database.audit_log import log_auth_attempt
+            for issue in issues:
+                log_auth_attempt(
+                    f"STATE_TAMPER:{issue['file']}",
+                    "tamper_detected",
+                    "fail",
+                )
+        except Exception as e:
+            logging.error(f"State tamper lockdown: Error logging audit: {e}")
 
-    def cleanup_enrollment_wizard(self, result):
-        self._enrollment_wizard = None
+        # Show tray notification
+        if self.tray:
+            try:
+                from PySide6.QtWidgets import QSystemTrayIcon
+                details = ", ".join(i["file"] for i in issues)
+                self.tray.showMessage(
+                    "⚠️ FaceGATE Security Alert",
+                    f"Critical state files tampered with: {details}. "
+                    f"All apps have been re-locked.",
+                    QSystemTrayIcon.MessageIcon.Critical,
+                    15000,
+                )
+            except Exception:
+                pass
 
     @Slot()
     def quit_app(self, bypass_protection=False, restore_launchers=True):
         logging.info("Quit requested. Performing shutdown...")
-        
-        # Check uninstall protection
         if not bypass_protection:
             if self.config.get("behavior.uninstall_protection", True):
                 logging.info("Uninstall protection is active. Prompting for verification...")
@@ -589,18 +310,19 @@ class FaceGateApplication(QObject):
                     logging.info("Shutdown cancelled due to verification failure.")
                     return
         
-        # Restore launchers on any quit/shutdown so system returns to default pre-protection state
         try:
             restore_substitution(self.get_protected_apps())
             logging.info("Launcher modifications reverted on shutdown.")
         except Exception as e:
             logging.error(f"Error restoring launchers on shutdown: {e}")
 
-        # Stop background monitoring thread
         if self.monitor:
             self.monitor.stop()
 
-        # Securely zero the cached encryption key from memory
+        # Stop the state integrity watchdog
+        if hasattr(self, 'state_watchdog') and self.state_watchdog:
+            self.state_watchdog.stop()
+
         from database.embedding_store import clear_cached_key
         clear_cached_key()
 
@@ -612,10 +334,15 @@ def run_auth_launch(desktop_name: str, exec_args: list):
     Substituted launcher client entrypoint.
     Queries the running FaceGate daemon via D-Bus session bus.
     If authenticated, spawns the actual application command.
-    If FaceGate daemon is disabled or inactive, falls back to direct execution.
+    If FaceGate daemon is inactive, auto-starts the daemon or falls back to in-client GUI auth.
     """
+    desktop_field_codes = {"%f", "%F", "%u", "%U", "%i", "%c", "%k"}
+    clean_exec_args = [arg for arg in exec_args if arg not in desktop_field_codes]
+    if clean_exec_args:
+        exec_args = clean_exec_args
+
     from PySide6.QtCore import QCoreApplication
-    from PySide6.QtDBus import QDBusInterface, QDBusConnection, QDBusReply
+    from PySide6.QtDBus import QDBusInterface, QDBusConnection, QDBusReply, QDBus
 
     bus = QDBusConnection.sessionBus()
 
@@ -630,79 +357,189 @@ def run_auth_launch(desktop_name: str, exec_args: list):
             pass
 
     if not daemon_active:
-        logging.warning(f"Launcher: FaceGate daemon is not active. Falling back to direct launch for '{desktop_name}'.")
+        logging.info(f"Launcher: FaceGate daemon is not active. Attempting to start daemon for '{desktop_name}'...")
+        from locking.launcher_sub import get_facegate_cmd
+        try:
+            fg_cmd = list(get_facegate_cmd())
+            fg_cmd.append("--monitor")
+            subprocess.Popen(fg_cmd, close_fds=True, start_new_session=True)
+            for _ in range(30):
+                time.sleep(0.1)
+                if bus.isConnected():
+                    try:
+                        owner_reply = bus.interface().serviceOwner("org.facegate.FaceGate")
+                        if owner_reply.isValid() and owner_reply.value():
+                            daemon_active = True
+                            break
+                    except Exception:
+                        pass
+        except Exception as e:
+            logging.warning(f"Could not auto-start daemon: {e}")
+
+    # Capture active desktop display environment variables
+    display_env = {}
+    env_keys = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "QT_QPA_PLATFORM", "XDG_SESSION_TYPE", "DESKTOP_SESSION"]
+    for k in env_keys:
+        if k in os.environ:
+            display_env[k] = os.environ[k]
+
+    if daemon_active:
+        app = QCoreApplication(sys.argv)
+
+        interface = QDBusInterface(
+            "org.facegate.FaceGate",
+            "/org/facegate/FaceGate",
+            "org.facegate.FaceGate",
+            bus
+        )
+        interface.setTimeout(300000)  # 5-minute timeout for authentication requests
+
+        if interface.isValid():
+            logging.info(f"Launcher: Requesting auth for app '{desktop_name}' via D-Bus...")
+            raw_reply = interface.callWithArgumentList(
+                QDBus.CallMode.Block,
+                "RequestAuthWithEnv",
+                [desktop_name, display_env]
+            )
+            reply = QDBusReply(raw_reply)
+            if not reply.isValid():
+                raw_reply = interface.callWithArgumentList(
+                    QDBus.CallMode.Block,
+                    "RequestAuth",
+                    [desktop_name]
+                )
+                reply = QDBusReply(raw_reply)
+
+            if reply.isValid():
+                authorized = reply.value()
+                if authorized:
+                    logging.info(f"Launcher: D-Bus auth succeeded. Executing: {exec_args}")
+                    try:
+                        subprocess.Popen(exec_args, close_fds=True, start_new_session=True)
+                        sys.exit(0)
+                    except Exception as e:
+                        logging.error(f"Launcher: Failed to execute {exec_args}: {e}")
+                        sys.exit(1)
+                else:
+                    logging.warning("Launcher: D-Bus auth rejected. Process execution blocked.")
+                    sys.exit(1)
+
+    # In-client Fallback Auth Dialog if daemon D-Bus is unavailable or interface call failed
+    logging.info(f"Launcher: Running in-client auth fallback for '{desktop_name}'...")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+
+    config = get_config()
+    app_name = desktop_name
+    for p_app in config.get("protected_apps", []):
+        if p_app.get("desktop_name") == desktop_name or p_app.get("id") == desktop_name:
+            app_name = p_app.get("name", desktop_name)
+            break
+
+    timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
+    from database.embedding_store import EMBEDDING_FILE, OLD_EMBEDDING_FILE
+    mode = "face" if (os.path.exists(EMBEDDING_FILE) or os.path.exists(OLD_EMBEDDING_FILE)) else "password"
+
+    dialog = AuthDialog(app_name, mode=mode, timeout_seconds=timeout_sec)
+    dialog.setWindowState(Qt.WindowState.WindowActive)
+    dialog.show()
+    dialog.raise_()
+    dialog.activateWindow()
+
+    result = dialog.exec()
+    if result == QDialog.DialogCode.Accepted or getattr(dialog, "authenticated", False):
+        logging.info(f"Launcher in-client auth succeeded. Executing: {exec_args}")
         try:
             subprocess.Popen(exec_args, close_fds=True, start_new_session=True)
-            # Restore launchers in background thread since daemon is not running
-            import threading
-            from locking.launcher_sub import emergency_restore_launchers
-            threading.Thread(target=emergency_restore_launchers, daemon=True).start()
             sys.exit(0)
         except Exception as e:
-            logging.error(f"Launcher fallback failed to execute {exec_args}: {e}")
-            sys.exit(1)
-
-    # Needs QCoreApplication to bind to D-Bus event loop
-    app = QCoreApplication(sys.argv)
-
-    interface = QDBusInterface(
-        "org.facegate.FaceGate",
-        "/org/facegate/FaceGate",
-        "org.facegate.FaceGate",
-        bus
-    )
-
-    if not interface.isValid():
-        logging.warning(f"Launcher: Interface invalid. Falling back to direct launch for '{desktop_name}'.")
-        try:
-            subprocess.Popen(exec_args, close_fds=True, start_new_session=True)
-            import threading
-            from locking.launcher_sub import emergency_restore_launchers
-            threading.Thread(target=emergency_restore_launchers, daemon=True).start()
-            sys.exit(0)
-        except Exception as e:
-            sys.exit(1)
-
-    logging.info(f"Launcher: Requesting auth for app '{desktop_name}'...")
-    from PySide6.QtDBus import QDBus
-    raw_reply = interface.callWithArgumentList(
-        QDBus.CallMode.Block,
-        "RequestAuth",
-        [desktop_name],
-        300000  # 5-minute timeout so authentication dialog won't time out prematurely
-    )
-    reply = QDBusReply(raw_reply)
-
-    if not reply.isValid():
-        logging.error(f"Launcher: D-Bus method call failed ({reply.error().message()}). Blocking execution for security.")
-        sys.exit(1)
-
-    authorized = reply.value()
-    if authorized:
-        logging.info(f"Launcher: Auth succeeded. Executing: {exec_args}")
-        try:
-            subprocess.Popen(exec_args, close_fds=True, start_new_session=True)
-            sys.exit(0)
-        except Exception as e:
-            logging.error(f"Launcher: Failed to execute {exec_args}: {e}")
+            logging.error(f"Launcher in-client auth: Failed to execute {exec_args}: {e}")
             sys.exit(1)
     else:
-        logging.warning("Launcher: Auth rejected. Process execution blocked.")
+        logging.warning("Launcher in-client auth rejected. Blocking execution.")
         sys.exit(1)
+
+def verify_cli_admin_access(action_name: str = "Admin Action"):
+    """
+    Enforces admin authorization (face recognition via D-Bus daemon or terminal master password fallback)
+    for sensitive CLI operations like --enroll, --export-profile, and --import-profile.
+    """
+    from database.embedding_store import load_embeddings, EMBEDDING_FILE, get_cached_key
+    from security.credential_store import verify_password, set_master_password_cli
+    import getpass
+
+    has_enrolled = False
+    try:
+        enrolled = load_embeddings()
+        has_enrolled = len(enrolled) > 0
+    except Exception:
+        has_enrolled = os.path.exists(EMBEDDING_FILE)
+
+    if has_enrolled or os.path.exists(EMBEDDING_FILE):
+        dbus_success = False
+        dbus_active = False
+
+        from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply
+        bus = QDBusConnection.sessionBus()
+        if bus.isConnected():
+            interface = QDBusInterface(
+                "org.facegate.FaceGate",
+                "/org/facegate/FaceGate",
+                "org.facegate.FaceGate",
+                bus
+            )
+            if interface.isValid():
+                dbus_active = True
+                from PySide6.QtDBus import QDBus
+                logging.info(f"Requesting {action_name} authorization via running FaceGate daemon...")
+                raw_reply = interface.callWithArgumentList(
+                    QDBus.CallMode.Block,
+                    "RequestAdminAuth",
+                    [action_name]
+                )
+                reply = QDBusReply(raw_reply)
+                if reply.isValid():
+                    dbus_success = reply.value()
+
+        if dbus_active and dbus_success:
+            logging.info(f"{action_name} authorized via daemon.")
+        else:
+            if sys.stdin.isatty():
+                try:
+                    pwd = getpass.getpass(f"Enter master password to authorize {action_name.lower()}: ")
+                except (EOFError, KeyboardInterrupt):
+                    print(f"\n{action_name} cancelled.", file=sys.stderr)
+                    sys.exit(1)
+                if not verify_password(pwd):
+                    print(f"Error: Incorrect master password. {action_name} denied.", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                print(f"Error: Master password required for {action_name.lower()} in non-interactive mode.", file=sys.stderr)
+                sys.exit(1)
+    else:
+        if get_cached_key() is None:
+            if sys.stdin.isatty():
+                print("No master password configured. Setting up master password first...")
+                set_master_password_cli()
+                if get_cached_key() is None:
+                    print("Error: Master password configuration failed.", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                print("Error: No master password configured. Run 'facegate --set-master-password' first.", file=sys.stderr)
+                sys.exit(1)
 
 def main():
     setup_logging()
     logging.info("Starting FaceGate-Linux application wrapper.")
 
-    # Prevent core dumps from leaking encryption keys from memory
+    # Prevent core dumps from leaking encryption keys from memory via RLIMIT_CORE
     try:
-        import ctypes
-        PR_SET_DUMPABLE = 4
-        libc = ctypes.CDLL("libc.so.6", use_errno=True)
-        libc.prctl(PR_SET_DUMPABLE, 0)
-        logging.info("Core dumps disabled (PR_SET_DUMPABLE=0).")
+        import resource
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        logging.info("Core dump limit set to 0 (RLIMIT_CORE=0).")
     except Exception as e:
-        logging.warning(f"Could not disable core dumps: {e}")
+        logging.warning(f"Could not set core dump limit: {e}")
 
     # Fallback env variables for graphical execution compatibility (only when not running under pure Wayland)
     if "WAYLAND_DISPLAY" not in os.environ and "QT_QPA_PLATFORM" not in os.environ:
@@ -728,8 +565,106 @@ def main():
     parser.add_argument("--restore-launchers", action="store_true", help="Restore all modified desktop launchers to original state")
     parser.add_argument("--restore-all", action="store_true", help="Emergency recovery: restore all modified desktop launchers and clear state")
     parser.add_argument("--settings", action="store_true", help="Launch the Settings GUI window")
+    parser.add_argument("--status", action="store_true", help="Display rich CLI status dashboard")
+    parser.add_argument("--health", action="store_true", help="Run system health and diagnostic checks")
+    parser.add_argument("--list-cameras", action="store_true", help="List and diagnose connected camera devices")
+    parser.add_argument("--export-profile", type=str, metavar="FILE", help="Export enrolled face profiles to encrypted transfer file (.fgxfer)")
+    parser.add_argument("--export-user", nargs="+", metavar="NAME", help="Specify user profile(s) to export (default: all)")
+    parser.add_argument("--import-profile", type=str, metavar="FILE", help="Import face profiles from encrypted transfer file (.fgxfer)")
+    parser.add_argument("--force-import", action="store_true", help="Overwrite conflicting local profiles during profile import")
     
     args, unknown = parser.parse_known_args()
+
+    if args.list_cameras:
+        from camera.device_enum import format_camera_list
+        print(format_camera_list())
+        sys.exit(0)
+
+    if args.export_profile:
+        verify_cli_admin_access("Export Profiles")
+        from security.profile_transfer import export_profile
+        try:
+            count, path = export_profile(args.export_profile, export_users=args.export_user)
+            print(f"SUCCESS: Exported {count} face profile(s) to '{path}'.")
+            sys.exit(0)
+        except Exception as e:
+            print(f"Error exporting profiles: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    if args.import_profile:
+        verify_cli_admin_access("Import Profiles")
+        from security.profile_transfer import import_profile
+        try:
+            users = import_profile(args.import_profile, force_import=args.force_import)
+            print(f"SUCCESS: Imported {len(users)} face profile(s): {', '.join(users)}.")
+            sys.exit(0)
+        except Exception as e:
+            print(f"Error importing profiles: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    if args.health:
+        from utils.health_check import run_health_check
+        passed, total, report = run_health_check()
+        print("\n".join(report))
+        sys.exit(0 if passed == total else 1)
+
+    if args.status:
+        from PySide6.QtDBus import QDBusInterface, QDBusConnection
+        from database.embedding_store import load_embeddings, get_cached_key
+        from database.audit_log import get_recent_logs
+        
+        config = get_config()
+        print("🛡️  === FaceGATE-Linux Status Dashboard ===")
+        
+        # Check D-Bus Daemon Status
+        bus = QDBusConnection.sessionBus()
+        daemon_active = False
+        if bus.isConnected():
+            interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
+            if interface.isValid():
+                daemon_active = True
+                
+        status_str = "\033[92m● ACTIVE (Running)\033[0m" if daemon_active else "\033[91m○ INACTIVE (Not Running)\033[0m"
+        print(f"  Daemon Status  : {status_str}")
+        
+        # Encryption Vault Status
+        key = get_cached_key()
+        vault_str = "\033[92mUnlocked (Key Cached)\033[0m" if key else "\033[93mLocked (Master Password Required)\033[0m"
+        print(f"  Security Vault : {vault_str}")
+        
+        # Protected Apps
+        apps = config.get("protected_apps", [])
+        print(f"  Protected Apps : {len(apps)}")
+        for app in apps:
+            app_id = app.get("id", "unknown")
+            app_name = app.get("name", app_id)
+            print(f"    - {app_name} ({app_id})")
+            
+        # Enrolled Profiles
+        try:
+            enrolled = load_embeddings()
+            users = list(enrolled.keys())
+            print(f"  Enrolled Faces : {len(users)} ({', '.join(users) if users else 'none'})")
+        except Exception:
+            print("  Enrolled Faces : Unknown (Vault Locked)")
+            
+        # Recent Audit Trail
+        logs = get_recent_logs(limit=5)
+        print("\n  Recent Activity (Last 5 events):")
+        if not logs:
+            print("    (No authentication logs recorded)")
+        else:
+            for log in logs:
+                res = log.get('result', 'unknown')
+                res_symbol = "✓" if res == 'success' else "✗" if res == 'fail' else "!"
+                color = "\033[92m" if res == 'success' else "\033[91m" if res == 'fail' else "\033[93m"
+                app = log.get('app_identifier', 'unknown')
+                method = log.get('method', 'unknown')
+                ts = log.get('timestamp', '')
+                print(f"    {color}[{res_symbol}]\033[0m {ts} | {app} via {method} ({res})")
+                
+        print("===========================================")
+        sys.exit(0)
 
     if args.restore_launchers or args.restore_all:
         from locking.launcher_manager import get_launcher_manager
@@ -870,9 +805,8 @@ def main():
                     logging.info("Requesting Settings Access authorization via running FaceGate daemon...")
                     raw_reply = interface.callWithArgumentList(
                         QDBus.CallMode.Block,
-                        "RequestAuth",
-                        ["Settings Access"],
-                        300000
+                        "RequestAdminAuth",
+                        ["Settings Access"]
                     )
                     reply = QDBusReply(raw_reply)
                     if reply.isValid():
@@ -888,13 +822,11 @@ def main():
                     else:
                         logging.error(f"D-Bus auth call failed: {reply.error().message()}")
             
-            if dbus_active:
-                if not dbus_success:
-                    logging.info("Settings Access: Verification failed via daemon. Exiting.")
-                    sys.exit(1)
+            if dbus_active and dbus_success:
+                logging.info("Settings Access authorized via daemon.")
             else:
                 # Fallback to local AuthDialog
-                logging.info("FaceGate daemon is not active on D-Bus. Running local verification.")
+                logging.info("Daemon verification skipped or unsuccessful. Running local verification.")
                 mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
                 timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
                 dialog = AuthDialog("Settings Access", mode=mode, timeout_seconds=timeout_sec)
@@ -914,76 +846,7 @@ def main():
         
     elif args.enroll:
         # CLI Enrollment mode - Requires Admin Authentication
-        from database.embedding_store import load_embeddings, EMBEDDING_FILE, get_cached_key
-        from security.credential_store import verify_password, set_master_password_cli
-        import getpass
-
-        has_enrolled = False
-        try:
-            enrolled = load_embeddings()
-            has_enrolled = len(enrolled) > 0
-        except Exception:
-            has_enrolled = os.path.exists(EMBEDDING_FILE)
-
-        if has_enrolled or os.path.exists(EMBEDDING_FILE):
-            # Check if FaceGate daemon is active on session D-Bus
-            dbus_success = False
-            dbus_active = False
-
-            from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply
-            bus = QDBusConnection.sessionBus()
-            if bus.isConnected():
-                interface = QDBusInterface(
-                    "org.facegate.FaceGate",
-                    "/org/facegate/FaceGate",
-                    "org.facegate.FaceGate",
-                    bus
-                )
-                if interface.isValid():
-                    dbus_active = True
-                    from PySide6.QtDBus import QDBus
-                    logging.info("Requesting Enrollment Access authorization via running FaceGate daemon...")
-                    raw_reply = interface.callWithArgumentList(
-                        QDBus.CallMode.Block,
-                        "RequestAuth",
-                        ["Enrollment Access"],
-                        300000
-                    )
-                    reply = QDBusReply(raw_reply)
-                    if reply.isValid():
-                        dbus_success = reply.value()
-
-            if dbus_active:
-                if not dbus_success:
-                    print("Error: Enrollment Access verification failed via daemon. Access denied.", file=sys.stderr)
-                    sys.exit(1)
-            else:
-                # Daemon is not active: require master password verification
-                if sys.stdin.isatty():
-                    try:
-                        pwd = getpass.getpass("Enter master password to authorize enrollment: ")
-                    except (EOFError, KeyboardInterrupt):
-                        print("\nEnrollment cancelled.", file=sys.stderr)
-                        sys.exit(1)
-                    if not verify_password(pwd):
-                        print("Error: Incorrect master password. Enrollment access denied.", file=sys.stderr)
-                        sys.exit(1)
-                else:
-                    print("Error: Master password required to authorize enrollment in non-interactive mode.", file=sys.stderr)
-                    sys.exit(1)
-        else:
-            # First-run setup: no master password set yet
-            if get_cached_key() is None:
-                if sys.stdin.isatty():
-                    print("No master password configured. Setting up master password first...")
-                    set_master_password_cli()
-                    if get_cached_key() is None:
-                        print("Error: Master password configuration failed.", file=sys.stderr)
-                        sys.exit(1)
-                else:
-                    print("Error: No master password configured. Run 'facegate --set-master-password' first.", file=sys.stderr)
-                    sys.exit(1)
-
+        verify_cli_admin_access("Enrollment Access")
         from recognition.cli_enroll import enroll_user
         enroll_user(args.enroll)
         sys.exit(0)
@@ -996,19 +859,25 @@ def main():
         desktop_name = args.recognize
         config = get_config()
         
-        # Determine app name
+        # Determine app name and auth_mode configuration
         app_name = desktop_name
+        target_app = None
         for p_app in config.get("protected_apps", []):
             if p_app.get("desktop_name") == desktop_name or p_app.get("id") == desktop_name:
                 app_name = p_app.get("name", desktop_name)
+                target_app = p_app
                 break
                 
         timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
         
-        # Always launch in face mode if database exists, so camera window pops up first.
         from database.embedding_store import EMBEDDING_FILE, OLD_EMBEDDING_FILE
-        mode = "face" if (os.path.exists(EMBEDDING_FILE) or os.path.exists(OLD_EMBEDDING_FILE)) else "password"
-        logging.info(f"Recognition subprocess launching in '{mode}' mode (Face Recognition first).")
+        configured_mode = target_app.get("auth_mode") if target_app else None
+        if configured_mode in ("face", "password", "face+password"):
+            mode = configured_mode
+        else:
+            mode = "face" if (os.path.exists(EMBEDDING_FILE) or os.path.exists(OLD_EMBEDDING_FILE)) else "password"
+            
+        logging.info(f"Recognition subprocess launching for '{app_name}' in '{mode}' mode.")
         
         dialog = AuthDialog(app_name, mode=mode, timeout_seconds=timeout_sec)
         dialog.setWindowState(Qt.WindowState.WindowActive)
@@ -1021,7 +890,7 @@ def main():
         
         result = dialog.exec()
         
-        if result == QDialog.DialogCode.Accepted:
+        if result == QDialog.DialogCode.Accepted or getattr(dialog, "authenticated", False):
             actual_method = "password" if (dialog.fallback_to_password or mode == "password") else "face"
             print(f"FACEGATE_METHOD:{actual_method}")
             if hasattr(dialog, "final_score") and dialog.final_score is not None:
@@ -1066,12 +935,6 @@ def main():
     elif args.monitor:
         # Daemon monitor mode
         config = get_config()
-        startup_delay = int(config.get("behavior.startup_delay_seconds", 0))
-        if startup_delay > 0:
-            logging.info(f"Daemon: Delaying startup by {startup_delay} seconds...")
-            import time
-            time.sleep(startup_delay)
-            
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
 

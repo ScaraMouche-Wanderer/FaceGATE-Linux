@@ -48,49 +48,41 @@ def _get_machine_bound_key() -> bytes:
 
 def _save_persistent_vault_key(key: bytes):
     """
-    Saves the derived key to system keyring and machine-bound encrypted storage.
+    Saves the derived key to OS keyring if security.persist_vault_key is explicitly enabled.
+    By default (persist_vault_key=False), keys are kept strictly in RAM and session tmpfs.
     """
+    from utils.config_loader import get_config
+    try:
+        config = get_config()
+        if not config.get("security.persist_vault_key", False):
+            logging.debug("Persistent vault key storage disabled by default config (security.persist_vault_key=false).")
+            return
+    except Exception:
+        return
+
     key_bytes = bytes(key) if isinstance(key, (bytes, bytearray)) else key
 
-    # 1. Save to system keyring if keyring module is available
+    # Save to system keyring if keyring module is available
     try:
         import keyring
         keyring.set_password("facegate", "vault_key", key_bytes.hex())
         logging.info("Saved vault encryption key to system keyring.")
     except Exception as e:
-        logging.debug(f"System keyring save skipped: {e}")
-
-    # 2. Save to machine-bound encrypted file (~/.config/facegate/.vault_key.enc)
-    try:
-        vault_key_file = os.path.expanduser("~/.config/facegate/.vault_key.enc")
-        os.makedirs(os.path.dirname(vault_key_file), mode=0o700, exist_ok=True)
-        os.chmod(os.path.dirname(vault_key_file), 0o700)
-
-        m_key = _get_machine_bound_key()
-        from security.crypto_engine import encrypt
-        nonce, ciphertext = encrypt(key_bytes, m_key)
-        payload = {
-            "nonce": base64.b64encode(nonce).decode('utf-8'),
-            "ciphertext": base64.b64encode(ciphertext).decode('utf-8')
-        }
-        
-        tmp_file = vault_key_file + ".tmp"
-        fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, 'w') as f:
-            json.dump(payload, f)
-            f.flush()
-            os.fsync(f.fileno())
-        os.chmod(tmp_file, 0o600)
-        os.replace(tmp_file, vault_key_file)
-        logging.info(f"Persisted machine-bound vault key file: {vault_key_file}")
-    except Exception as e:
-        logging.warning(f"Could not persist machine-bound vault key file: {e}")
+        logging.warning(f"System keyring save skipped/failed: {e}")
 
 def _load_persistent_vault_key() -> bytes | None:
     """
-    Attempts to restore the vault key from system keyring or machine-bound encrypted storage.
+    Attempts to restore the vault key from system keyring if security.persist_vault_key is enabled.
     """
-    # 1. Try system keyring
+    from utils.config_loader import get_config
+    try:
+        config = get_config()
+        if not config.get("security.persist_vault_key", False):
+            return None
+    except Exception:
+        return None
+
+    # Try system keyring
     try:
         import keyring
         val = keyring.get_password("facegate", "vault_key")
@@ -101,23 +93,6 @@ def _load_persistent_vault_key() -> bytes | None:
                 return b
     except Exception as e:
         logging.debug(f"System keyring lookup skipped: {e}")
-
-    # 2. Try machine-bound encrypted file
-    try:
-        vault_key_file = os.path.expanduser("~/.config/facegate/.vault_key.enc")
-        if os.path.exists(vault_key_file):
-            with open(vault_key_file, 'r') as f:
-                payload = json.load(f)
-            nonce = base64.b64decode(payload["nonce"])
-            ciphertext = base64.b64decode(payload["ciphertext"])
-            m_key = _get_machine_bound_key()
-            from security.crypto_engine import decrypt
-            decrypted = decrypt(nonce, ciphertext, m_key)
-            if len(decrypted) == 32:
-                logging.info("Restored vault encryption key from machine-bound file.")
-                return decrypted
-    except Exception as e:
-        logging.error(f"Error restoring machine-bound vault key file: {e}")
 
     return None
 
@@ -229,7 +204,7 @@ def read_envelope_file() -> dict:
             envelope = json.load(f)
             
         return {
-            "kdf": envelope["kdf"],
+            "kdf": envelope.get("kdf"),
             "iterations": int(envelope["iterations"]),
             "salt": base64.b64decode(envelope["salt"]),
             "nonce": base64.b64decode(envelope["nonce"]),
@@ -299,11 +274,11 @@ def load_embeddings() -> dict:
         
     try:
         from security.crypto_engine import decrypt, build_aad
-        has_kdf = "kdf" in envelope
-        aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), envelope.get("iterations", 600000), envelope.get("salt", "")) if has_kdf else None
-        try:
+        has_kdf = "kdf" in envelope and envelope["kdf"] is not None
+        if has_kdf:
+            aad = build_aad(envelope["kdf"], envelope.get("iterations", 600000), envelope.get("salt", ""))
             decrypted_bytes = decrypt(envelope["nonce"], envelope["ciphertext"], key, aad)
-        except Exception:
+        else:
             decrypted_bytes = decrypt(envelope["nonce"], envelope["ciphertext"], key, aad=None)
         data = json.loads(decrypted_bytes.decode('utf-8'))
         
@@ -378,6 +353,10 @@ def save_embedding(name: str, embedding: np.ndarray):
 
         # Signal running daemon to reload user embeddings safely
         notify_daemon_reload()
+
+        # Write initialization sentinel (idempotent)
+        from security.state_watchdog import write_sentinel
+        write_sentinel()
     except Exception as e:
         logging.error(f"Error saving encrypted embedding: {e}")
         raise RuntimeError(f"Error saving encrypted embedding: {e}")

@@ -3,11 +3,11 @@ import subprocess
 import time
 import logging
 from PySide6.QtCore import QObject, Slot, ClassInfo
-from PySide6.QtDBus import QDBusConnection, QDBusAbstractAdaptor
+from PySide6.QtDBus import QDBusConnection, QDBusAbstractAdaptor, QDBusContext
 from PySide6.QtWidgets import QApplication
 from locking.launcher_sub import get_facegate_cmd, get_facegate_executable
 
-def run_recognition_helper(identifier: str, cached_key: bytes | None = None) -> tuple[int, str]:
+def run_recognition_helper(identifier: str, cached_key: bytes | None = None, env: dict | None = None) -> tuple[int, str]:
     cmd = list(get_facegate_cmd())
     cmd.extend(["--recognize", identifier])
     pass_fds = []
@@ -21,8 +21,26 @@ def run_recognition_helper(identifier: str, cached_key: bytes | None = None) -> 
 
     logging.info(f"Spawning recognition subprocess: {' '.join(cmd)}")
 
+    proc_env = os.environ.copy()
+    if env:
+        allowed_keys = {
+            "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
+            "QT_QPA_PLATFORM", "XDG_SESSION_TYPE", "DESKTOP_SESSION"
+        }
+        for k, v in env.items():
+            if isinstance(k, str) and isinstance(v, str) and k in allowed_keys:
+                proc_env[k] = v
+
     try:
-        proc = subprocess.Popen(cmd, pass_fds=pass_fds, stdout=subprocess.PIPE, text=True, close_fds=True)
+        proc = subprocess.Popen(
+            cmd,
+            pass_fds=pass_fds,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            close_fds=True,
+            env=proc_env
+        )
         if cached_key is not None:
             os.close(r)
             try:
@@ -34,7 +52,9 @@ def run_recognition_helper(identifier: str, cached_key: bytes | None = None) -> 
             QApplication.processEvents()
             time.sleep(0.05)
 
-        stdout_data, _ = proc.communicate()
+        stdout_data, stderr_data = proc.communicate()
+        if proc.returncode != 0 and stderr_data:
+            logging.error(f"Recognition subprocess exit code {proc.returncode}. Stderr: {stderr_data.strip()}")
         return proc.returncode, stdout_data
     except Exception as e:
         logging.error(f"Failed to spawn recognition subprocess: {e}")
@@ -54,7 +74,7 @@ class FaceGateService(QObject):
         # Instantiate the adaptor to map this QObject to the D-Bus interface
         self.adaptor = FaceGateAdaptor(self)
 
-    def request_auth_internal(self, app_identifier: str) -> bool:
+    def request_auth_internal(self, app_identifier: str, env: dict | None = None) -> bool:
         logging.info(f"D-Bus request received: RequestAuth for '{app_identifier}'")
         
         # If the monitor is currently disabled, bypass auth
@@ -69,6 +89,15 @@ class FaceGateService(QObject):
                 logging.info(f"App '{app_identifier}' (ID: '{app_id}') is already authorized in session. Auto-authorizing.")
                 return True
 
+        # Check if this app is a Decoy Honeypot app
+        if self.main_app:
+            protected = self.main_app.get_protected_apps()
+            from security.decoy_mode import is_decoy_app, handle_decoy_trigger
+            if is_decoy_app(app_identifier, protected):
+                logging.warning(f"Decoy Honeypot app '{app_identifier}' triggered via D-Bus!")
+                handle_decoy_trigger(app_identifier)
+                return False
+
         # Check for persistent brute-force lockout
         from security.lockout_manager import is_locked_out
         locked_out, remaining = is_locked_out(app_identifier)
@@ -81,7 +110,7 @@ class FaceGateService(QObject):
         from database.embedding_store import get_cached_key, set_cached_key
         cached_key = get_cached_key()
         
-        exit_code, stdout_data = run_recognition_helper(app_identifier, cached_key)
+        exit_code, stdout_data = run_recognition_helper(app_identifier, cached_key, env=env)
         logging.info(f"Recognition subprocess exited with code {exit_code}")
         
         success = (exit_code == 0)
@@ -114,10 +143,21 @@ class FaceGateService(QObject):
         from database.audit_log import log_auth_attempt
         log_auth_attempt(app_identifier, method, "success" if success else "fail", score, username)
         
-        if success and self.main_app:
-            self.main_app.authorize_app(app_identifier)
+        from security.lockout_manager import record_failed_attempt, reset_lockout
+        if success:
+            reset_lockout(app_identifier)
+            if self.main_app:
+                self.main_app.authorize_app(app_identifier)
+        else:
+            record_failed_attempt(app_identifier)
             
         return success
+
+    def request_admin_auth_internal(self, reason: str, env: dict | None = None) -> bool:
+        logging.info(f"D-Bus request received: RequestAdminAuth for '{reason}'")
+        if not self.main_app:
+            return False
+        return self.main_app.verify_admin_face(reason)
 
     def emergency_kill_internal(self):
         """
@@ -243,30 +283,31 @@ class FaceGateService(QObject):
         return False
 
 @ClassInfo({"D-Bus Interface": "org.facegate.FaceGate"})
-class FaceGateAdaptor(QDBusAbstractAdaptor):
+class FaceGateAdaptor(QDBusAbstractAdaptor, QDBusContext):
     def __init__(self, parent: FaceGateService):
         super().__init__(parent)
         self.service = parent
 
     def _verify_caller_uid(self) -> bool:
-        msg = self.message()
-        if msg.isValid():
-            caller_service = msg.service()
-            if not caller_service:
-                return True
-            import os
-            from PySide6.QtDBus import QDBusConnection
-            bus = QDBusConnection.sessionBus()
-            if bus.isConnected() and bus.interface():
-                try:
+        try:
+            msg = self.message()
+            if msg.isValid():
+                caller_service = msg.service()
+                if not caller_service:
+                    return True
+                import os
+                from PySide6.QtDBus import QDBusConnection
+                bus = QDBusConnection.sessionBus()
+                if bus.isConnected() and bus.interface():
                     owner_reply = bus.interface().serviceUid(caller_service)
                     if owner_reply.isValid():
                         caller_uid = owner_reply.value()
                         if caller_uid != os.getuid():
                             logging.warning(f"D-Bus call REJECTED: Caller UID {caller_uid} != process UID {os.getuid()}")
                             return False
-                except Exception as e:
-                    logging.debug(f"Caller UID check non-blocking fallback: {e}")
+        except Exception as e:
+            logging.warning(f"Caller UID check exception (failing closed): {e}")
+            return False
         return True
 
     @Slot(result=bool)
@@ -280,6 +321,24 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
         if not self._verify_caller_uid():
             return False
         return self.service.request_auth_internal(app_identifier)
+
+    @Slot(str, dict, result=bool)
+    def RequestAuthWithEnv(self, app_identifier: str, env: dict) -> bool:
+        if not self._verify_caller_uid():
+            return False
+        return self.service.request_auth_internal(app_identifier, env=env)
+
+    @Slot(str, result=bool)
+    def RequestAdminAuth(self, reason: str) -> bool:
+        if not self._verify_caller_uid():
+            return False
+        return self.service.request_admin_auth_internal(reason)
+
+    @Slot(str, dict, result=bool)
+    def RequestAdminAuthWithEnv(self, reason: str, env: dict) -> bool:
+        if not self._verify_caller_uid():
+            return False
+        return self.service.request_admin_auth_internal(reason, env=env)
 
     # NOTE: GetCachedKey and UpdateCachedKey have been deliberately REMOVED from
     # the D-Bus interface. Exposing the raw AES-256 key on the session bus allowed

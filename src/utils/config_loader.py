@@ -63,9 +63,34 @@ class Config:
         return val
 
     def reload(self):
-        """Hot-reloads configuration from disk without creating a new Config instance."""
+        """Hot-reloads configuration from disk without creating a new Config instance.
+        
+        Includes tamper detection: if the previous config had protected_apps
+        entries but the reloaded config has none, the previous list is preserved
+        and a CRITICAL warning is logged. This prevents the attack where
+        deleting config.yaml causes fallback to default.yaml (empty protected_apps).
+        """
+        # Snapshot current protected_apps before reload
+        previous_apps = self.get("protected_apps", [])
+
         self.settings = {}
         self.load()
+
+        # Tamper detection: protected_apps disappeared
+        new_apps = self.get("protected_apps", [])
+        if previous_apps and not new_apps:
+            from security.state_watchdog import is_initialized
+            if is_initialized():
+                deny_mode = self.get("security.deny_on_missing_state", True)
+                if deny_mode:
+                    logging.critical(
+                        "TAMPER DETECTED: protected_apps configuration was emptied "
+                        "after initialization (was %d apps, now 0). Preserving "
+                        "previous protected apps list.",
+                        len(previous_apps),
+                    )
+                    self.set("protected_apps", previous_apps)
+
         logging.info("Configuration hot-reloaded from disk.")
 
     def set(self, key, value):
