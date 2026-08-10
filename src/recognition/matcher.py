@@ -60,3 +60,25 @@ def match_face(live_embedding: np.ndarray, enrolled: dict = None) -> tuple:
         
     logging.info(f"No match found: similarity {top_score:.4f} is below threshold {threshold}")
     return None, top_score
+
+def match_multi_faces(faces: list, enrolled: dict = None) -> list:
+    """
+    Evaluates multiple detected faces against enrolled embeddings.
+    Calls match_face for individual candidate evaluations to preserve threshold & ambiguity checking,
+    and sorts results so enrolled user matches appear first.
+    
+    Returns:
+        List of tuples: (face_dict, matched_name, confidence_score)
+    """
+    if not faces:
+        return []
+        
+    results = []
+    for face in faces:
+        emb = face['embedding']
+        name, score = match_face(emb, enrolled)
+        results.append((face, name, score))
+        
+    # Sort results: enrolled user matches first (highest confidence score), then by face bounding box area
+    results.sort(key=lambda r: (r[1] is not None, r[2], r[0].get('area', 0)), reverse=True)
+    return results

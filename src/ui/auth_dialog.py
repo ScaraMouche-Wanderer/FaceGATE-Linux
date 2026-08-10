@@ -561,28 +561,25 @@ class AuthDialog(QDialog):
         matched_score = 0.0
         matched_face = None
         
-        face_matches = []
-        for face in faces:
+        from recognition.matcher import match_multi_faces
+        face_matches = match_multi_faces(faces, self.enrolled_embeddings)
+        
+        for face, name, score in face_matches:
             bbox = face['bbox']
-            emb = face['embedding']
-            
-            from recognition.matcher import match_face
-            name, score = match_face(emb, self.enrolled_embeddings)
-            face_matches.append((face, name, score))
-            
             if name:
-                color = (0, 255, 0) # Green in BGR
+                color = (0, 255, 0) # Green in BGR for recognized enrolled user
                 text = f"{name} ({score:.2f})"
-                matched_user = name
-                matched_score = score
-                matched_face = face
+                if matched_user is None or score > matched_score:
+                    matched_user = name
+                    matched_score = score
+                    matched_face = face
             else:
-                color = (0, 0, 255) # Red in BGR
+                color = (0, 0, 255) # Red in BGR for unknown bystander
                 text = "Unknown"
                 if score > 0:
                     text += f" ({score:.2f})"
             
-            # Draw sleek reticle bounding box and label
+            # Draw sleek reticle bounding box and label for every face in the camera frame
             draw_tech_corner_reticle(display_frame, bbox, color, text)
 
         # Update preview with overlays

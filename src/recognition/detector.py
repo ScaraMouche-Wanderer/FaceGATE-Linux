@@ -56,7 +56,7 @@ class Detector:
     def get_load_time(self) -> float:
         return self.load_time
 
-    def detect_faces(self, frame: np.ndarray):
+    def detect_faces(self, frame: np.ndarray, max_faces: int = 5):
         """
         Detects faces in a BGR frame.
         
@@ -65,16 +65,27 @@ class Detector:
                 - 'bbox': [x1, y1, x2, y2]
                 - 'embedding': np.ndarray (size 512)
                 - 'kps': keypoints
+                - 'area': int (bounding box surface area)
+            Sorted by bounding box area (largest / closest face first).
         """
         try:
             faces = self.app.get(frame)
             results = []
             for face in faces:
+                bbox = face.bbox.astype(int).tolist()
+                w = max(0, bbox[2] - bbox[0])
+                h = max(0, bbox[3] - bbox[1])
+                area = w * h
                 results.append({
-                    'bbox': face.bbox.astype(int).tolist(),
+                    'bbox': bbox,
                     'embedding': face.embedding,
-                    'kps': face.kps
+                    'kps': face.kps,
+                    'area': area
                 })
+            # Sort faces by bounding box area descending (largest / closest face first)
+            results.sort(key=lambda f: f['area'], reverse=True)
+            if max_faces and len(results) > max_faces:
+                results = results[:max_faces]
             return results
         except Exception as e:
             logging.error(f"Error in face detection: {e}")
