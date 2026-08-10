@@ -25,38 +25,27 @@ def is_ir_frame(frame: np.ndarray, threshold: float = None) -> bool:
     mean_diff = (np.mean(diff_rg) + np.mean(diff_gb)) / 2.0
     return mean_diff < threshold
 
-def detect_camera_device() -> int:
+def detect_camera_device(ignore_override: bool = False) -> int:
     """
     Checks for camera devices, running the IR-vs-RGB heuristic to prefer
-    RGB-producing devices. Respects manual config overrides if set.
+    RGB-producing devices. Respects manual config overrides if set unless ignore_override=True.
     """
-    config = get_config()
-    override = config.get("camera.device_index")
-    if override is not None:
-        logging.info(f"Using camera device index override from config: {override}")
-        return int(override)
-        
-    best_idx = 0
-    max_devices = 5
-    for idx in range(max_devices):
-        # Prefer CAP_V4L2 explicitly on Linux
-        cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(idx) # Fallback to default backend
-            
-        if cap.isOpened():
-            ret, frame = cap.read()
-            cap.release()
-            if ret and frame is not None:
-                if not is_ir_frame(frame):
-                    logging.info(f"Auto-detected RGB camera at index {idx}")
-                    return idx
-                else:
-                    logging.info(f"Detected IR/grayscale camera at index {idx}. Continuing search...")
-                    best_idx = idx
-                    
-    logging.info(f"Fallback: using camera at index {best_idx}")
-    return best_idx
+    if not ignore_override:
+        try:
+            config = get_config()
+            override = config.get("camera.device_index")
+            if override is not None:
+                logging.info(f"Using camera device index override from config: {override}")
+                return int(override)
+        except Exception:
+            pass
+
+    from camera.device_enum import find_best_rgb_camera
+    try:
+        return find_best_rgb_camera()
+    except Exception as e:
+        logging.warning(f"Camera enumeration failed during detection: {e}")
+        return 0
 
 def diagnose_camera_error(device_index: int) -> str:
     """
@@ -122,6 +111,16 @@ class CameraWorker:
         if not self.cap.isOpened():
             self.cap = cv2.VideoCapture(self.device_index)
             
+        if not self.cap.isOpened():
+            logging.warning(f"Configured camera device index {self.device_index} failed to open. Attempting auto-detection fallback...")
+            fallback_idx = detect_camera_device(ignore_override=True)
+            if fallback_idx != self.device_index:
+                logging.info(f"Switching camera device from index {self.device_index} to fallback index {fallback_idx}.")
+                self.device_index = fallback_idx
+                self.cap = cv2.VideoCapture(self.device_index, cv2.CAP_V4L2)
+                if not self.cap.isOpened():
+                    self.cap = cv2.VideoCapture(self.device_index)
+
         if not self.cap.isOpened():
             err_msg = diagnose_camera_error(self.device_index)
             logging.error(err_msg)
