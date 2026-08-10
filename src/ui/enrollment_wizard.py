@@ -151,7 +151,7 @@ class EnrollmentWizard(QDialog):
         u_lbl = QLabel("Enrolling Username:")
         u_lbl.setObjectName("boldLabel")
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("e.g. voidnode")
+        self.username_input.setPlaceholderText("e.g. alex")
         self.username_input.returnPressed.connect(self.process_intro_next)
         if self.target_username:
             self.username_input.setText(self.target_username)

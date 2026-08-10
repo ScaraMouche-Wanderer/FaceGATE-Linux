@@ -8,10 +8,17 @@ build/
 .pytest_cache/
 .cache/
 .venv/
+# Local User Data & Biometrics
 *.db
-*.log
+*.sqlite
+*.npy
 *.enc
+*.key
+*.pem
+*.log
 config.yaml
+intruders/
+backups/
 
 # IDE / Editor
 .vscode/
