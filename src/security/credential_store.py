@@ -9,16 +9,14 @@ from database.embedding_store import (
     set_cached_key, check_and_perform_migration
 )
 
-def verify_password(password: str) -> bool:
+def verify_password(password: str, auto_migrate: bool = True) -> bool:
     """
     Verifies the password by trying to decrypt the embeddings envelope.
     If decryption succeeds, caches the derived key and returns True.
     Ensures memory hygiene by converting to bytearray and zeroing it out.
     
-    NOTE: Python's string immutability means a 'str'-typed password can linger
-    in memory until garbage-collected. To minimize the window of exposure, we
-    convert it to a bytearray and explicitly overwrite it as soon as key derivation
-    is complete.
+    If auto_migrate is True and a legacy envelope without KDF/AAD binding is detected,
+    this function will automatically rewrite the envelope to upgrade to AAD-bound storage.
     """
     if not password:
         return False
@@ -58,12 +56,21 @@ def verify_password(password: str) -> bool:
         
         # Attempt to decrypt the embeddings with AAD binding.
         from security.crypto_engine import build_aad
-        has_kdf = "kdf" in envelope
-        aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), iterations, salt) if has_kdf else None
-        try:
+        has_kdf = "kdf" in envelope and envelope["kdf"] is not None
+        if has_kdf:
+            aad = build_aad(envelope["kdf"], iterations, salt)
+            # Mandatory AAD binding; no fallback to aad=None allowed if kdf is present
             decrypt(nonce, ciphertext, key, aad)
-        except Exception:
+        else:
+            # Legacy envelope without KDF binding
             decrypt(nonce, ciphertext, key, aad=None)
+            if auto_migrate:
+                # Perform automatic background migration to AAD-bound envelope
+                try:
+                    logging.info("Migrating legacy envelope without AAD binding to AAD-bound envelope...")
+                    update_master_password(password, password)
+                except Exception as mig_err:
+                    logging.warning(f"Failed to auto-migrate legacy envelope to AAD binding: {mig_err}")
         
         # Success! Cache the derived key
         set_cached_key(key)
@@ -106,11 +113,11 @@ def update_master_password(current_password: str | None, new_password: str) -> N
             
             key = derive_key(current_bytes, salt, iterations)
             from security.crypto_engine import build_aad
-            has_kdf = "kdf" in envelope
-            aad = build_aad(envelope.get("kdf", "pbkdf2_hmac_sha256"), iterations, salt) if has_kdf else None
-            try:
+            has_kdf = "kdf" in envelope and envelope["kdf"] is not None
+            if has_kdf:
+                aad = build_aad(envelope["kdf"], iterations, salt)
                 decrypted_bytes = decrypt(nonce, ciphertext, key, aad)
-            except Exception:
+            else:
                 decrypted_bytes = decrypt(nonce, ciphertext, key, aad=None)
             existing_data = json.loads(decrypted_bytes.decode('utf-8'))
         except Exception:
@@ -163,6 +170,10 @@ def update_master_password(current_password: str | None, new_password: str) -> N
         # The daemon's get_cached_key() will read the updated key from the RAM file.
         from database.embedding_store import notify_daemon_reload
         notify_daemon_reload()
+
+        # Write initialization sentinel (idempotent)
+        from security.state_watchdog import write_sentinel
+        write_sentinel()
     finally:
         for i in range(len(pwd_bytes)):
             pwd_bytes[i] = 0

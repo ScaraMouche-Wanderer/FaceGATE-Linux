@@ -9,6 +9,28 @@ _lock = threading.Lock()
 
 def _load_lockout_data() -> dict:
     if not os.path.exists(LOCKOUT_FILE):
+        # If the system was previously initialized, a missing lockout file
+        # means it was deleted — treat as tamper and return max lockout state.
+        # This prevents brute-force counter resets via file deletion.
+        from security.state_watchdog import is_initialized
+        if is_initialized():
+            from utils.config_loader import get_config
+            try:
+                config = get_config()
+                deny_mode = config.get("security.deny_on_missing_state", True)
+            except Exception:
+                deny_mode = True
+
+            if deny_mode:
+                logging.critical(
+                    "TAMPER DETECTED: Lockout file deleted after initialization. "
+                    "Treating as maximum lockout to prevent brute-force counter reset."
+                )
+                return {
+                    "apps": {},
+                    "global_attempts": 10,
+                    "global_lockout_until": time.time() + 300,  # 5-minute lockout
+                }
         return {"apps": {}, "global_attempts": 0, "global_lockout_until": 0.0}
     try:
         with open(LOCKOUT_FILE, 'r') as f:
@@ -26,9 +48,14 @@ def _load_lockout_data() -> dict:
 def _save_lockout_data(data: dict):
     try:
         os.makedirs(os.path.dirname(LOCKOUT_FILE), exist_ok=True)
-        with open(LOCKOUT_FILE, 'w') as f:
+        tmp_file = LOCKOUT_FILE + ".tmp"
+        fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
             json.dump(data, f, indent=2)
-        os.chmod(LOCKOUT_FILE, 0o600)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_file, 0o600)
+        os.replace(tmp_file, LOCKOUT_FILE)
     except Exception as e:
         logging.error(f"Error writing lockout file '{LOCKOUT_FILE}': {e}")
 
