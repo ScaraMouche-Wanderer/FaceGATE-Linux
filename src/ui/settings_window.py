@@ -2911,7 +2911,7 @@ class SettingsWindow(QDialog):
             logging.error(f"Failed to export audit logs: {e}")
 
     def verify_audit_log_db_integrity(self):
-        from database.audit_log import verify_audit_log_integrity
+        from database.audit_log import verify_audit_log_integrity, repair_audit_log_integrity
         is_valid, count, msg = verify_audit_log_integrity()
         if is_valid:
             QMessageBox.information(
@@ -2920,11 +2920,26 @@ class SettingsWindow(QDialog):
                 f"🛡️ Cryptographic Integrity Verified!\n\n• Verified Records: {count}\n• SHA-256 Hash Chain: Valid\n\n{msg}"
             )
         else:
-            QMessageBox.critical(
-                self,
-                "Audit Log Tampering Detected!",
-                f"⚠️ SECURITY WARNING: Audit Log Tampering Detected!\n\n{msg}"
-            )
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setWindowTitle("Audit Log Tampering Detected!")
+            msg_box.setText(f"⚠️ SECURITY WARNING: Audit Log Tampering Detected!\n\n{msg}")
+            msg_box.setInformativeText("Would you like to repair and re-seal the cryptographic hash chain across all log entries?")
+            reseal_btn = msg_box.addButton("🛡️ Re-Seal Hash Chain", QMessageBox.ButtonRole.AcceptRole)
+            msg_box.addButton(QMessageBox.StandardButton.Cancel)
+            msg_box.exec()
+            
+            if msg_box.clickedButton() == reseal_btn:
+                ok, rep_count, rep_msg = repair_audit_log_integrity()
+                if ok:
+                    QMessageBox.information(
+                        self,
+                        "Audit Log Chain Restored",
+                        f"✅ {rep_msg}\n\nAll {rep_count} log entries have been re-hashed and re-sealed successfully."
+                    )
+                    self.populate_logs_table()
+                else:
+                    QMessageBox.critical(self, "Repair Failed", f"Failed to re-seal audit log: {rep_msg}")
 
     def _make_verify_face_callback(self, username: str):
         return lambda: self.test_user_face_verification(username)

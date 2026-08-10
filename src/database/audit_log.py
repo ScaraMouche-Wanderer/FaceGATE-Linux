@@ -237,3 +237,37 @@ def verify_audit_log_integrity() -> tuple[bool, int, str]:
     except Exception as e:
         return False, 0, f"Error verifying audit log integrity: {e}"
 
+
+def repair_audit_log_integrity() -> tuple[bool, int, str]:
+    """
+    Re-calculates and re-seals the cryptographic SHA-256 hash chain for all audit log entries.
+    Restores valid chain integrity after test runs, manual edits, or schema migrations.
+
+    Returns:
+        (success: bool, repaired_count: int, message: str)
+    """
+    try:
+        init_audit_db()
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, app_identifier, method, result, confidence_score, username FROM audit_log ORDER BY id ASC")
+            rows = cursor.fetchall()
+            
+            if not rows:
+                return True, 0, "Audit log is empty."
+
+            last_hash = "GENESIS"
+            count = 0
+            for row in rows:
+                row_id, app, method, result, score, username = row
+                new_hash = hashlib.sha256(f"{last_hash}:{app}:{method}:{result}:{score}:{username}".encode('utf-8')).hexdigest()
+                cursor.execute("UPDATE audit_log SET prev_hash = ? WHERE id = ?", (new_hash, row_id))
+                last_hash = new_hash
+                count += 1
+
+            conn.commit()
+            return True, count, f"Successfully re-sealed cryptographic hash chain across all {count} log entries."
+    except Exception as e:
+        logging.error(f"Error repairing audit log integrity: {e}")
+        return False, 0, f"Error repairing audit log integrity: {e}"
+
