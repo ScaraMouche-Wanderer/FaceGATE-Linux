@@ -19,8 +19,9 @@ from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QPainterPath, QFont, Q
 
 class AuthSuccessOverlay(QWidget):
     """
-    Animated green checkmark overlay with expanding circle and checkmark draw animation.
-    Displays for 800ms before calling the dismiss callback.
+    Animated green checkmark overlay with expanding circle, checkmark draw animation,
+    particle burst, and expanding ring ripple for premium feel.
+    Displays for 900ms before calling the dismiss callback.
     """
     finished = Signal()
 
@@ -41,6 +42,15 @@ class AuthSuccessOverlay(QWidget):
         self.setFixedSize(parent.width() if parent else 400, parent.height() if parent else 300)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+
+        # Particle burst data: (angle, speed, size)
+        import random
+        self._particles = []
+        for _ in range(12):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = random.uniform(40, 90)
+            size = random.uniform(3, 6)
+            self._particles.append((angle, speed, size))
 
     @Property(float)
     def draw_progress(self):
@@ -156,6 +166,32 @@ class AuthSuccessOverlay(QWidget):
 
             painter.drawPath(path)
 
+        # Particle burst (scatter outward after 50% progress)
+        if p > 0.5:
+            particle_t = (p - 0.5) / 0.5
+            for angle, speed, size in self._particles:
+                dist = speed * particle_t
+                px = cx + math.cos(angle) * dist
+                py = cy + math.sin(angle) * dist
+                particle_alpha = max(0.0, 1.0 - particle_t * 1.3)
+                particle_color = QColor("#10b981")
+                particle_color.setAlphaF(particle_alpha * 0.7)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(particle_color))
+                painter.drawEllipse(QPointF(px, py), size * (1 - particle_t * 0.5), size * (1 - particle_t * 0.5))
+
+        # Expanding ring ripple
+        if p > 0.6:
+            ripple_t = (p - 0.6) / 0.4
+            ripple_radius = 36 + 60 * ripple_t
+            ripple_alpha = max(0.0, 0.5 - ripple_t * 0.6)
+            ripple_color = QColor("#10b981")
+            ripple_color.setAlphaF(ripple_alpha)
+            ripple_pen = QPen(ripple_color, 2.0)
+            painter.setPen(ripple_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(QPointF(cx, cy), ripple_radius, ripple_radius)
+
         # "Authenticated" text
         if p > 0.7:
             text_alpha = min(1.0, (p - 0.7) / 0.3)
@@ -229,12 +265,13 @@ class AuthFailureOverlay(QWidget):
         self.shake_anim = QPropertyAnimation(self, b"shake_offset")
         self.shake_anim.setDuration(400)
         self.shake_anim.setKeyValueAt(0.0, 0)
-        self.shake_anim.setKeyValueAt(0.15, -8)
-        self.shake_anim.setKeyValueAt(0.3, 8)
-        self.shake_anim.setKeyValueAt(0.45, -6)
-        self.shake_anim.setKeyValueAt(0.6, 6)
-        self.shake_anim.setKeyValueAt(0.75, -3)
-        self.shake_anim.setKeyValueAt(0.9, 3)
+        self.shake_anim.setKeyValueAt(0.1, -12)
+        self.shake_anim.setKeyValueAt(0.2, 12)
+        self.shake_anim.setKeyValueAt(0.3, -10)
+        self.shake_anim.setKeyValueAt(0.4, 10)
+        self.shake_anim.setKeyValueAt(0.55, -7)
+        self.shake_anim.setKeyValueAt(0.7, 7)
+        self.shake_anim.setKeyValueAt(0.85, -3)
         self.shake_anim.setKeyValueAt(1.0, 0)
         self.shake_anim.start()
 
@@ -257,10 +294,20 @@ class AuthFailureOverlay(QWidget):
         cy = h / 2.0
         p = max(0.0, min(1.0, self._progress))
 
-        # Semi-transparent backdrop
+        # Semi-transparent backdrop with red edge vignette
         backdrop = QColor("#0a0a0f" if self.is_dark else "#ffffff")
         backdrop.setAlphaF(0.75 * p)
         painter.fillRect(0, 0, w, h, backdrop)
+        
+        # Red vignette edge effect
+        if p > 0.2:
+            vignette_alpha = min(0.15, p * 0.15)
+            for edge_dist in range(0, 30, 3):
+                edge_color = QColor("#ef4444")
+                edge_color.setAlphaF(vignette_alpha * (1 - edge_dist / 30.0))
+                painter.setPen(QPen(edge_color, 1))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(edge_dist, edge_dist, w - edge_dist * 2, h - edge_dist * 2)
 
         # Red glow
         if p > 0.1:

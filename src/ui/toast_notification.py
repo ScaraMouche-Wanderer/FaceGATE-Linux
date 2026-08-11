@@ -55,9 +55,9 @@ class Toast(QWidget):
     """
     dismissed = Signal()
 
-    TOAST_WIDTH = 360
-    TOAST_HEIGHT = 64
-    MARGIN = 16
+    TOAST_WIDTH = 380
+    TOAST_HEIGHT = 72
+    MARGIN = 18
     SPACING = 8
 
     def __init__(self, parent, message: str, severity: str = "info",
@@ -94,6 +94,7 @@ class Toast(QWidget):
         self.dismiss_timer = QTimer(self)
         self.dismiss_timer.setSingleShot(True)
         self.dismiss_timer.timeout.connect(self.start_dismiss)
+        self._paused = False
 
         # Progress tracking for auto-dismiss bar
         self._progress = 1.0
@@ -226,8 +227,16 @@ class Toast(QWidget):
             painter.drawText(QRect(text_x, 30, self.width() - text_x - 16, 26),
                              Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.message)
         else:
-            painter.drawText(QRect(text_x, 0, self.width() - text_x - 16, self.height()),
+            painter.drawText(QRect(text_x, 0, self.width() - text_x - 40, self.height()),
                              Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.message)
+
+        # Close button (× icon) — drawn as small text
+        close_color = QColor(text_color)
+        close_color.setAlphaF(0.5)
+        painter.setPen(close_color)
+        painter.setFont(QFont("Inter", 13))
+        painter.drawText(QRect(self.width() - 36, 0, 28, self.height()),
+                         Qt.AlignmentFlag.AlignCenter, "×")
 
         # Progress bar at bottom
         if self._progress < 1.0:
@@ -251,6 +260,24 @@ class Toast(QWidget):
             self.dismiss_timer.stop()
             self.start_dismiss()
             event.accept()
+
+    def enterEvent(self, event):
+        """Pause auto-dismiss on hover."""
+        if not self._paused and self.dismiss_timer.isActive():
+            self._paused = True
+            self._remaining_ms = max(0, self.dismiss_timer.remainingTime())
+            self.dismiss_timer.stop()
+            self.progress_timer.stop()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        """Resume auto-dismiss on hover exit."""
+        if self._paused:
+            self._paused = False
+            if hasattr(self, '_remaining_ms') and self._remaining_ms > 0:
+                self.dismiss_timer.start(self._remaining_ms)
+                self.progress_timer.start(50)
+        super().leaveEvent(event)
 
 
 class ToastManager:

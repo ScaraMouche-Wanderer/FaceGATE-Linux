@@ -6,12 +6,81 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QProgressBar, QStackedWidget, QWidget, QMessageBox
 )
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, QPropertyAnimation, QEasingCurve, QTimer
+from PySide6.QtGui import QPainter, QColor, QFont, QPen
 from camera.camera_worker import CameraWorker
 from recognition.blur_checker import is_blurry
 from database.embedding_store import save_embedding, load_embeddings, get_cached_key
 from security.credential_store import verify_password
 from ui.auth_dialog import convert_cv_to_pixmap, FaceDetectorWorker
+
+
+class StepProgressBar(QWidget):
+    """
+    Sleek, modern segmented progress bar for wizard navigation.
+    Replaces circular dot rings with clean, rounded pill segments.
+    """
+    def __init__(self, steps: list, parent=None):
+        super().__init__(parent)
+        self.steps = steps
+        self._active_step = 0
+        self.setFixedHeight(36)
+        self.setMinimumWidth(300)
+    
+    def set_active_step(self, index: int):
+        self._active_step = min(index, len(self.steps) - 1)
+        self.update()
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        w = self.width()
+        h = self.height()
+        n = len(self.steps)
+        if n == 0:
+            return
+        
+        try:
+            from utils.config_loader import get_config
+            is_dark = get_config().get("behavior.theme", "light") == "dark"
+        except Exception:
+            is_dark = False
+        
+        accent = QColor("#8b5cf6")         # Purple active
+        completed = QColor("#10b981")       # Green completed
+        pending_bg = QColor("#374151") if is_dark else QColor("#e5e7eb")
+        text_active = QColor("#1f2937") if not is_dark else QColor("#f3f4f6")
+        text_dim = QColor("#9ca3af") if is_dark else QColor("#6b7280")
+        
+        gap = 8
+        seg_w = (w - (n - 1) * gap) / n
+        seg_h = 5
+        bar_y = 2
+        
+        for i in range(n):
+            x = i * (seg_w + gap)
+            
+            # Segment bar
+            if i < self._active_step:
+                color = completed
+            elif i == self._active_step:
+                color = accent
+            else:
+                color = pending_bg
+            
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
+            painter.drawRoundedRect(int(x), bar_y, int(seg_w), seg_h, 3, 3)
+            
+            # Step label text
+            painter.setFont(QFont("Inter", 9, QFont.Weight.DemiBold if i == self._active_step else QFont.Weight.Normal))
+            painter.setPen(text_active if i <= self._active_step else text_dim)
+            label = f"{i + 1}. {self.steps[i]}"
+            painter.drawText(int(x), bar_y + seg_h + 14, int(seg_w), 16, Qt.AlignmentFlag.AlignCenter, label)
+        
+        painter.end()
+
 
 class EnrollmentWizard(QDialog):
     def __init__(self, parent=None, target_username: str = ""):
@@ -109,6 +178,10 @@ class EnrollmentWizard(QDialog):
         self.stack = QStackedWidget()
         layout.addWidget(self.stack)
 
+        # Step indicator breadcrumb
+        self.step_indicator = StepProgressBar(steps=["Profile Setup", "Face Capture", "Review & Save"], parent=content_widget)
+        layout.insertWidget(0, self.step_indicator)
+
         # 1. Page 0: Intro & Username input & password validation if needed
         self.create_intro_page()
         
@@ -121,6 +194,18 @@ class EnrollmentWizard(QDialog):
         self.stack.setCurrentIndex(0)
         self.intro_next_btn.setDefault(True)
         self.apply_theme_dynamically()
+
+        # Entrance animation
+        self.setWindowOpacity(0.0)
+        QTimer.singleShot(50, self._play_entrance_animation)
+
+    def _play_entrance_animation(self):
+        self._entrance_anim = QPropertyAnimation(self, b"windowOpacity")
+        self._entrance_anim.setDuration(250)
+        self._entrance_anim.setStartValue(0.0)
+        self._entrance_anim.setEndValue(1.0)
+        self._entrance_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._entrance_anim.start()
 
     # ------------------ Page Creation ------------------
     
@@ -355,6 +440,8 @@ class EnrollmentWizard(QDialog):
     
     def start_capture_flow(self):
         self.stack.setCurrentIndex(1)
+        if hasattr(self, 'step_indicator'):
+            self.step_indicator.set_active_step(1)
         self.intro_next_btn.setDefault(False)
         self.save_btn.setDefault(False)
         self.embeddings = []
@@ -397,6 +484,8 @@ class EnrollmentWizard(QDialog):
     def cancel_capture_flow(self):
         self.cleanup_camera()
         self.stack.setCurrentIndex(0)
+        if hasattr(self, 'step_indicator'):
+            self.step_indicator.set_active_step(0)
         self.intro_next_btn.setDefault(True)
         self.save_btn.setDefault(False)
         self.username_input.setFocus()
@@ -497,6 +586,8 @@ class EnrollmentWizard(QDialog):
                 f"Click 'Save Face Profile' below to encrypt and save the profile."
             )
         self.stack.setCurrentIndex(2)
+        if hasattr(self, 'step_indicator'):
+            self.step_indicator.set_active_step(2)
         self.save_btn.setDefault(True)
         self.save_btn.setFocus()
 

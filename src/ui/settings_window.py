@@ -763,10 +763,10 @@ class SettingsWindow(QDialog):
                 effect = QGraphicsOpacityEffect(target_widget)
                 target_widget.setGraphicsEffect(effect)
                 self._tab_anim = QPropertyAnimation(effect, b"opacity")
-                self._tab_anim.setDuration(180)
-                self._tab_anim.setStartValue(0.4)
+                self._tab_anim.setDuration(220)
+                self._tab_anim.setStartValue(0.0)
                 self._tab_anim.setEndValue(1.0)
-                self._tab_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+                self._tab_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
                 self.tab_stack.setCurrentIndex(target_page)
                 self._tab_anim.start()
             else:

@@ -17,8 +17,8 @@ except Exception:
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 )
-from PySide6.QtCore import Qt, QTimer, Slot, QThread, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import Qt, QTimer, Slot, QThread, Signal, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QRadialGradient, QFont
 from security.credential_store import verify_password
 
 class DetectorLoader(QThread):
@@ -79,6 +79,9 @@ class FaceDetectorWorker(QThread):
     def stop(self):
         self.running = False
         self.wait()
+
+
+
 
 def draw_tech_corner_reticle(img, bbox, color, text=""):
     """
@@ -268,10 +271,11 @@ class AuthDialog(QDialog):
         # PAGE 0: Face Mode
         face_page = QWidget()
         face_layout = QVBoxLayout(face_page)
-        face_layout.setContentsMargins(24, 24, 24, 24)
-        face_layout.setSpacing(16)
+        face_layout.setContentsMargins(28, 20, 28, 24)
+        face_layout.setSpacing(12)
         
-        self.header_label_face = QLabel(f"🔒 <b>{self.app_name}</b> is locked.")
+        # Shield lock header with app name
+        self.header_label_face = QLabel(f"🛡️ <b>{self.app_name}</b> requires authentication")
         self.header_label_face.setObjectName("headerLabel")
         self.header_label_face.setAlignment(Qt.AlignmentFlag.AlignCenter)
         face_layout.addWidget(self.header_label_face)
@@ -281,11 +285,11 @@ class AuthDialog(QDialog):
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         face_layout.addWidget(self.status_label)
 
-        # Camera View QLabel
+        # Camera View QLabel with dynamic biometric border
         self.camera_label = QLabel()
         self.camera_label.setFixedSize(360, 270)
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.camera_label.setStyleSheet(f"border: 2px solid {c['BORDER_NEUTRAL']}; border-radius: 8px; background-color: {c['CARD_NEUTRAL']};")
+        self.camera_label.setStyleSheet(f"border: 2px solid {c['BORDER_NEUTRAL']}; border-radius: 12px; background-color: {c['CARD_NEUTRAL']};")
         face_layout.addWidget(self.camera_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Password Fallback Button
@@ -311,7 +315,7 @@ class AuthDialog(QDialog):
         pwd_layout.setContentsMargins(24, 24, 24, 24)
         pwd_layout.setSpacing(16)
 
-        self.header_label_pwd = QLabel(f"🔒 <b>{self.app_name}</b> is locked.")
+        self.header_label_pwd = QLabel(f"🔐 <b>{self.app_name}</b> requires password")
         self.header_label_pwd.setObjectName("headerLabel")
         self.header_label_pwd.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pwd_layout.addWidget(self.header_label_pwd)
@@ -398,6 +402,19 @@ class AuthDialog(QDialog):
             self.timeout_timer.timeout.connect(self.handle_timeout)
             
         self.apply_theme_dynamically()
+
+        # Entrance animation: scale+fade in
+        self.setWindowOpacity(0.0)
+        QTimer.singleShot(50, self._play_entrance_animation)
+
+    def _play_entrance_animation(self):
+        """Smooth entrance: fade in from 0 to 1 opacity."""
+        self._entrance_anim = QPropertyAnimation(self, b"windowOpacity")
+        self._entrance_anim.setDuration(250)
+        self._entrance_anim.setStartValue(0.0)
+        self._entrance_anim.setEndValue(1.0)
+        self._entrance_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._entrance_anim.start()
 
     def apply_theme_dynamically(self):
         from ui.theme import get_theme_qss, get_colors
@@ -497,6 +514,11 @@ class AuthDialog(QDialog):
             self.camera_worker.signals.error.connect(self.handle_camera_error, Qt.ConnectionType.QueuedConnection)
             self.status_label.setText("Accessing video capture device...")
             
+            # Set initial camera scanning border
+            from ui.theme import get_colors
+            c = get_colors(self.theme_mode)
+            self.camera_label.setStyleSheet(f"border: 2px solid #6366f1; border-radius: 12px; background-color: {c['CARD_NEUTRAL']};")
+            
             # Start timeout timer now that models are loaded and camera starts
             if hasattr(self, "timeout_timer") and self.timeout_seconds > 0:
                 self.timeout_timer.start(self.timeout_seconds * 1000)
@@ -590,6 +612,10 @@ class AuthDialog(QDialog):
         if matched_user and matched_face:
             self.success_count += 1
             
+            # Dynamic camera border on match
+            border_color = "#10b981" if self.success_count >= 2 else "#f59e0b"
+            self.camera_label.setStyleSheet(f"border: 2.5px solid {border_color}; border-radius: 12px; background-color: {c['CARD_NEUTRAL']};")
+            
             # Record centroid of matched face
             bbox = matched_face['bbox']
             centroid = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
@@ -670,6 +696,10 @@ class AuthDialog(QDialog):
                 self.success_count -= 1
             else:
                 self.matched_centroids.clear()
+            
+            # Dynamic camera border on idle/scanning
+            border_color = "#3b82f6" if len(faces) > 0 else c["BORDER_NEUTRAL"]
+            self.camera_label.setStyleSheet(f"border: 2px solid {border_color}; border-radius: 12px; background-color: {c['CARD_NEUTRAL']};")
             if len(faces) > 0:
                 self.unknown_face_ticks += 1
                 if not self.enrolled_embeddings:

@@ -447,10 +447,58 @@ def get_theme_qss(theme_override: str = None, palette_override: str = None) -> s
     c = get_colors(theme_override, palette_override)
     
     return f"""
+        /* ─── Global Foundation ─── */
         QDialog, QMainWindow {{
             background-color: {c["BG_NEUTRAL"]};
             color: {c["TEXT_PRIMARY"]};
             font-family: {FONT_FAMILY};
+            font-size: 13px;
+        }}
+
+        /* ─── Premium Scrollbar ─── */
+        QScrollBar:vertical {{
+            background: transparent;
+            width: 8px;
+            margin: 4px 1px 4px 1px;
+            border: none;
+        }}
+        QScrollBar::handle:vertical {{
+            background-color: {c["BORDER_NEUTRAL"]};
+            min-height: 32px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background-color: {c["ACCENT_PURPLE"]};
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            height: 0px;
+            background: none;
+            border: none;
+        }}
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+            background: none;
+        }}
+        QScrollBar:horizontal {{
+            background: transparent;
+            height: 8px;
+            margin: 1px 4px 1px 4px;
+            border: none;
+        }}
+        QScrollBar::handle:horizontal {{
+            background-color: {c["BORDER_NEUTRAL"]};
+            min-width: 32px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background-color: {c["ACCENT_PURPLE"]};
+        }}
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+            width: 0px;
+            background: none;
+            border: none;
+        }}
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+            background: none;
         }}
         QLabel {{
             color: {c["TEXT_PRIMARY"]};
@@ -459,25 +507,30 @@ def get_theme_qss(theme_override: str = None, palette_override: str = None) -> s
         QLabel[secondary="true"] {{
             color: {c["TEXT_SECONDARY"]};
         }}
+        /* ─── Input Fields with Glow Focus ─── */
         QLineEdit {{
             background-color: {c["WIDGET_BG"]};
-            border: 1px solid {c["BORDER_NEUTRAL"]};
-            border-radius: 6px;
-            padding: 8px 12px;
+            border: 1.5px solid {c["BORDER_NEUTRAL"]};
+            border-radius: 8px;
+            padding: 10px 14px;
             color: {c["TEXT_PRIMARY"]};
             font-size: 13px;
             font-family: {FONT_FAMILY};
         }}
-        QLineEdit:focus {{
-            border: 1px solid {c["ACCENT_PURPLE"]};
+        QLineEdit:hover {{
+            border: 1.5px solid {c["TEXT_SECONDARY"]};
         }}
+        QLineEdit:focus {{
+            border: 2px solid {c["ACCENT_PURPLE"]};
+        }}
+        /* ─── Premium Buttons ─── */
         QPushButton {{
             background-color: {c["ACCENT_PURPLE"]};
             color: #ffffff;
             border: none;
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-weight: bold;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-weight: 600;
             font-size: 13px;
             font-family: {FONT_FAMILY};
         }}
@@ -529,22 +582,23 @@ def get_theme_qss(theme_override: str = None, palette_override: str = None) -> s
         QPushButton#cancelBtn, QPushButton#changePwdBtn, QPushButton#testFaceBtn {{
             background-color: {c["CANCEL_BTN_BG"]};
             color: {c["TEXT_PRIMARY"]};
-            border: 1px solid {c["BORDER_NEUTRAL"]};
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-weight: bold;
+            border: 1.5px solid {c["BORDER_NEUTRAL"]};
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-weight: 600;
             font-size: 13px;
         }}
         QPushButton#cancelBtn:hover, QPushButton#changePwdBtn:hover, QPushButton#testFaceBtn:hover {{
             background-color: {c["CANCEL_BTN_HOVER"]};
+            border-color: {c["TEXT_SECONDARY"]};
         }}
         QPushButton#removeSelectedBtn, QPushButton#clearIntrudersBtn {{
             background-color: #ef4444;
             color: #ffffff;
             border: none;
-            font-weight: bold;
-            border-radius: 6px;
-            padding: 8px 16px;
+            font-weight: 600;
+            border-radius: 8px;
+            padding: 10px 20px;
         }}
         QPushButton#removeSelectedBtn:hover, QPushButton#clearIntrudersBtn:hover {{
             background-color: #dc2626;
@@ -556,9 +610,9 @@ def get_theme_qss(theme_override: str = None, palette_override: str = None) -> s
             background-color: {c["ACCENT_PURPLE"]};
             color: #ffffff;
             border: none;
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-weight: bold;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-weight: 600;
             font-size: 13px;
         }}
         QPushButton#enrollBtn:hover, QPushButton#enrollNewBtn:hover {{
@@ -597,16 +651,18 @@ def get_theme_qss(theme_override: str = None, palette_override: str = None) -> s
         QListWidget {{
             background-color: {c["CARD_NEUTRAL"]};
             border: 1px solid {c["BORDER_NEUTRAL"]};
-            border-radius: 8px;
+            border-radius: 10px;
             color: {c["TEXT_PRIMARY"]};
             font-size: 13px;
             font-family: {FONT_FAMILY};
-            padding: 4px;
+            padding: 6px;
+            outline: none;
         }}
         QListWidget::item {{
-            padding: 8px;
-            border-radius: 4px;
+            padding: 10px 12px;
+            border-radius: 6px;
             color: {c["TEXT_PRIMARY"]};
+            margin: 1px 2px;
         }}
         QListWidget::item:hover {{
             background-color: {c["LIST_ITEM_HOVER"]};
@@ -831,15 +887,38 @@ def get_theme_qss(theme_override: str = None, palette_override: str = None) -> s
         QPushButton#removeBtn {{
             background-color: transparent;
             color: #ef4444;
-            border: 1px solid #ef4444;
-            border-radius: 4px;
-            padding: 4px 8px;
+            border: 1.5px solid #ef4444;
+            border-radius: 6px;
+            padding: 5px 10px;
             font-size: 11px;
-            font-weight: bold;
+            font-weight: 600;
         }}
         QPushButton#removeBtn:hover {{
             background-color: #ef4444;
             color: white;
+        }}
+        /* ─── Text Edit ─── */
+        QTextEdit {{
+            background-color: {c["WIDGET_BG"]};
+            border: 1.5px solid {c["BORDER_NEUTRAL"]};
+            border-radius: 8px;
+            padding: 8px;
+            color: {c["TEXT_PRIMARY"]};
+            font-family: {FONT_FAMILY};
+            font-size: 13px;
+        }}
+        QTextEdit:focus {{
+            border: 2px solid {c["ACCENT_PURPLE"]};
+        }}
+        /* ─── Tooltips ─── */
+        QToolTip {{
+            background-color: {c["CARD_NEUTRAL"]};
+            color: {c["TEXT_PRIMARY"]};
+            border: 1px solid {c["BORDER_NEUTRAL"]};
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-family: {FONT_FAMILY};
+            font-size: 12px;
         }}
     """
 
@@ -1010,7 +1089,7 @@ def resolve_app_icon(icon_source: str) -> QIcon:
     return icon
 
 def composite_tray_icon(app_icon: QIcon, is_locked: bool) -> QIcon:
-    pixmap = app_icon.pixmap(24, 24)
+    pixmap = app_icon.pixmap(24, 24).copy()
     if pixmap.isNull():
         pixmap = QPixmap(24, 24)
         pixmap.fill(Qt.GlobalColor.transparent)

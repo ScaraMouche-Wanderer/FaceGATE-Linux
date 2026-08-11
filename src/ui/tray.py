@@ -4,10 +4,10 @@ from PySide6.QtCore import Qt, QPointF, QRectF
 
 def create_circle_icon(color_hex: str) -> QIcon:
     """
-    Renders a custom circle icon dynamically using QPainter.
+    Renders a custom circle icon dynamically using QPainter at 48x48 HiDPI.
     Avoids host icon-theme dependency errors on minimal desktop environments.
     """
-    pixmap = QPixmap(24, 24)
+    pixmap = QPixmap(48, 48)
     pixmap.fill(Qt.GlobalColor.transparent)
     
     painter = QPainter(pixmap)
@@ -16,19 +16,19 @@ def create_circle_icon(color_hex: str) -> QIcon:
     # White border ring
     painter.setBrush(QColor("#ffffff"))
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawEllipse(3, 3, 18, 18)
+    painter.drawEllipse(6, 6, 36, 36)
     
     # Inner colored status circle
     painter.setBrush(QColor(color_hex))
-    painter.drawEllipse(5, 5, 14, 14)
+    painter.drawEllipse(10, 10, 28, 28)
     
     painter.end()
     return QIcon(pixmap)
 
 
 def create_square_icon(color_hex: str) -> QIcon:
-    """Rounded-square variant of the status icon, same visual language as the circle."""
-    pixmap = QPixmap(24, 24)
+    """Rounded-square variant of the status icon at 48x48 HiDPI."""
+    pixmap = QPixmap(48, 48)
     pixmap.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pixmap)
@@ -36,18 +36,18 @@ def create_square_icon(color_hex: str) -> QIcon:
 
     painter.setBrush(QColor("#ffffff"))
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawRoundedRect(3, 3, 18, 18, 6, 6)
+    painter.drawRoundedRect(6, 6, 36, 36, 12, 12)
 
     painter.setBrush(QColor(color_hex))
-    painter.drawRoundedRect(5, 5, 14, 14, 4, 4)
+    painter.drawRoundedRect(10, 10, 28, 28, 8, 8)
 
     painter.end()
     return QIcon(pixmap)
 
 
 def create_shield_icon(color_hex: str) -> QIcon:
-    """Shield glyph - reads as 'protection/security' at a glance in the tray."""
-    pixmap = QPixmap(24, 24)
+    """Shield glyph at 48x48 HiDPI - reads as 'protection/security' at a glance."""
+    pixmap = QPixmap(48, 48)
     pixmap.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pixmap)
@@ -65,48 +65,48 @@ def create_shield_icon(color_hex: str) -> QIcon:
 
     painter.setBrush(QColor("#ffffff"))
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawPolygon(shield_path(12, 2, 9, 20))
+    painter.drawPolygon(shield_path(24, 4, 18, 40))
 
     painter.setBrush(QColor(color_hex))
-    painter.drawPolygon(shield_path(12, 4, 6.5, 15))
+    painter.drawPolygon(shield_path(24, 8, 13, 30))
 
     painter.end()
     return QIcon(pixmap)
 
 
 def create_lock_icon(color_hex: str) -> QIcon:
-    """Padlock glyph - the most literal option for a lock/access-control app."""
-    pixmap = QPixmap(24, 24)
+    """Padlock glyph at 48x48 HiDPI - lock/access-control icon."""
+    pixmap = QPixmap(48, 48)
     pixmap.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    # White backing plate so the glyph stays legible on any panel background/theme
+    # White backing plate
     painter.setBrush(QColor("#ffffff"))
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawRoundedRect(2, 2, 20, 20, 5, 5)
+    painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
 
     # Shackle
     pen = QPen(QColor(color_hex))
-    pen.setWidth(2)
+    pen.setWidth(4)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     painter.setPen(pen)
     painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawArc(QRectF(8, 5, 8, 9), 0, 180 * 16)
+    painter.drawArc(QRectF(16, 10, 16, 18), 0, 180 * 16)
 
     # Body
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QColor(color_hex))
-    painter.drawRoundedRect(6, 11, 12, 9, 2, 2)
+    painter.drawRoundedRect(12, 22, 24, 18, 4, 4)
 
     painter.end()
     return QIcon(pixmap)
 
 
 def create_gate_icon(color_hex: str) -> QIcon:
-    """Vertical-bar 'gate' glyph, a nod to the FaceGATE name specifically."""
-    pixmap = QPixmap(24, 24)
+    """Vertical-bar 'gate' glyph at 48x48 HiDPI."""
+    pixmap = QPixmap(48, 48)
     pixmap.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pixmap)
@@ -114,16 +114,46 @@ def create_gate_icon(color_hex: str) -> QIcon:
 
     painter.setBrush(QColor("#ffffff"))
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawRoundedRect(2, 2, 20, 20, 5, 5)
+    painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
 
     painter.setBrush(QColor(color_hex))
-    bar_w = 3
-    for x in (5, 10.5, 16):
-        painter.drawRoundedRect(QRectF(x, 5, bar_w, 14), 1.5, 1.5)
+    bar_w = 6
+    for x in (10, 21, 32):
+        painter.drawRoundedRect(QRectF(x, 10, bar_w, 28), 3, 3)
 
     painter.end()
     return QIcon(pixmap)
 
+
+def launch_app_command(app_dict: dict | str) -> bool:
+    """Launches an application using its desktop_name, command, or executable."""
+    import subprocess, shutil, logging
+    if isinstance(app_dict, str):
+        desktop_name = app_dict if app_dict.endswith(".desktop") else app_dict + ".desktop"
+        executable = app_dict[:-8] if app_dict.endswith(".desktop") else app_dict
+    elif isinstance(app_dict, dict):
+        desktop_name = app_dict.get("desktop_name")
+        executable = app_dict.get("executable") or app_dict.get("id")
+    else:
+        return False
+    
+    if desktop_name and shutil.which("gtk-launch"):
+        try:
+            dt_id = desktop_name[:-8] if desktop_name.endswith(".desktop") else desktop_name
+            subprocess.Popen(["gtk-launch", dt_id], close_fds=True, start_new_session=True)
+            return True
+        except Exception as e:
+            logging.warning(f"gtk-launch failed for '{desktop_name}': {e}")
+
+    if executable:
+        path = shutil.which(executable)
+        if path:
+            try:
+                subprocess.Popen([path], close_fds=True, start_new_session=True)
+                return True
+            except Exception as e:
+                logging.error(f"Failed to launch executable '{path}': {e}")
+    return False
 
 # Registry of selectable tray icon styles. Keys are the values stored in
 # config ("behavior.tray_icon_style"); "circle" remains the default so
@@ -230,18 +260,25 @@ class FaceGateTray(QSystemTrayIcon):
         
         # Protected apps rows
         protected_apps = self.main_app.get_protected_apps()
-        tray_apps = [app for app in protected_apps if app.get("show_in_tray", True)][:5]
+        tray_apps = [app for app in protected_apps if (app.get("show_in_tray", True) if isinstance(app, dict) else True)][:5]
         from ui.theme import resolve_app_icon, composite_tray_icon
         for app in tray_apps:
-            app_id = app.get("id")
-            app_name = app.get("name", app_id)
-            desktop_name = app.get("desktop_name")
+            if isinstance(app, dict):
+                app_id = app.get("id")
+                app_name = app.get("name", app_id)
+                desktop_name = app.get("desktop_name")
+                icon_name = app.get("icon", "")
+            else:
+                app_id = app
+                app_name = app
+                desktop_name = app
+                icon_name = ""
             
             is_authed = self.main_app.is_app_authorized(app_id)
             display_text = app_name
             
             # Resolve real icon and composite overlay badge
-            base_icon = resolve_app_icon(app.get("icon", ""))
+            base_icon = resolve_app_icon(icon_name)
             composited_icon = composite_tray_icon(base_icon, is_locked=not is_authed)
             
             app_action = QAction(display_text, self.menu)
@@ -253,9 +290,15 @@ class FaceGateTray(QSystemTrayIcon):
                     return lambda: self.main_app.trigger_manual_auth(d_name)
                 app_action.triggered.connect(make_trigger())
             else:
-                def make_relock(a_id=app_id):
-                    return lambda: self.main_app.relock_app(a_id)
-                app_action.triggered.connect(make_relock())
+                def make_open(target_app=app, a_id=app_id):
+                    def _handler():
+                        resumed = 0
+                        if hasattr(self.main_app, 'session_manager'):
+                            resumed = self.main_app.session_manager.resume_suspended_processes(a_id)
+                        if resumed == 0:
+                            launch_app_command(target_app)
+                    return _handler
+                app_action.triggered.connect(make_open())
                 
             self.menu.addAction(app_action)
             
