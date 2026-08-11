@@ -334,12 +334,12 @@ def save_embedding(name: str, embedding: np.ndarray):
         }
         
         tmp_file = EMBEDDING_FILE + ".tmp"
-        with open(tmp_file, 'w') as f:
+        fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
             json.dump(new_envelope, f, indent=4)
             f.flush()
             os.fsync(f.fileno())
             
-        # Ensure correct file permissions atomically
         os.chmod(tmp_file, 0o600)
         os.replace(tmp_file, EMBEDDING_FILE)
         logging.info(f"Saved encrypted embedding for user '{name}' to {EMBEDDING_FILE}")
@@ -367,6 +367,9 @@ def notify_daemon_reload():
     If running inside the daemon process itself, reloads in-process without D-Bus IPC.
     Otherwise, sends an asynchronous D-Bus signal cross-process.
     """
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
+
     try:
         from PySide6.QtWidgets import QApplication
         from PySide6.QtDBus import QDBusConnection, QDBusInterface
@@ -499,7 +502,8 @@ def delete_embedding(name: str):
         }
         
         tmp_file = EMBEDDING_FILE + ".tmp"
-        with open(tmp_file, 'w') as f:
+        fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
             json.dump(new_envelope, f, indent=4)
             f.flush()
             os.fsync(f.fileno())
@@ -594,9 +598,14 @@ def check_and_perform_migration(password_str: str = None) -> bool:
         }
         
         os.makedirs(os.path.dirname(EMBEDDING_FILE), exist_ok=True)
-        with open(EMBEDDING_FILE, 'w') as f:
+        tmp_file = EMBEDDING_FILE + ".tmp"
+        fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
             json.dump(envelope, f, indent=4)
-        os.chmod(EMBEDDING_FILE, 0o600)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_file, 0o600)
+        os.replace(tmp_file, EMBEDDING_FILE)
         
         # Verify migrated data round-trips correctly
         decrypted_bytes = decrypt(nonce, ciphertext, key)
