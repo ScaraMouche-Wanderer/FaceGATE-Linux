@@ -74,7 +74,8 @@ def atomic_write(filepath: str, content: str, mode_bits: int = 0o644) -> bool:
     tmp_path = filepath + ".tmp"
     try:
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(tmp_path, 'w', encoding='utf-8') as f:
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode_bits)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())

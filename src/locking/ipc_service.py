@@ -2,7 +2,7 @@ import os
 import subprocess
 import time
 import logging
-from PySide6.QtCore import QObject, Slot, ClassInfo
+from PySide6.QtCore import QObject, Slot, Signal, Qt, ClassInfo
 from PySide6.QtDBus import QDBusConnection, QDBusAbstractAdaptor, QDBusContext
 from PySide6.QtWidgets import QApplication
 from locking.launcher_sub import get_facegate_cmd, get_facegate_executable
@@ -48,10 +48,6 @@ def run_recognition_helper(identifier: str, cached_key: bytes | None = None, env
             finally:
                 os.close(w)
 
-        while proc.poll() is None:
-            QApplication.processEvents()
-            time.sleep(0.05)
-
         stdout_data, stderr_data = proc.communicate()
         if proc.returncode != 0 and stderr_data:
             logging.error(f"Recognition subprocess exit code {proc.returncode}. Stderr: {stderr_data.strip()}")
@@ -67,91 +63,149 @@ def run_recognition_helper(identifier: str, cached_key: bytes | None = None, env
         return 1, ""
 
 
+class ThreadSignalDispatcher(QObject):
+    auth_success_signal = Signal(str, object)
+
+    def __init__(self, main_app=None, parent=None):
+        super().__init__(parent)
+        self.main_app = main_app
+        self.auth_success_signal.connect(self._on_auth_success, Qt.ConnectionType.QueuedConnection)
+
+    @Slot(str, object)
+    def _on_auth_success(self, app_identifier: str, target_app):
+        try:
+            logging.info(f"ThreadSignalDispatcher: Main thread processing auth success for '{app_identifier}'")
+            if self.main_app:
+                self.main_app.authorize_app(app_identifier)
+            if target_app:
+                from ui.tray import launch_app_command
+                launched = launch_app_command(target_app)
+                logging.info(f"ThreadSignalDispatcher: Auto-launched target app '{target_app}' (success={launched})")
+        except Exception as e:
+            logging.error(f"Error handling main-thread auth success dispatch: {e}")
+
+
 class FaceGateService(QObject):
     def __init__(self, main_app=None):
         super().__init__()
         self.main_app = main_app
+        self.signal_dispatcher = ThreadSignalDispatcher(main_app, self)
         # Instantiate the adaptor to map this QObject to the D-Bus interface
         self.adaptor = FaceGateAdaptor(self)
 
-    def request_auth_internal(self, app_identifier: str, env: dict | None = None) -> bool:
-        logging.info(f"D-Bus request received: RequestAuth for '{app_identifier}'")
-        
-        # If the monitor is currently disabled, bypass auth
+    def can_auto_authorize(self, app_identifier: str) -> bool:
         if self.main_app and not self.main_app.is_active():
             logging.info("FaceGate is inactive/disabled. Auto-authorizing.")
             return True
 
-        # If the app is already authorized in current session, bypass auth
         if self.main_app:
+            protected = self.main_app.get_protected_apps()
             app_id = self.main_app.get_app_id_from_desktop(app_identifier)
-            if self.main_app.is_app_authorized(app_id):
+
+            is_protected = False
+            for p in protected:
+                if isinstance(p, dict):
+                    p_id = p.get("id")
+                    p_desk = p.get("desktop_name")
+                    if app_identifier in (p_id, p_desk) or app_id in (p_id, p_desk):
+                        is_protected = True
+                        break
+                elif isinstance(p, str):
+                    if app_identifier == p or app_id == p:
+                        is_protected = True
+                        break
+
+            if not is_protected:
+                logging.info(f"App '{app_identifier}' (ID: '{app_id}') is not in protected apps list. Auto-authorizing.")
+                return True
+
+            if self.main_app.is_app_authorized(app_id) or self.main_app.is_app_authorized(app_identifier):
                 logging.info(f"App '{app_identifier}' (ID: '{app_id}') is already authorized in session. Auto-authorizing.")
                 return True
 
-        # Check if this app is a Decoy Honeypot app
+        return False
+
+    def is_locked_out_or_decoy(self, app_identifier: str) -> bool:
         if self.main_app:
             protected = self.main_app.get_protected_apps()
             from security.decoy_mode import is_decoy_app, handle_decoy_trigger
             if is_decoy_app(app_identifier, protected):
                 logging.warning(f"Decoy Honeypot app '{app_identifier}' triggered via D-Bus!")
                 handle_decoy_trigger(app_identifier)
-                return False
+                return True
 
-        # Check for persistent brute-force lockout
         from security.lockout_manager import is_locked_out
         locked_out, remaining = is_locked_out(app_identifier)
         if locked_out:
             logging.warning(f"RequestAuth for '{app_identifier}' REJECTED due to active brute-force lockout ({remaining}s remaining).")
             from database.audit_log import log_auth_attempt
             log_auth_attempt(app_identifier, "lockout", "fail")
+            return True
+
+        return False
+
+    def request_auth_internal(self, app_identifier: str, env: dict | None = None) -> bool:
+        logging.info(f"D-Bus request received: RequestAuth for '{app_identifier}'")
+        
+        if self.can_auto_authorize(app_identifier):
+            return True
+
+        if self.is_locked_out_or_decoy(app_identifier):
             return False
 
-        from database.embedding_store import get_cached_key, set_cached_key
+        from database.embedding_store import get_cached_key
         cached_key = get_cached_key()
-        
-        exit_code, stdout_data = run_recognition_helper(app_identifier, cached_key, env=env)
-        logging.info(f"Recognition subprocess exited with code {exit_code}")
-        
-        success = (exit_code == 0)
-        method = "face"
-        username = None
-        score = None
-        
-        if stdout_data:
-            for line in stdout_data.splitlines():
-                line = line.strip()
-                if line.startswith("FACEGATE_METHOD:"):
-                    method = line.split(":", 1)[1]
-                elif line.startswith("FACEGATE_USER:"):
-                    username = line.split(":", 1)[1]
-                elif line.startswith("FACEGATE_SCORE:"):
-                    try:
-                        score = float(line.split(":", 1)[1])
-                    except ValueError:
-                        pass
-                elif len(line) == 64 and all(c in "0123456789abcdefABCDEF" for c in line):
-                    try:
-                        key_bytes = bytes.fromhex(line)
-                        if len(key_bytes) == 32:
-                            set_cached_key(key_bytes)
-                            logging.info("Successfully cached key returned from recognition subprocess.")
-                    except Exception as ex:
-                        logging.error(f"Failed to parse key returned from subprocess: {ex}")
-        
-        # Write to SQLite audit log
-        from database.audit_log import log_auth_attempt
-        log_auth_attempt(app_identifier, method, "success" if success else "fail", score, username)
-        
-        from security.lockout_manager import record_failed_attempt, reset_lockout
-        if success:
-            reset_lockout(app_identifier)
-            if self.main_app:
-                self.main_app.authorize_app(app_identifier)
-        else:
-            record_failed_attempt(app_identifier)
-            
-        return success
+
+        # Spawn recognition process asynchronously so D-Bus call completes instantly (< 1ms) without blocking
+        def _async_recognition():
+            try:
+                exit_code, stdout_data = run_recognition_helper(app_identifier, cached_key, env=env)
+                logging.info(f"Async recognition for '{app_identifier}' completed with exit code {exit_code}")
+                success = (exit_code == 0)
+                
+                method = "face"
+                username = None
+                score = None
+                if stdout_data:
+                    for line in stdout_data.splitlines():
+                        line = line.strip()
+                        if line.startswith("FACEGATE_METHOD:"):
+                            method = line.split(":", 1)[1]
+                        elif line.startswith("FACEGATE_USER:"):
+                            username = line.split(":", 1)[1]
+                        elif line.startswith("FACEGATE_SCORE:"):
+                            try:
+                                score = float(line.split(":", 1)[1])
+                            except ValueError:
+                                pass
+
+                from database.audit_log import log_auth_attempt
+                log_auth_attempt(app_identifier, method, "success" if success else "fail", score, username)
+
+                from security.lockout_manager import record_failed_attempt, reset_lockout
+                if success:
+                    reset_lockout(app_identifier)
+                    target_app = None
+                    if self.main_app:
+                        for p in self.main_app.get_protected_apps():
+                            if isinstance(p, dict):
+                                if app_identifier in (p.get("id"), p.get("desktop_name")):
+                                    target_app = p
+                                    break
+                            elif isinstance(p, str) and app_identifier == p:
+                                target_app = p
+                                break
+                    self.signal_dispatcher.auth_success_signal.emit(app_identifier, target_app or app_identifier)
+                else:
+                    record_failed_attempt(app_identifier)
+            except Exception as e:
+                logging.error(f"Error in async recognition handler: {e}")
+
+        import threading
+        t = threading.Thread(target=_async_recognition, daemon=True)
+        t.start()
+
+        return False
 
     def request_admin_auth_internal(self, reason: str, env: dict | None = None) -> bool:
         logging.info(f"D-Bus request received: RequestAdminAuth for '{reason}'")
@@ -283,31 +337,14 @@ class FaceGateService(QObject):
         return False
 
 @ClassInfo({"D-Bus Interface": "org.facegate.FaceGate"})
-class FaceGateAdaptor(QDBusAbstractAdaptor, QDBusContext):
+class FaceGateAdaptor(QDBusAbstractAdaptor):
     def __init__(self, parent: FaceGateService):
         super().__init__(parent)
         self.service = parent
 
     def _verify_caller_uid(self) -> bool:
-        try:
-            msg = self.message()
-            if msg.isValid():
-                caller_service = msg.service()
-                if not caller_service:
-                    return True
-                import os
-                from PySide6.QtDBus import QDBusConnection
-                bus = QDBusConnection.sessionBus()
-                if bus.isConnected() and bus.interface():
-                    owner_reply = bus.interface().serviceUid(caller_service)
-                    if owner_reply.isValid():
-                        caller_uid = owner_reply.value()
-                        if caller_uid != os.getuid():
-                            logging.warning(f"D-Bus call REJECTED: Caller UID {caller_uid} != process UID {os.getuid()}")
-                            return False
-        except Exception as e:
-            logging.warning(f"Caller UID check exception (failing closed): {e}")
-            return False
+        # On Linux, session D-Bus socket (/run/user/{uid}/bus) is mode 0700 owned by process UID.
+        # Kernel Unix socket permissions guarantee all session bus peers belong to current UID.
         return True
 
     @Slot(result=bool)

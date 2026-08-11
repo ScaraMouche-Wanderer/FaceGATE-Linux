@@ -265,6 +265,15 @@ class AppMonitor:
                                         continue
                                 else:
                                     self.main_app.auth_timestamps[canonical_id] = time.time()
+
+                                # Send SIGCONT if the process was suspended prior to authorization
+                                try:
+                                    if proc.status() == psutil.STATUS_STOPPED:
+                                        logging.info(f"AppMonitor: Resuming authorized suspended process '{name}' (PID: {pid}) via SIGCONT.")
+                                        os.kill(pid, signal.SIGCONT)
+                                except Exception:
+                                    pass
+
                                 self._seen_pids.add(proc_key)
                                 continue
 
