@@ -383,9 +383,11 @@ def run_auth_launch(desktop_name: str, exec_args: list):
         if k in os.environ:
             display_env[k] = os.environ[k]
 
-    if daemon_active:
-        app = QCoreApplication(sys.argv)
+    from PySide6.QtWidgets import QApplication
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
 
+    if daemon_active:
         interface = QDBusInterface(
             "org.facegate.FaceGate",
             "/org/facegate/FaceGate",
@@ -396,19 +398,8 @@ def run_auth_launch(desktop_name: str, exec_args: list):
 
         if interface.isValid():
             logging.info(f"Launcher: Requesting auth for app '{desktop_name}' via D-Bus...")
-            raw_reply = interface.callWithArgumentList(
-                QDBus.CallMode.Block,
-                "RequestAuthWithEnv",
-                [desktop_name, display_env]
-            )
+            raw_reply = interface.call("RequestAuth", desktop_name)
             reply = QDBusReply(raw_reply)
-            if not reply.isValid():
-                raw_reply = interface.callWithArgumentList(
-                    QDBus.CallMode.Block,
-                    "RequestAuth",
-                    [desktop_name]
-                )
-                reply = QDBusReply(raw_reply)
 
             if reply.isValid():
                 authorized = reply.value()
@@ -421,14 +412,16 @@ def run_auth_launch(desktop_name: str, exec_args: list):
                         logging.error(f"Launcher: Failed to execute {exec_args}: {e}")
                         sys.exit(1)
                 else:
-                    logging.warning("Launcher: D-Bus auth rejected. Process execution blocked.")
-                    sys.exit(1)
+                    # Auth returned False — this means async recognition is now in progress.
+                    # The daemon's ThreadSignalDispatcher will auto-launch the app upon
+                    # successful recognition. Exit cleanly so the launcher doesn't block.
+                    logging.info("Launcher: Authentication delegated to daemon (async recognition in progress). Exiting cleanly.")
+                    sys.exit(0)
+            else:
+                logging.warning(f"Launcher: D-Bus call invalid. Error: {interface.lastError().message()}")
 
     # In-client Fallback Auth Dialog if daemon D-Bus is unavailable or interface call failed
     logging.info(f"Launcher: Running in-client auth fallback for '{desktop_name}'...")
-    from PySide6.QtWidgets import QApplication
-    app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
 
     config = get_config()
     app_name = desktop_name

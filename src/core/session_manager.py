@@ -22,7 +22,8 @@ class SessionManager(QObject):
         self.auth_timestamps = {}  # app_id -> float
 
         for app in self.get_protected_apps():
-            self.authorized_apps[app["id"]] = False
+            app_id = app["id"] if isinstance(app, dict) else app
+            self.authorized_apps[app_id] = False
 
         self.disabled_timer = QTimer(self)
         self.disabled_timer.setSingleShot(True)
@@ -32,40 +33,70 @@ class SessionManager(QObject):
         return self.active
 
     def is_app_authorized(self, app_id: str) -> bool:
+        if not app_id:
+            return False
         canonical_id = self.get_app_id_from_desktop(app_id)
-        return self.authorized_apps.get(canonical_id, False)
+        if self.authorized_apps.get(canonical_id, False):
+            return True
+        if self.authorized_apps.get(app_id, False):
+            return True
+        norm_id = app_id[:-8] if app_id.endswith(".desktop") else app_id
+        return any(self.authorized_apps.get(k, False) for k in (norm_id, norm_id + ".desktop"))
 
     def get_app_id_from_desktop(self, identifier: str) -> str:
         if not identifier:
             return identifier
         norm_id = identifier[:-8] if identifier.endswith(".desktop") else identifier
         for app in self.get_protected_apps():
-            app_id = app.get("id", "")
-            desktop_name = app.get("desktop_name", "")
-            norm_app_id = app_id[:-8] if app_id.endswith(".desktop") else app_id
-            norm_desktop = desktop_name[:-8] if desktop_name.endswith(".desktop") else desktop_name
+            if isinstance(app, dict):
+                app_id = app.get("id", "")
+                desktop_name = app.get("desktop_name", "")
+                norm_app_id = app_id[:-8] if app_id.endswith(".desktop") else app_id
+                norm_desktop = desktop_name[:-8] if desktop_name.endswith(".desktop") else desktop_name
 
-            if identifier in (app_id, desktop_name) or norm_id in (norm_app_id, norm_desktop):
-                return app_id
+                if identifier in (app_id, desktop_name) or norm_id in (norm_app_id, norm_desktop):
+                    return app_id or desktop_name or identifier
+            elif isinstance(app, str):
+                norm_app = app[:-8] if app.endswith(".desktop") else app
+                if identifier == app or norm_id == norm_app:
+                    return app
         return identifier
 
     def get_app_name(self, identifier: str) -> str:
         for app in self.get_protected_apps():
-            if app.get("id") == identifier or app.get("desktop_name") == identifier:
-                return app.get("name", identifier)
+            if isinstance(app, dict):
+                if app.get("id") == identifier or app.get("desktop_name") == identifier:
+                    return app.get("name", identifier)
+            elif isinstance(app, str):
+                if app == identifier:
+                    return identifier
         return identifier
 
     def authorize_app(self, app_identifier: str):
         app_id = self.get_app_id_from_desktop(app_identifier)
-        protected_ids = {app.get("id") for app in self.get_protected_apps() if app.get("id")}
-        if app_id not in protected_ids:
+        protected_ids = set()
+        for app in self.get_protected_apps():
+            if isinstance(app, dict):
+                if app.get("id"):
+                    protected_ids.add(app["id"])
+                if app.get("desktop_name"):
+                    protected_ids.add(app["desktop_name"])
+            elif isinstance(app, str):
+                protected_ids.add(app)
+
+        if app_id not in protected_ids and app_identifier not in protected_ids:
             logging.warning(f"Attempted to authorize non-protected application or pseudo-app '{app_identifier}' (ID: '{app_id}'). Skipping session caching.")
             return
 
         was_authorized = self.authorized_apps.get(app_id, False)
         self.authorized_apps[app_id] = True
+        self.authorized_apps[app_identifier] = True
         self.auth_timestamps[app_id] = time.time()
-        logging.info(f"State updated: Application '{app_id}' is UNLOCKED.")
+        self.auth_timestamps[app_identifier] = time.time()
+        logging.info(f"State updated: Application '{app_id}' ('{app_identifier}') is UNLOCKED.")
+
+        # Resume any process that was suspended prior to authorization
+        self.resume_suspended_processes(app_id)
 
         tray = self.get_tray()
         if not was_authorized and self.config.get("behavior.notify_on_auth", True) and tray:
@@ -78,11 +109,54 @@ class SessionManager(QObject):
                 3000
             )
 
+    def resume_suspended_processes(self, app_identifier: str) -> int:
+        """Sends SIGCONT to any running processes for app_identifier that are in SIGSTOP state."""
+        import psutil, os, signal
+        canonical_id = self.get_app_id_from_desktop(app_identifier)
+        resumed = 0
+        
+        target_app = None
+        for app in self.get_protected_apps():
+            if isinstance(app, dict):
+                p_id = app.get("id", "")
+                p_desk = app.get("desktop_name", "")
+                if canonical_id in (p_id, p_desk) or app_identifier in (p_id, p_desk):
+                    target_app = app
+                    break
+        if not target_app:
+            return 0
+
+        exec_name = target_app.get("executable") or target_app.get("id") or ""
+        if not exec_name:
+            return 0
+
+        exec_base = os.path.basename(exec_name).lower()
+
+        for proc in psutil.process_iter(['pid', 'name', 'exe', 'status']):
+            try:
+                name = (proc.info['name'] or "").lower()
+                exe = (proc.info['exe'] or "").lower()
+                status = proc.info['status']
+
+                if exec_base in name or exec_base in os.path.basename(exe):
+                    if status == psutil.STATUS_STOPPED:
+                        logging.info(f"Resuming suspended process '{proc.info['name']}' (PID: {proc.info['pid']}) via SIGCONT.")
+                        os.kill(proc.info['pid'], signal.SIGCONT)
+                        resumed += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        return resumed
+
     def relock_app(self, app_id: str, monitor=None):
         canonical_id = self.get_app_id_from_desktop(app_id)
-        was_authorized = self.authorized_apps.get(canonical_id, False)
-        self.authorized_apps[canonical_id] = False
-        self.auth_timestamps.pop(canonical_id, None)
+        norm_id = canonical_id[:-8] if canonical_id.endswith(".desktop") else canonical_id
+        keys_to_clear = {canonical_id, app_id, norm_id, norm_id + ".desktop"}
+        
+        was_authorized = any(self.authorized_apps.get(k, False) for k in keys_to_clear)
+        for k in keys_to_clear:
+            self.authorized_apps[k] = False
+            self.auth_timestamps.pop(k, None)
+
         logging.info(f"State updated: Application '{canonical_id}' is LOCKED.")
         
         if monitor:

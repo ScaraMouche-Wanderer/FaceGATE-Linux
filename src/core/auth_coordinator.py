@@ -50,7 +50,7 @@ class AuthCoordinator(QObject):
         If there are no enrolled faces (first setup), returns True immediately.
         """
         from security.lockout_manager import is_locked_out
-        locked_out, remaining = is_locked_out(reason)
+        locked_out, remaining = is_locked_out(reason, is_admin=True)
         if locked_out:
             logging.warning(f"Admin verification for '{reason}' REJECTED due to active lockout ({remaining}s remaining).")
             from database.audit_log import log_auth_attempt
@@ -155,28 +155,8 @@ class AuthCoordinator(QObject):
                 parent._process_auth_request(desktop_name, pid)
             else:
                 self._process_auth_request(desktop_name, pid)
-        finally:
-            QTimer.singleShot(0, self._process_auth_queue)
-
-    @Slot(str, int)
-    def handle_monitor_auth(self, desktop_name: str, pid: int):
-        logging.info(f"Queuing auth request for '{desktop_name}' (PID: {pid})")
-        self._auth_queue.append((desktop_name, pid))
-        if not self._auth_busy:
-            self._process_auth_queue()
-
-    def _process_auth_queue(self):
-        if not self._auth_queue:
-            self._auth_busy = False
-            return
-        self._auth_busy = True
-        desktop_name, pid = self._auth_queue.pop(0)
-        try:
-            parent = self.parent()
-            if parent and hasattr(parent, "_process_auth_request"):
-                parent._process_auth_request(desktop_name, pid)
-            else:
-                self._process_auth_request(desktop_name, pid)
+        except Exception as e:
+            logging.error(f"Error processing auth request for '{desktop_name}' (PID: {pid}): {e}")
         finally:
             QTimer.singleShot(0, self._process_auth_queue)
 
@@ -241,34 +221,6 @@ class AuthCoordinator(QObject):
                     os.write(w, cached_key)
                 finally:
                     os.close(w)
-            
-            watch_timer = QTimer(self)
-            def check_process_alive():
-                try:
-                    if not psutil.pid_exists(pid):
-                        logging.info(f"Target process PID {pid} died externally. Terminating recognition subprocess.")
-                        if proc.poll() is None:
-                            proc.terminate()
-                        watch_timer.stop()
-                    elif proc.poll() is not None:
-                        watch_timer.stop()
-                except Exception:
-                    pass
-            
-            watch_timer.timeout.connect(check_process_alive)
-            watch_timer.start(100)
-            
-            try:
-                while proc.poll() is None:
-                    QApplication.processEvents()
-                    time.sleep(0.05)
-            finally:
-                watch_timer.stop()
-                try:
-                    watch_timer.timeout.disconnect(check_process_alive)
-                except Exception:
-                    pass
-                watch_timer.deleteLater()
 
             stdout_data, stderr_data = proc.communicate()
             exit_code = proc.returncode

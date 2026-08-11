@@ -137,7 +137,8 @@ class Config:
 
             os.makedirs(os.path.dirname(user_config_path), exist_ok=True)
             tmp_path = user_config_path + ".tmp"
-            with open(tmp_path, 'w') as f:
+            fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w') as f:
                 yaml.safe_dump(diff_to_save, f, default_flow_style=False, sort_keys=False)
                 f.flush()
                 os.fsync(f.fileno())
