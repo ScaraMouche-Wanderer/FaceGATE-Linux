@@ -498,6 +498,55 @@ class TestPersistentLockoutManager:
         result = service.request_auth_internal(app_name)
         assert result is False, "IPC service RequestAuth must return False when app is locked out"
 
+    def test_lockout_canonicalization_admin_bucket(self, temp_lockout_file):
+        """Varying admin reason strings (e.g. Delete User for 'alice' vs 'bob') must share the '__admin__' bucket."""
+        from security.lockout_manager import record_failed_attempt, is_locked_out, reset_lockout
+        reset_lockout(is_admin=True)
+
+        record_failed_attempt("Delete Enrolled Face Profile for 'alice'", is_admin=True)
+        record_failed_attempt("Delete Enrolled Face Profile for 'bob'", is_admin=True)
+        attempts, _, remaining = record_failed_attempt("Delete Enrolled Face Profile for 'charlie'", is_admin=True)
+
+        # 3 attempts across different dynamic reasons must escalate to lockout
+        assert attempts == 3
+        assert remaining > 0
+
+        locked, _ = is_locked_out("Any Other Admin Action", is_admin=True)
+        assert locked, "Different admin action must be locked out because all share __admin__ bucket"
+
+    def test_lockout_canonicalization_unknown_app(self, temp_lockout_file):
+        """Varying unknown app_identifier strings must share the '__unknown_app__' bucket."""
+        from security.lockout_manager import record_failed_attempt, is_locked_out, reset_lockout
+        reset_lockout()
+
+        record_failed_attempt("random_app_1")
+        record_failed_attempt("random_app_2")
+        attempts, _, remaining = record_failed_attempt("random_app_3")
+
+        assert attempts == 3
+        assert remaining > 0
+
+        locked, _ = is_locked_out("random_app_4")
+        assert locked, "Unrecognized app identifiers must share the __unknown_app__ bucket"
+
+    def test_liveness_texture_synthetic_frame_gated_by_test_mode(self):
+        """Flat solid-fill frame (0.0 variance) must fail in production and pass ONLY when test mode is enabled."""
+        from recognition.liveness import check_texture_liveness
+        flat_crop = np.zeros((100, 100, 3), dtype=np.uint8)
+
+        # In production mode (allow_synthetic=False, no test env vars)
+        with patch.dict(os.environ, {}, clear=True):
+            passed, score, reason = check_texture_liveness(flat_crop, allow_synthetic=False)
+            assert not passed, "Flat 0.0 variance frame must fail texture liveness in production mode"
+            assert "Low texture variance" in reason
+
+        # In test mode
+        with patch.dict(os.environ, {"FACEGATE_TEST_MODE": "1"}):
+            passed, score, reason = check_texture_liveness(flat_crop)
+            assert passed, "Flat frame should pass when FACEGATE_TEST_MODE is set"
+            assert reason == "Synthetic test frame"
+
+
 
 class TestKeyPersistence:
     """Tests for persistent vault key storage and restoration."""

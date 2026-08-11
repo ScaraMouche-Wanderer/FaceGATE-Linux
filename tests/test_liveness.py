@@ -156,7 +156,11 @@ def test_liveness_allows_explicit_negative_opt_out(mock_get_config, mock_vc, moc
     from ui.auth_dialog import AuthDialog
     
     mock_config = MagicMock()
-    mock_config.get.side_effect = lambda key, default=None: -1.0 if key == "recognition.liveness_min_motion" else default
+    def mock_get(key, default=None):
+        if key == "recognition.liveness_min_motion":
+            return -1.0
+        return default if default is not None else 0.52
+    mock_config.get.side_effect = mock_get
     mock_get_config.return_value = mock_config
     
     with patch('recognition.detector.Detector', side_effect=MockDetectorStatic):

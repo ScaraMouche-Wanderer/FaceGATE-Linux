@@ -56,16 +56,16 @@ def test_apply_substitution_permission_error(mock_show_message, tmp_path):
         f.write("[Desktop Entry]\nExec=kitty\n")
         
     # Force PermissionError when writing the user-level desktop file
-    original_open = open
-    def mock_open(file, mode="r", *args, **kwargs):
-        if mode == "w" and "user_desktop" in str(file):
-            raise PermissionError("[Errno 13] Permission denied", file)
-        return original_open(file, mode, *args, **kwargs)
+    original_os_open = os.open
+    def mock_os_open(path, flags, *args, **kwargs):
+        if "user_desktop" in str(path):
+            raise PermissionError("[Errno 13] Permission denied", path)
+        return original_os_open(path, flags, *args, **kwargs)
         
     with patch("locking.launcher_sub.USER_DESKTOP_DIR", user_desktop_dir), \
          patch("locking.launcher_sub.BACKUP_DIR", backup_dir), \
          patch("locking.launcher_sub.SYSTEM_DESKTOP_DIRS", [system_desktop_dir]), \
-         patch("builtins.open", side_effect=mock_open), \
+         patch("os.open", side_effect=mock_os_open), \
          patch("logging.error") as mock_log_error:
          
          # Create a dummy tray icon so notify_permission_error finds it
