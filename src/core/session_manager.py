@@ -62,6 +62,21 @@ class SessionManager(QObject):
                     return app
         return identifier
 
+    def get_app_session_timeout(self, identifier: str) -> int:
+        """
+        Returns the effective session timeout in seconds for a specific application.
+        Falls back to global security.session_timeout_seconds (default 300).
+        """
+        global_timeout = int(self.config.get("security.session_timeout_seconds", 300))
+        for app in self.get_protected_apps():
+            if isinstance(app, dict):
+                if app.get("id") == identifier or app.get("desktop_name") == identifier:
+                    if "session_timeout_seconds" in app and app["session_timeout_seconds"] is not None:
+                        return int(app["session_timeout_seconds"])
+                    if "timeout_seconds" in app and app["timeout_seconds"] is not None:
+                        return int(app["timeout_seconds"])
+        return global_timeout
+
     def get_app_name(self, identifier: str) -> str:
         for app in self.get_protected_apps():
             if isinstance(app, dict):
@@ -71,6 +86,7 @@ class SessionManager(QObject):
                 if app == identifier:
                     return identifier
         return identifier
+
 
     def authorize_app(self, app_identifier: str):
         app_id = self.get_app_id_from_desktop(app_identifier)
@@ -140,9 +156,11 @@ class SessionManager(QObject):
 
                 if exec_base in name or exec_base in os.path.basename(exe):
                     if status == psutil.STATUS_STOPPED:
-                        logging.info(f"Resuming suspended process '{proc.info['name']}' (PID: {proc.info['pid']}) via SIGCONT.")
-                        os.kill(proc.info['pid'], signal.SIGCONT)
-                        resumed += 1
+                        logging.info(f"Resuming suspended process '{proc.info['name']}' (PID: {proc.info['pid']}).")
+                        from locking.process_controller import resume_process
+                        if resume_process(proc.info['pid']):
+                            resumed += 1
+
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
         return resumed

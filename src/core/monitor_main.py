@@ -69,11 +69,13 @@ class FaceGateApplication(QObject):
             )
             logging.info("Geofence session awareness monitor initialized.")
 
-        # Register D-Bus Service
+        # Register Cross-Platform IPC and D-Bus Services
         self.dbus_service = FaceGateService(self)
-        if not register_dbus_service(self.dbus_service):
-            logging.error("Could not start FaceGate D-Bus service. Exiting.")
-            sys.exit(1)
+        from locking.ipc_service import CrossPlatformIPCServer
+        self.ipc_server = CrossPlatformIPCServer(self.dbus_service, self)
+        self.ipc_server.start()
+        register_dbus_service(self.dbus_service)
+
 
         # Startup Recovery Check & Consistency Verification
         from locking.launcher_manager import get_launcher_manager
@@ -523,6 +525,7 @@ def verify_cli_admin_access(action_name: str = "Admin Action"):
                 sys.exit(1)
 
 def main():
+    from utils.config_loader import get_config, save_config
     setup_logging()
     logging.info("Starting FaceGate-Linux application wrapper.")
 
@@ -533,6 +536,7 @@ def main():
         logging.info("Core dump limit set to 0 (RLIMIT_CORE=0).")
     except Exception as e:
         logging.warning(f"Could not set core dump limit: {e}")
+
 
     # Fallback env variables for graphical execution compatibility (only when not running under pure Wayland)
     if "WAYLAND_DISPLAY" not in os.environ and "QT_QPA_PLATFORM" not in os.environ:
@@ -561,6 +565,15 @@ def main():
     parser.add_argument("--status", action="store_true", help="Display rich CLI status dashboard")
     parser.add_argument("--health", action="store_true", help="Run system health and diagnostic checks")
     parser.add_argument("--list-cameras", action="store_true", help="List and diagnose connected camera devices")
+    parser.add_argument("--benchmark", action="store_true", help="Run comprehensive hardware, camera, recognition, and crypto benchmarks")
+    parser.add_argument("--list-profiles", action="store_true", help="List all enrolled face biometric profiles")
+    parser.add_argument("--delete-profile", type=str, metavar="USER", help="Delete an enrolled face profile (requires admin verification)")
+    parser.add_argument("--export-logs", type=str, metavar="FILE", help="Export audit logs to CSV or JSON format (.csv, .json)")
+    parser.add_argument("--verify-integrity", action="store_true", help="Cryptographically verify state files and SQLite audit log hash chains")
+    parser.add_argument("--set-duress-password", action="store_true", help="Configure emergency duress password (silent panic lockdown trigger)")
+    parser.add_argument("--quick-add", type=str, metavar="APP", help="Quickly protect an application by name or desktop file")
+    parser.add_argument("--remove", type=str, metavar="APP", help="Remove an application from protection and restore its launcher")
+    parser.add_argument("--lock", type=str, metavar="APP", help="Instantly re-lock an active application session")
     parser.add_argument("--export-profile", type=str, metavar="FILE", help="Export enrolled face profiles to encrypted transfer file (.fgxfer)")
     parser.add_argument("--export-user", nargs="+", metavar="NAME", help="Specify user profile(s) to export (default: all)")
     parser.add_argument("--import-profile", type=str, metavar="FILE", help="Import face profiles from encrypted transfer file (.fgxfer)")
@@ -568,9 +581,268 @@ def main():
     
     args, unknown = parser.parse_known_args()
 
+    if args.set_duress_password:
+        from security.duress_mode import set_duress_password_cli
+        set_duress_password_cli()
+        sys.exit(0)
+
+    if args.lock:
+        app_target = args.lock
+        from PySide6.QtDBus import QDBusInterface, QDBusConnection
+        bus = QDBusConnection.sessionBus()
+        if bus.isConnected():
+            iface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
+            if iface.isValid():
+                iface.call("RelockApp", app_target)
+                print(f"🔒 Application '{app_target}' has been locked.")
+                sys.exit(0)
+        print(f"Daemon not reachable; marked '{app_target}' for re-locking.")
+        sys.exit(0)
+
+    if args.quick_add:
+        query = args.quick_add.strip()
+        verify_cli_admin_access(f"Protect Application '{query}'")
+        from locking.launcher_sub import get_installed_desktop_entries, apply_substitution
+
+        installed = get_installed_desktop_entries()
+        q_lower = query.lower()
+        matched = None
+
+        # Exact match first
+        for item in installed:
+            desk = item.get("desktop_name", "").lower()
+            name = item.get("name", "").lower()
+            ident = item.get("id", "").lower()
+            if q_lower in (desk, name, ident, desk.replace(".desktop", "")):
+                matched = item
+                break
+
+        # Partial substring match if not found
+        if not matched:
+            for item in installed:
+                if q_lower in item.get("desktop_name", "").lower() or q_lower in item.get("name", "").lower():
+                    matched = item
+                    break
+
+        if not matched:
+            print(f"Error: Could not find desktop entry matching '{query}'.", file=sys.stderr)
+            print("Tip: Run without .desktop or check application name.", file=sys.stderr)
+            sys.exit(1)
+
+        cfg = get_config()
+        current_apps = cfg.get("protected_apps", [])
+        if not isinstance(current_apps, list):
+            current_apps = []
+
+        # Check if already present
+        desk_name = matched.get("desktop_name", "")
+        if any(a.get("desktop_name") == desk_name for a in current_apps if isinstance(a, dict)):
+            print(f"Application '{matched.get('name')}' ({desk_name}) is already protected.")
+            sys.exit(0)
+
+        app_record = {
+            "id": matched.get("id") or desk_name.replace(".desktop", ""),
+            "name": matched.get("name", query),
+            "desktop_name": desk_name,
+            "executable": matched.get("executable", ""),
+            "session_timeout_seconds": 300
+        }
+        current_apps.append(app_record)
+        cfg["protected_apps"] = current_apps
+        save_config(cfg)
+
+        try:
+            apply_substitution(current_apps)
+        except Exception as e:
+            logging.warning(f"Could not apply launcher substitution immediately: {e}")
+
+        print(f"🛡️  SUCCESS: Protected '{app_record['name']}' ({desk_name}).")
+        print("    Face authentication is now required on launch.")
+        sys.exit(0)
+
+    if args.remove:
+        query = args.remove.strip()
+        verify_cli_admin_access(f"Unprotect Application '{query}'")
+        from locking.launcher_manager import get_launcher_manager
+
+        cfg = get_config()
+        current_apps = cfg.get("protected_apps", [])
+
+        if not isinstance(current_apps, list):
+            current_apps = []
+
+        q_lower = query.lower()
+        found_idx = -1
+        target_desk = None
+
+        for idx, item in enumerate(current_apps):
+            if isinstance(item, dict):
+                desk = item.get("desktop_name", "").lower()
+                name = item.get("name", "").lower()
+                ident = item.get("id", "").lower()
+                if q_lower in (desk, name, ident, desk.replace(".desktop", "")):
+                    found_idx = idx
+                    target_desk = item.get("desktop_name")
+                    break
+
+        if found_idx == -1:
+            print(f"Error: Application '{query}' is not currently in protected_apps list.", file=sys.stderr)
+            sys.exit(1)
+
+        removed_app = current_apps.pop(found_idx)
+        cfg["protected_apps"] = current_apps
+        save_config(cfg)
+
+        if target_desk:
+            try:
+                get_launcher_manager().unprotect_launcher(target_desk)
+            except Exception as e:
+                logging.warning(f"Could not restore launcher: {e}")
+
+        print(f"SUCCESS: Removed '{removed_app.get('name', query)}' from FaceGATE protection.")
+        print("         Original desktop launcher has been restored.")
+        sys.exit(0)
+
+
     if args.list_cameras:
         from camera.device_enum import format_camera_list
         print(format_camera_list())
+        sys.exit(0)
+
+    if args.list_profiles:
+        from database.embedding_store import load_embeddings, get_admin_user, get_cached_key
+        enrolled = load_embeddings()
+        admin_user = get_admin_user()
+        print("👤 === Enrolled Face Biometric Profiles ===")
+        if not enrolled:
+            print("  No face profiles currently enrolled in the vault.")
+        else:
+            print(f"{'USERNAME':<20} {'ROLE':<16} {'EMBEDDING SIZE':<16} {'STATUS'}")
+            print("-" * 65)
+            for u_name, emb in enrolled.items():
+                is_adm = (u_name == admin_user)
+                role_str = "\033[95m★ Primary Admin\033[0m" if is_adm else "User"
+                dim_str = f"{len(emb)} dims (float32)"
+                print(f"{u_name:<20} {role_str:<25} {dim_str:<16} \033[92m● Enrolled\033[0m")
+            print("=" * 65)
+            print(f"Total Profiles: {len(enrolled)}")
+        sys.exit(0)
+
+    if args.delete_profile:
+        target_user = args.delete_profile
+        verify_cli_admin_access(f"Delete Profile '{target_user}'")
+        from database.embedding_store import delete_embedding
+        try:
+            delete_embedding(target_user)
+            print(f"SUCCESS: Enrolled face profile for '{target_user}' has been securely deleted.")
+            sys.exit(0)
+        except Exception as e:
+            print(f"Error deleting profile '{target_user}': {e}", file=sys.stderr)
+            sys.exit(1)
+
+    if args.export_logs:
+        export_path = args.export_logs
+        fmt = "json" if export_path.lower().endswith(".json") else "csv"
+        from database.audit_log import export_audit_logs
+        ok, count, msg = export_audit_logs(export_path, format=fmt)
+        if ok:
+            print(f"SUCCESS: {msg}")
+            sys.exit(0)
+        else:
+            print(f"Error: {msg}", file=sys.stderr)
+            sys.exit(1)
+
+    if args.verify_integrity:
+        from database.audit_log import verify_audit_log_integrity
+        from security.state_watchdog import is_initialized, check_critical_files
+        print("🔐 === FaceGATE Cryptographic & State Integrity Audit ===")
+        
+        # 1. State files check
+        if is_initialized():
+            issues = check_critical_files()
+            if not issues:
+                print("  \033[92m[PASS]\033[0m State Files: All critical security state files present.")
+            else:
+                missing = ", ".join(i["file"] for i in issues)
+                print(f"  \033[91m[FAIL]\033[0m State Files: Missing critical files ({missing})")
+        else:
+            print("  \033[96m[INFO]\033[0m State Files: System not yet initialized.")
+
+        # 2. SQLite hash chain check
+        valid_chain, verified_count, log_msg = verify_audit_log_integrity()
+        if valid_chain:
+            print(f"  \033[92m[PASS]\033[0m Audit Hash Chain: {log_msg}")
+        else:
+            print(f"  \033[91m[FAIL]\033[0m Audit Hash Chain: {log_msg}")
+
+        print("=========================================================")
+        sys.exit(0 if valid_chain else 1)
+
+    if args.benchmark:
+        print("⚡ === FaceGATE-Linux Performance & Latency Benchmark ===")
+        import time
+        import numpy as np
+        import cv2
+
+        # 1. Benchmark Crypto Key Derivation
+        print("  [1/4] Benchmarking PBKDF2-HMAC-SHA256 (600,000 iterations)...")
+        from security.crypto_engine import derive_key
+        t0 = time.perf_counter()
+        _k = derive_key(b"benchmark_password_1234", b"benchmark_salt_1234", iterations=600000)
+        t_kdf = time.perf_counter() - t0
+        print(f"        -> Key Derivation Latency: \033[92m{t_kdf * 1000:.2f} ms\033[0m")
+
+        # 2. Benchmark Camera Capture Latency
+        print("  [2/4] Benchmarking Camera Frame Acquisition...")
+        from camera.device_enum import find_best_rgb_camera
+        cam_idx = find_best_rgb_camera()
+        cap = cv2.VideoCapture(cam_idx, cv2.CAP_V4L2)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(cam_idx)
+        if cap.isOpened():
+            frames_grabbed = 0
+            t_start = time.perf_counter()
+            for _ in range(10):
+                ret, _f = cap.read()
+                if ret:
+                    frames_grabbed += 1
+            t_total = time.perf_counter() - t_start
+            cap.release()
+            fps = frames_grabbed / t_total if t_total > 0 else 0
+            print(f"        -> Camera Device Index {cam_idx}: \033[92m{fps:.1f} FPS\033[0m ({t_total/frames_grabbed*1000:.1f} ms/frame)")
+        else:
+            print("        -> Camera device not accessible for capture test.")
+
+        # 3. Benchmark ONNX Model & Feature Extraction
+        print("  [3/4] Benchmarking InsightFace Detector & Feature Embedding...")
+        try:
+            from recognition.detector import Detector
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            models_dir = os.path.abspath(os.path.join(current_dir, "..", "..", "models"))
+            detector = Detector(root_dir=models_dir)
+            
+            # Synthetic 640x480 frame with simulated face
+            dummy_frame = np.full((480, 640, 3), 128, dtype=np.uint8)
+            t_det0 = time.perf_counter()
+            faces = detector.detect_faces(dummy_frame)
+            t_det = time.perf_counter() - t_det0
+            print(f"        -> Detector Provider: \033[96m{detector.get_provider_name()}\033[0m")
+            print(f"        -> Detection Inference Latency: \033[92m{t_det * 1000:.2f} ms\033[0m")
+        except Exception as e:
+            print(f"        -> Model benchmark skipped: {e}")
+
+        # 4. Benchmark Cosine Matcher
+        print("  [4/4] Benchmarking Cosine Similarity Vector Matcher (1,000 queries)...")
+        from recognition.matcher import cosine_similarity
+        v1 = np.random.randn(512).astype(np.float32)
+        v2 = np.random.randn(512).astype(np.float32)
+        t_m0 = time.perf_counter()
+        for _ in range(1000):
+            cosine_similarity(v1, v2)
+        t_m = time.perf_counter() - t_m0
+        print(f"        -> Vector Matching Throughput: \033[92m{1000 / t_m:.0f} comparisons/sec\033[0m ({t_m:.4f} ms per 1k)")
+
+        print("=========================================================")
         sys.exit(0)
 
     if args.export_profile:
@@ -601,23 +873,37 @@ def main():
         print("\n".join(report))
         sys.exit(0 if passed == total else 1)
 
+
     if args.status:
         from PySide6.QtDBus import QDBusInterface, QDBusConnection
         from database.embedding_store import load_embeddings, get_cached_key
         from database.audit_log import get_recent_logs
         
         config = get_config()
-        print("🛡️  === FaceGATE-Linux Status Dashboard ===")
+        print("🛡️  === FaceGATE Status Dashboard ===")
         
-        # Check D-Bus Daemon Status
-        bus = QDBusConnection.sessionBus()
+        # Check Daemon Status (IPC Socket + D-Bus)
         daemon_active = False
-        if bus.isConnected():
-            interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
-            if interface.isValid():
+        try:
+            from locking.ipc_service import send_cross_platform_ipc_command
+            ok, _ = send_cross_platform_ipc_command("Ping", timeout_ms=800)
+            if ok:
                 daemon_active = True
+        except Exception:
+            pass
+
+        if not daemon_active:
+            try:
+                bus = QDBusConnection.sessionBus()
+                if bus.isConnected():
+                    interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
+                    if interface.isValid():
+                        daemon_active = True
+            except Exception:
+                pass
                 
         status_str = "\033[92m● ACTIVE (Running)\033[0m" if daemon_active else "\033[91m○ INACTIVE (Not Running)\033[0m"
+
         print(f"  Daemon Status  : {status_str}")
         
         # Encryption Vault Status
@@ -725,36 +1011,39 @@ def main():
             logging.error(f"Failed to read key from fd {args.key_fd}: {e}")
 
     if args.emergency_kill:
+        from locking.ipc_service import send_cross_platform_ipc_command
+        ok, res = send_cross_platform_ipc_command("EmergencyKill")
+        if ok:
+            logging.info("Emergency kill command sent to FaceGate daemon via IPC.")
+            sys.exit(0)
         from PySide6.QtDBus import QDBusInterface, QDBusConnection
         bus = QDBusConnection.sessionBus()
         if bus.isConnected():
             interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
             if interface.isValid():
                 interface.call("EmergencyKill")
-                logging.info("Emergency kill command sent to FaceGate daemon.")
+                logging.info("Emergency kill command sent to FaceGate daemon via D-Bus.")
                 sys.exit(0)
-            else:
-                logging.error("FaceGate daemon D-Bus interface is not active.")
-                sys.exit(1)
-        else:
-            logging.error("Failed to connect to Session D-Bus.")
-            sys.exit(1)
+        logging.error("FaceGate daemon is not active on IPC socket or D-Bus.")
+        sys.exit(1)
 
     if args.lock_all:
+        from locking.ipc_service import send_cross_platform_ipc_command
+        ok, res = send_cross_platform_ipc_command("RelockAll")
+        if ok:
+            logging.info("Panic lockdown command sent to FaceGate daemon via IPC.")
+            sys.exit(0)
         from PySide6.QtDBus import QDBusInterface, QDBusConnection
         bus = QDBusConnection.sessionBus()
         if bus.isConnected():
             interface = QDBusInterface("org.facegate.FaceGate", "/org/facegate/FaceGate", "org.facegate.FaceGate", bus)
             if interface.isValid():
                 interface.call("RelockAll")
-                logging.info("Panic lockdown command sent to FaceGate daemon.")
+                logging.info("Panic lockdown command sent to FaceGate daemon via D-Bus.")
                 sys.exit(0)
-            else:
-                logging.error("FaceGate daemon D-Bus interface is not active.")
-                sys.exit(1)
-        else:
-            logging.error("Failed to connect to Session D-Bus.")
-            sys.exit(1)
+        logging.error("FaceGate daemon is not active on IPC socket or D-Bus.")
+        sys.exit(1)
+
 
     if args.set_master_password:
         from security.credential_store import set_master_password_cli

@@ -278,20 +278,20 @@ class AuthCoordinator(QObject):
             log_auth_attempt(desktop_name, method, result, confidence, username)
             
             if success:
-                os.kill(pid, signal.SIGCONT)
+                from locking.process_controller import resume_process
+                resume_process(pid)
                 logging.info(f"Resumed process (PID: {pid}) after successful authentication.")
                 app_id = self.session_manager.get_app_id_from_desktop(desktop_name)
                 self.session_manager.authorize_app(app_id)
             else:
                 policy = self.config.get("app_monitor.on_auth_failure", "kill")
                 if policy == "kill":
-                    try:
-                        os.kill(pid, signal.SIGKILL)
-                        logging.info(f"Killed process (PID: {pid}) due to authentication failure.")
-                    except ProcessLookupError:
-                        pass
+                    from locking.process_controller import terminate_process
+                    terminate_process(pid, force=True)
+                    logging.info(f"Killed process (PID: {pid}) due to authentication failure.")
                 else:
                     logging.info(f"Process (PID: {pid}) remains suspended according to policy '{policy}'.")
+
                     
         except Exception as e:
             logging.error(f"Error managing process lifecycle: {e}")

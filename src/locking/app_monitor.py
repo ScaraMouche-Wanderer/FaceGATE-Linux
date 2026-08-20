@@ -254,23 +254,30 @@ class AppMonitor:
 
                             # If app is globally authorized, check if session timeout elapsed
                             if self.main_app.is_app_authorized(app_id):
-                                timeout = int(self.main_app.config.get("security.session_timeout_seconds", 300))
+                                timeout = match_app.get("session_timeout_seconds")
+                                if timeout is None:
+                                    timeout = match_app.get("timeout_seconds")
+                                if timeout is None:
+                                    timeout = self.main_app.config.get("security.session_timeout_seconds", 300)
+                                timeout = int(timeout)
+
                                 canonical_id = self.main_app.get_app_id_from_desktop(app_id)
                                 auth_time = self.main_app.auth_timestamps.get(canonical_id, 0)
                                 if auth_time and auth_time > 0:
                                     if timeout > 0 and (time.time() - auth_time) > timeout:
-                                        logging.info(f"AppMonitor: Session timeout elapsed for '{app_id}' (PID: {pid}). Relocking app.")
+                                        logging.info(f"AppMonitor: Session timeout ({timeout}s) elapsed for '{app_id}' (PID: {pid}). Relocking app.")
                                         self.main_app.relock_app(app_id)
                                         self._seen_pids.discard(proc_key)
                                         continue
                                 else:
                                     self.main_app.auth_timestamps[canonical_id] = time.time()
 
-                                # Send SIGCONT if the process was suspended prior to authorization
+                                # Resume process if it was suspended prior to authorization
                                 try:
                                     if proc.status() == psutil.STATUS_STOPPED:
-                                        logging.info(f"AppMonitor: Resuming authorized suspended process '{name}' (PID: {pid}) via SIGCONT.")
-                                        os.kill(pid, signal.SIGCONT)
+                                        logging.info(f"AppMonitor: Resuming authorized suspended process '{name}' (PID: {pid}).")
+                                        from locking.process_controller import resume_process
+                                        resume_process(pid)
                                 except Exception:
                                     pass
 
@@ -280,21 +287,21 @@ class AppMonitor:
                             # Check if target app is marked as a Decoy Honeypot
                             if match_app.get("is_decoy", False):
                                 logging.warning(f"AppMonitor: Detected Decoy Honeypot process '{name}' (PID: {pid}). Terminating process and triggering trap.")
-                                try:
-                                    os.kill(pid, signal.SIGKILL)
-                                except OSError:
-                                    pass
+                                from locking.process_controller import terminate_process
+                                terminate_process(pid, force=True)
                                 self._seen_pids.add(proc_key)
                                 from security.decoy_mode import handle_decoy_trigger
                                 handle_decoy_trigger(desktop_name or app_id)
                                 continue
 
-                            logging.info(f"AppMonitor: Detected target process '{name}' (PID: {pid}). Suspending via SIGSTOP.")
+                            logging.info(f"AppMonitor: Detected target process '{name}' (PID: {pid}). Suspending.")
                             
-                            # Immediately suspend the process
-                            os.kill(pid, signal.SIGSTOP)
+                            # Immediately suspend the process via cross-platform controller
+                            from locking.process_controller import suspend_process
+                            suspend_process(pid)
                             
                             # Mark as seen so we don't suspend it repeatedly
+
                             self._seen_pids.add(proc_key)
                             
                             # Request authorization (emitted to main GUI thread)

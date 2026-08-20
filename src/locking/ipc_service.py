@@ -430,19 +430,141 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
             return False
         return self.service.remove_enrolled_user_internal(username)
 
+
+class CrossPlatformIPCServer(QObject):
+    """
+    Zero-dependency, cross-platform IPC server using QLocalServer (Named Pipes on Windows,
+    UNIX Domain Sockets on Linux/macOS). Operates in parallel with D-Bus.
+    """
+    def __init__(self, service: FaceGateService, parent=None):
+        super().__init__(parent)
+        self.service = service
+        from PySide6.QtNetwork import QLocalServer
+        self.server = QLocalServer(self)
+        self.server.newConnection.connect(self._on_new_connection)
+
+    def start(self) -> bool:
+        from utils.platform_paths import get_ipc_socket_address, is_windows
+        addr = get_ipc_socket_address()
+        
+        from PySide6.QtNetwork import QLocalServer
+        # Clean up stale socket on Unix
+        if not is_windows() and os.path.exists(addr):
+            try:
+                os.unlink(addr)
+            except OSError:
+                pass
+        
+        QLocalServer.removeServer(addr)
+        if not self.server.listen(addr):
+            logging.warning(f"CrossPlatformIPCServer: Failed to listen on '{addr}': {self.server.errorString()}")
+            return False
+        logging.info(f"CrossPlatformIPCServer: Listening on '{addr}' for cross-platform requests.")
+        return True
+
+    def _on_new_connection(self):
+        import json
+        client = self.server.nextPendingConnection()
+        if not client:
+            return
+
+        def _handle_read():
+            data = client.readAll().data().decode("utf-8", errors="ignore")
+            if not data:
+                return
+            try:
+                msg = json.loads(data)
+                action = msg.get("action", "")
+                resp = {"status": "ok", "result": None}
+
+                if action == "Ping":
+                    resp["result"] = True
+                elif action == "RelockAll":
+                    self.service.relock_all_internal()
+                    resp["result"] = True
+                elif action == "RelockApp":
+                    app = msg.get("app", "")
+                    self.service.relock_app_internal(app)
+                    resp["result"] = True
+                elif action == "Enable":
+                    resp["result"] = self.service.enable_internal()
+                elif action == "Disable":
+                    minutes = msg.get("minutes", 15)
+                    resp["result"] = self.service.disable_internal(minutes)
+                elif action == "RequestAuth":
+                    app = msg.get("app", "")
+                    resp["result"] = self.service.request_auth_internal(app)
+                elif action == "EmergencyKill":
+                    self.service.emergency_kill_internal()
+                    resp["result"] = True
+                else:
+                    resp = {"status": "error", "error": f"Unknown action: {action}"}
+
+                out_bytes = json.dumps(resp).encode("utf-8")
+                client.write(out_bytes)
+                client.flush()
+            except Exception as e:
+                err_resp = json.dumps({"status": "error", "error": str(e)}).encode("utf-8")
+                client.write(err_resp)
+                client.flush()
+            finally:
+                client.disconnectFromServer()
+
+        client.readyRead.connect(_handle_read)
+
+
+def send_cross_platform_ipc_command(action: str, timeout_ms: int = 4000, **kwargs) -> tuple[bool, any]:
+    """
+    Sends an IPC command to the running daemon across Linux, macOS, and Windows.
+    Returns (success: bool, result_payload: any).
+    """
+    import json
+    from PySide6.QtNetwork import QLocalSocket
+    from utils.platform_paths import get_ipc_socket_address
+
+    socket = QLocalSocket()
+    addr = get_ipc_socket_address()
+    socket.connectToServer(addr)
+    if not socket.waitForConnected(timeout_ms):
+        return False, None
+
+    payload = {"action": action}
+    payload.update(kwargs)
+    socket.write(json.dumps(payload).encode("utf-8"))
+    socket.flush()
+
+    if socket.waitForReadyRead(timeout_ms):
+        raw = socket.readAll().data().decode("utf-8", errors="ignore")
+        try:
+            res = json.loads(raw)
+            if res.get("status") == "ok":
+                return True, res.get("result")
+        except Exception:
+            pass
+    socket.disconnectFromServer()
+    return False, None
+
+
 def register_dbus_service(service_obj) -> bool:
-    bus = QDBusConnection.sessionBus()
-    if not bus.isConnected():
-        logging.error("Failed to connect to Session D-Bus.")
+    """Registers session D-Bus on Linux or fallback environments."""
+    try:
+        from PySide6.QtDBus import QDBusConnection
+        bus = QDBusConnection.sessionBus()
+        if not bus.isConnected():
+            logging.warning("Session D-Bus is not connected. Relying on cross-platform IPC socket.")
+            return False
+            
+        if not bus.registerService("org.facegate.FaceGate"):
+            logging.warning("Failed to register D-Bus service name: org.facegate.FaceGate.")
+            return False
+            
+        if not bus.registerObject("/org/facegate/FaceGate", service_obj):
+            logging.warning("Failed to register object at path: /org/facegate/FaceGate")
+            return False
+            
+        logging.info("D-Bus service 'org.facegate.FaceGate' registered successfully.")
+        return True
+    except Exception as e:
+        logging.warning(f"D-Bus registration skipped: {e}")
         return False
-        
-    if not bus.registerService("org.facegate.FaceGate"):
-        logging.error("Failed to register D-Bus service name: org.facegate.FaceGate. Is FaceGate already running?")
-        return False
-        
-    if not bus.registerObject("/org/facegate/FaceGate", service_obj):
-        logging.error("Failed to register object at path: /org/facegate/FaceGate")
-        return False
-        
-    logging.info("D-Bus service 'org.facegate.FaceGate' registered successfully.")
-    return True
+
