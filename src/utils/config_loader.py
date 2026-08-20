@@ -150,7 +150,6 @@ class Config:
             logging.error(f"Error saving config to {user_config_path}: {e}")
             return False
 
-# Global config instance
 _config_instance = None
 
 def get_config():
@@ -158,3 +157,13 @@ def get_config():
     if _config_instance is None:
         _config_instance = Config()
     return _config_instance
+
+
+
+def save_config(new_settings: dict = None) -> bool:
+    """Convenience helper to update and save the global config to disk."""
+    cfg = get_config()
+    if new_settings is not None and isinstance(new_settings, dict):
+        cfg.settings = new_settings
+    return cfg.save()
+

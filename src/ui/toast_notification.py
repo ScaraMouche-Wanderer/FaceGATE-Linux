@@ -311,6 +311,124 @@ class ToastManager:
     def show_warning(parent: QWidget, message: str, duration_ms: int = 5000, title: str = None) -> Toast:
         return ToastManager.show_toast(parent, message, "warning", duration_ms, title)
 
-    @staticmethod
-    def show_error(parent: QWidget, message: str, duration_ms: int = 6000, title: str = None) -> Toast:
-        return ToastManager.show_toast(parent, message, "error", duration_ms, title)
+class BiometricHUD(QWidget):
+    """
+    Ultra-sleek, minimal floating glassmorphic pill notification displayed at the top-center
+    of the active desktop screen when an application lock/unlock transition occurs.
+    """
+    HUD_WIDTH = 260
+    HUD_HEIGHT = 44
+
+    def __init__(self, message: str, icon: str = "🛡️", is_success: bool = True, duration_ms: int = 2500):
+        super().__init__(None)
+        self.message = message
+        self.icon = icon
+        self.is_success = is_success
+        self.duration_ms = duration_ms
+        self._opacity = 0.0
+
+        self.setFixedSize(self.HUD_WIDTH, self.HUD_HEIGHT)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool |
+            Qt.WindowType.SubWindow
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+
+        self.opacity_effect = QGraphicsOpacityEffect(self)
+        self.opacity_effect.setOpacity(0.0)
+        self.setGraphicsEffect(self.opacity_effect)
+
+        self.dismiss_timer = QTimer(self)
+        self.dismiss_timer.setSingleShot(True)
+        self.dismiss_timer.timeout.connect(self.dismiss)
+
+    @Property(float)
+    def hud_opacity(self):
+        return self._opacity
+
+    @hud_opacity.setter
+    def hud_opacity(self, val):
+        self._opacity = val
+        self.opacity_effect.setOpacity(val)
+
+    def show_hud(self):
+        # Center horizontally at top of primary screen
+        app = QApplication.instance()
+        if app:
+            screen = app.primaryScreen()
+            if screen:
+                geom = screen.geometry()
+                target_x = geom.x() + (geom.width() - self.HUD_WIDTH) // 2
+                target_y = geom.y() + 40
+                self.move(target_x, target_y - 20)
+
+        self.show()
+        self.raise_()
+
+        # Slide down & fade in
+        self.slide_in = QPropertyAnimation(self, b"pos")
+        self.slide_in.setDuration(300)
+        self.slide_in.setStartValue(QPoint(self.x(), self.y()))
+        self.slide_in.setEndValue(QPoint(self.x(), self.y() + 20))
+        self.slide_in.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self.fade_in = QPropertyAnimation(self, b"hud_opacity")
+        self.fade_in.setDuration(250)
+        self.fade_in.setStartValue(0.0)
+        self.fade_in.setEndValue(1.0)
+        self.fade_in.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self.slide_in.start()
+        self.fade_in.start()
+        self.dismiss_timer.start(self.duration_ms)
+
+    def dismiss(self):
+        self.fade_out = QPropertyAnimation(self, b"hud_opacity")
+        self.fade_out.setDuration(300)
+        self.fade_out.setStartValue(self._opacity)
+        self.fade_out.setEndValue(0.0)
+        self.fade_out.setEasingCurve(QEasingCurve.Type.InCubic)
+        self.fade_out.finished.connect(self.deleteLater)
+        self.fade_out.start()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Translucent dark glassmorphism capsule
+        bg_color = QColor(15, 23, 42, 230) if self.is_success else QColor(30, 10, 10, 235)
+        border_color = QColor(16, 185, 129, 180) if self.is_success else QColor(239, 68, 68, 180)
+
+        path = QPainterPath()
+        path.addRoundedRect(1, 1, self.width() - 2, self.height() - 2, 22, 22)
+        painter.fillPath(path, QBrush(bg_color))
+
+        painter.setPen(QPen(border_color, 1.2))
+        painter.drawRoundedRect(1, 1, self.width() - 2, self.height() - 2, 22, 22)
+
+        # Icon & Text
+        painter.setFont(QFont("sans-serif", 13))
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(QRect(14, 0, 28, self.height()), Qt.AlignmentFlag.AlignVCenter, self.icon)
+
+        painter.setFont(QFont("Inter", 11, QFont.Weight.DemiBold))
+        text_color = QColor(241, 245, 249)
+        painter.setPen(text_color)
+        painter.drawText(QRect(44, 0, self.width() - 56, self.height()),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.message)
+
+    @classmethod
+    def show_unlocked(cls, app_name: str):
+        hud = cls(f"{app_name} Unlocked", icon="🛡️", is_success=True)
+        hud.show_hud()
+        return hud
+
+    @classmethod
+    def show_locked(cls, app_name: str):
+        hud = cls(f"{app_name} Locked", icon="🔒", is_success=False)
+        hud.show_hud()
+        return hud
+

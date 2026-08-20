@@ -4,8 +4,9 @@ import cv2
 import numpy as np
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QProgressBar, QStackedWidget, QWidget, QMessageBox
+    QProgressBar, QStackedWidget, QWidget, QMessageBox, QSizePolicy, QSizeGrip
 )
+
 from PySide6.QtCore import Qt, Slot, QPropertyAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import QPainter, QColor, QFont, QPen
 from camera.camera_worker import CameraWorker
@@ -149,9 +150,10 @@ class EnrollmentWizard(QDialog):
             QWidget#mainContainer {{
                 background-color: {c["BG_NEUTRAL"]};
                 border: 1px solid {c["BORDER_NEUTRAL"]};
-                border-radius: 14px;
+                border-radius: 18px;
             }}
         """)
+
         from ui.theme import WindowDragResizeFilter
         self.drag_filter = WindowDragResizeFilter(self)
         
@@ -165,18 +167,20 @@ class EnrollmentWizard(QDialog):
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
         
-        # Custom Title Bar (wizards don't resize or minimize)
-        self.title_bar = CustomTitleBar(self, title="FaceGate Enrollment Wizard", allow_maximize=False, allow_minimize=False)
+        # Custom Title Bar
+        from PySide6.QtWidgets import QSizePolicy, QSizeGrip
+        self.title_bar = CustomTitleBar(self, title="FaceGate Enrollment Wizard", allow_maximize=True, allow_minimize=False)
         container_layout.addWidget(self.title_bar)
         
         # Content layout widget
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(20, 16, 20, 20)
         container_layout.addWidget(content_widget)
         
         self.stack = QStackedWidget()
         layout.addWidget(self.stack)
+
 
         # Step indicator breadcrumb
         self.step_indicator = StepProgressBar(steps=["Profile Setup", "Face Capture", "Review & Save"], parent=content_widget)
@@ -301,12 +305,14 @@ class EnrollmentWizard(QDialog):
 
         from ui.theme import get_colors
         c_init = get_colors(self.theme_mode)
-        # Video Frame box
+        # Video Frame box with dynamic expanding policy
         self.camera_label = QLabel()
-        self.camera_label.setFixedSize(360, 270)
-        self.camera_label.setStyleSheet(f"background-color: {c_init['CARD_NEUTRAL']}; border: 1px solid {c_init['BORDER_NEUTRAL']}; border-radius: 8px;")
+        self.camera_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.camera_label.setMinimumSize(320, 240)
+        self.camera_label.setStyleSheet(f"background-color: {c_init['CARD_NEUTRAL']}; border: 1.5px solid {c_init['BORDER_NEUTRAL']}; border-radius: 14px;")
+
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.camera_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.camera_label)
 
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -316,16 +322,19 @@ class EnrollmentWizard(QDialog):
 
         layout.addStretch()
 
-        # Stop button if user wants to cancel
+        # Stop button if user wants to cancel and size grip
         btn_layout = QHBoxLayout()
         self.capture_cancel_btn = QPushButton("Cancel Capture")
         self.capture_cancel_btn.setObjectName("cancelBtn")
         self.capture_cancel_btn.clicked.connect(self.cancel_capture_flow)
         btn_layout.addWidget(self.capture_cancel_btn)
         btn_layout.addStretch()
+        size_grip = QSizeGrip(self)
+        btn_layout.addWidget(size_grip, alignment=Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
         layout.addLayout(btn_layout)
 
         self.stack.addWidget(page)
+
 
     def create_success_page(self):
         page = QWidget()
@@ -493,8 +502,11 @@ class EnrollmentWizard(QDialog):
     @Slot(object)
     def on_frame_received(self, frame):
         # 1. Update live preview label on UI thread immediately (buttery smooth FPS)
-        pixmap = convert_cv_to_pixmap(frame, 360, 270)
+        tgt_w = max(320, self.camera_label.width())
+        tgt_h = max(240, self.camera_label.height())
+        pixmap = convert_cv_to_pixmap(frame, tgt_w, tgt_h)
         self.camera_label.setPixmap(pixmap)
+
 
         # 2. Submit frame to background face detection thread
         if hasattr(self, "detector_worker") and self.detector_worker:
@@ -681,13 +693,14 @@ class EnrollmentWizard(QDialog):
             QWidget#mainContainer {{
                 background-color: {c["BG_NEUTRAL"]};
                 border: 1px solid {c["BORDER_NEUTRAL"]};
-                border-radius: 12px;
+                border-radius: 18px;
             }}
         """)
         if hasattr(self, "camera_label") and self.camera_label:
-            self.camera_label.setStyleSheet(f"background-color: {c['CARD_NEUTRAL']}; border: 1px solid {c['BORDER_NEUTRAL']}; border-radius: 8px;")
+            self.camera_label.setStyleSheet(f"background-color: {c['CARD_NEUTRAL']}; border: 1.5px solid {c['BORDER_NEUTRAL']}; border-radius: 14px;")
         if hasattr(self, "title_bar") and self.title_bar:
             self.title_bar.apply_theme_dynamically()
+
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):

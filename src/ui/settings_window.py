@@ -565,9 +565,10 @@ class SettingsWindow(QDialog):
             QWidget#mainContainer {{
                 background-color: {c["BG_NEUTRAL"]};
                 border: 1px solid {c["BORDER_NEUTRAL"]};
-                border-radius: 14px;
+                border-radius: 18px;
             }}
         """)
+
         self.drag_filter = WindowDragResizeFilter(self)
         
         # Shadow disabled (server-side decorations handle shadows now)
@@ -581,8 +582,9 @@ class SettingsWindow(QDialog):
         container_layout.setSpacing(0)
         
         # Custom Title Bar
-        self.title_bar = CustomTitleBar(self, title="FaceGate Settings", allow_maximize=True, allow_minimize=True)
+        self.title_bar = CustomTitleBar(self, title="FaceGate Settings", allow_maximize=True, allow_minimize=True, show_theme_toggle=True)
         container_layout.addWidget(self.title_bar)
+
         
         # Horizontal content layout
         main_layout = QHBoxLayout()
@@ -692,9 +694,13 @@ class SettingsWindow(QDialog):
         
         footer_layout.addWidget(self.cancel_btn)
         footer_layout.addWidget(self.save_btn)
+        from PySide6.QtWidgets import QSizeGrip
+        self.size_grip = QSizeGrip(self)
+        footer_layout.addWidget(self.size_grip, alignment=Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
         right_layout.addLayout(footer_layout)
 
         main_layout.addWidget(right_container)
+
         self.sidebar.setCurrentRow(0)
 
     def wrap_in_scroll_area(self, widget):
@@ -2002,9 +2008,10 @@ class SettingsWindow(QDialog):
         self._themed_labels.append((logo, "ACCENT_PURPLE"))
         banner_top.addWidget(logo)
 
-        ver_badge = QLabel("v1.1.0 Enterprise Build")
+        ver_badge = QLabel("v1.2.0 Enterprise Build")
         ver_badge.setStyleSheet(f"background-color: {c['ACCENT_PURPLE']}; color: #ffffff; padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 11px;")
         banner_top.addWidget(ver_badge)
+
         banner_top.addStretch()
         card_layout.addLayout(banner_top)
 
@@ -2436,8 +2443,9 @@ class SettingsWindow(QDialog):
         from PySide6.QtGui import QGuiApplication
         report = (
             "=== FaceGate System Diagnostics ===\n"
-            f"Version: 1.1.0\n"
+            f"Version: 1.2.0\n"
             f"Python: {sys.version.split()[0]} ({platform.machine()})\n"
+
             f"Platform: {platform.system()} {platform.release()}\n"
             f"D-Bus Service: org.facegate.FaceGate\n"
             f"Config Path: ~/.config/facegate/\n"
@@ -3935,8 +3943,17 @@ class SettingsWindow(QDialog):
         # Sync the sliding theme toggle position
         if hasattr(self, "title_bar") and self.title_bar:
             self.title_bar.apply_theme_dynamically()
-            if hasattr(self.title_bar, "theme_toggle"):
+            if hasattr(self.title_bar, "theme_toggle") and self.title_bar.theme_toggle:
                 self.title_bar.theme_toggle.update_toggle_state()
+
+        if hasattr(self, "main_container") and self.main_container:
+            self.main_container.setStyleSheet(f"""
+                QWidget#mainContainer {{
+                    background-color: {c["BG_NEUTRAL"]};
+                    border: 1px solid {c["BORDER_NEUTRAL"]};
+                    border-radius: 18px;
+                }}
+            """)
         
         # Refresh restart banner colors
         if hasattr(self, "restart_banner"):
@@ -3946,10 +3963,11 @@ class SettingsWindow(QDialog):
                 QFrame#restartBanner {{
                     background-color: {_banner_bg};
                     border: 1px solid #d97706;
-                    border-radius: 6px;
+                    border-radius: 12px;
                 }}
                 QLabel {{
                     color: {_banner_text};
+
                     font-size: 13px;
                     border: none;
                 }}

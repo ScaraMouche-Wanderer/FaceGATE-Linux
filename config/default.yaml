@@ -4,8 +4,18 @@ app_monitor:
   poll_interval_seconds: 0.2
   on_auth_failure: kill
   auth_timeout_seconds: 60
+# protected_apps: List of applications under FaceGATE protection.
+# Each app object supports:
+#   - id: Unique application identifier (e.g. "org.gnome.Terminal")
+#   - name: Friendly UI display name (e.g. "Terminal")
+#   - desktop_name: Desktop entry file name (e.g. "org.gnome.Terminal.desktop")
+#   - executable: Primary executable name (e.g. "gnome-terminal")
+#   - session_timeout_seconds: (Optional) Custom session timeout in seconds overriding global timeout.
+#   - auth_mode: (Optional) "face", "password", or "face+password" (requires two-factor authentication).
+#   - is_decoy: (Optional) true to enable honeypot decoy trap mode.
 protected_apps: []
 auth: {}
+
 authentication:
   password_fallback_grace_seconds: 15
 recognition:
@@ -32,7 +42,11 @@ security:
   # tamper attacks — the daemon locks down rather than failing open.
   # Set to false only if you want legacy "fail-open" behavior.
   deny_on_missing_state: true
+  # presence_sentry_enabled: Proximity & Presence walk-away auto-lock (opt-in)
+  presence_sentry_enabled: false
+  presence_sentry_timeout_seconds: 30
 behavior:
+
   launcher_recheck_interval_minutes: 10
   notify_on_auth: true
   autolock_on_idle: false

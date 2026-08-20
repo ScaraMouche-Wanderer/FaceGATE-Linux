@@ -344,8 +344,119 @@ PALETTES = {
             "DANGER_RED": "#ef4444",
             "WARNING_AMBER": "#f59e0b"
         }
+    },
+    "nordic_frost": {
+        "label": "Nordic Frost (Deep Navy & Ice)",
+        "dark": {
+            "IS_DARK": True,
+            "BG_NEUTRAL": "#070d18",
+            "BG_SECONDARY": "#0e1726",
+            "CARD_NEUTRAL": "#111c2e",
+            "BORDER_NEUTRAL": "#1f324d",
+            "TEXT_PRIMARY": "#f0f6fc",
+            "TEXT_SECONDARY": "#93a8c7",
+            "HEADER_TEXT": "#38bdf8",
+            "ACCENT_PURPLE": "#0ea5e9",
+            "ACCENT_PURPLE_HOVER": "#38bdf8",
+            "ACCENT_PURPLE_PRESSED": "#0284c7",
+            "WIDGET_BG": "#0b1320",
+            "LIST_ITEM_HOVER": "#1a2a42",
+            "HOVER_NEUTRAL": "#1a2a42",
+            "CANCEL_BTN_BG": "#162238",
+            "CANCEL_BTN_HOVER": "#223554",
+            "SHADOW_COLOR": "rgba(14, 165, 233, 0.15)",
+            "STATUS_HEADER_BG": "#121e33",
+            "SIDEBAR_BG": "#0b1320",
+            "SIDEBAR_HOVER_BG": "#17263c",
+            "SIDEBAR_COLOR": "#93a8c7",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#f59e0b"
+        },
+        "light": {
+            "IS_DARK": False,
+            "BG_NEUTRAL": "#f0f7ff",
+            "BG_SECONDARY": "#ffffff",
+            "CARD_NEUTRAL": "#ffffff",
+            "BORDER_NEUTRAL": "#bae6fd",
+            "TEXT_PRIMARY": "#0c4a6e",
+            "TEXT_SECONDARY": "#0369a1",
+            "HEADER_TEXT": "#0284c7",
+            "ACCENT_PURPLE": "#0284c7",
+            "ACCENT_PURPLE_HOVER": "#0369a1",
+            "ACCENT_PURPLE_PRESSED": "#075985",
+            "WIDGET_BG": "#ffffff",
+            "LIST_ITEM_HOVER": "#e0f2fe",
+            "HOVER_NEUTRAL": "#e0f2fe",
+            "CANCEL_BTN_BG": "#e0f2fe",
+            "CANCEL_BTN_HOVER": "#bae6fd",
+            "SHADOW_COLOR": "rgba(2, 132, 199, 0.12)",
+            "STATUS_HEADER_BG": "#e0f2fe",
+            "SIDEBAR_BG": "#bae6fd",
+            "SIDEBAR_HOVER_BG": "#7dd3fc",
+            "SIDEBAR_COLOR": "#0369a1",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#f59e0b"
+        }
+    },
+    "synthwave_magenta": {
+        "label": "Synthwave (Obsidian & Magenta)",
+        "dark": {
+            "IS_DARK": True,
+            "BG_NEUTRAL": "#110919",
+            "BG_SECONDARY": "#1a0f26",
+            "CARD_NEUTRAL": "#221332",
+            "BORDER_NEUTRAL": "#441d63",
+            "TEXT_PRIMARY": "#fae8ff",
+            "TEXT_SECONDARY": "#e879f9",
+            "HEADER_TEXT": "#f472b6",
+            "ACCENT_PURPLE": "#d946ef",
+            "ACCENT_PURPLE_HOVER": "#f472b6",
+            "ACCENT_PURPLE_PRESSED": "#c026d3",
+            "WIDGET_BG": "#170c22",
+            "LIST_ITEM_HOVER": "#351a4d",
+            "HOVER_NEUTRAL": "#351a4d",
+            "CANCEL_BTN_BG": "#2c1540",
+            "CANCEL_BTN_HOVER": "#422060",
+            "SHADOW_COLOR": "rgba(217, 70, 239, 0.2)",
+            "STATUS_HEADER_BG": "#261338",
+            "SIDEBAR_BG": "#170c22",
+            "SIDEBAR_HOVER_BG": "#301546",
+            "SIDEBAR_COLOR": "#e879f9",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#fbbf24"
+        },
+        "light": {
+            "IS_DARK": False,
+            "BG_NEUTRAL": "#fdf4ff",
+            "BG_SECONDARY": "#ffffff",
+            "CARD_NEUTRAL": "#ffffff",
+            "BORDER_NEUTRAL": "#f5d0fe",
+            "TEXT_PRIMARY": "#701a75",
+            "TEXT_SECONDARY": "#86198f",
+            "HEADER_TEXT": "#a21caf",
+            "ACCENT_PURPLE": "#c026d3",
+            "ACCENT_PURPLE_HOVER": "#a21caf",
+            "ACCENT_PURPLE_PRESSED": "#86198f",
+            "WIDGET_BG": "#ffffff",
+            "LIST_ITEM_HOVER": "#fae8ff",
+            "HOVER_NEUTRAL": "#fae8ff",
+            "CANCEL_BTN_BG": "#fae8ff",
+            "CANCEL_BTN_HOVER": "#f5d0fe",
+            "SHADOW_COLOR": "rgba(192, 38, 211, 0.12)",
+            "STATUS_HEADER_BG": "#fae8ff",
+            "SIDEBAR_BG": "#f5d0fe",
+            "SIDEBAR_HOVER_BG": "#f0abfc",
+            "SIDEBAR_COLOR": "#86198f",
+            "SUCCESS_GREEN": "#10b981",
+            "DANGER_RED": "#ef4444",
+            "WARNING_AMBER": "#f59e0b"
+        }
     }
 }
+
 
 PALETTE_LABELS = {k: v["label"] for k, v in PALETTES.items()}
 
@@ -401,7 +512,7 @@ def get_sidebar_qss(c: dict) -> str:
         QListWidget#sidebar {{
             background-color: {sidebar_bg};
             border: none;
-            border-bottom-left-radius: 12px;
+            border-bottom-left-radius: 20px;
             border-right: 1px solid {c["BORDER_NEUTRAL"]};
             padding-top: 12px;
             color: {sidebar_color};
@@ -410,9 +521,9 @@ def get_sidebar_qss(c: dict) -> str:
             outline: none;
         }}
         QListWidget#sidebar::item {{
-            padding: 10px 14px;
-            border-radius: 8px;
-            margin: 3px 8px;
+            padding: 10px 16px;
+            border-radius: 12px;
+            margin: 4px 10px;
             color: {sidebar_color};
             border: 1px solid transparent;
         }}
@@ -431,7 +542,7 @@ def get_sidebar_qss(c: dict) -> str:
             background-color: transparent;
             color: #ef4444;
             border: 1px solid #ef4444;
-            border-radius: 4px;
+            border-radius: 6px;
             padding: 4px 8px;
             font-size: 11px;
             font-weight: bold;
@@ -511,7 +622,7 @@ def get_theme_qss(theme_override: str = None, palette_override: str = None) -> s
         QLineEdit {{
             background-color: {c["WIDGET_BG"]};
             border: 1.5px solid {c["BORDER_NEUTRAL"]};
-            border-radius: 8px;
+            border-radius: 10px;
             padding: 10px 14px;
             color: {c["TEXT_PRIMARY"]};
             font-size: 13px;
@@ -528,7 +639,7 @@ def get_theme_qss(theme_override: str = None, palette_override: str = None) -> s
             background-color: {c["ACCENT_PURPLE"]};
             color: #ffffff;
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
             padding: 10px 20px;
             font-weight: 600;
             font-size: 13px;
@@ -540,6 +651,7 @@ def get_theme_qss(theme_override: str = None, palette_override: str = None) -> s
         QPushButton:pressed {{
             background-color: {c["ACCENT_PURPLE_PRESSED"]};
         }}
+
         QPushButton#macCloseBtn {{
             background-color: #ff5f56 !important;
             border-radius: 6px !important;
@@ -948,7 +1060,7 @@ def get_card_qss(importance: str = "normal", colors: dict = None) -> str:
         QWidget#card {{
             background-color: {card_bg};
             {border_qss}
-            border-radius: 10px;
+            border-radius: 14px;
         }}
         QLabel {{
             border: none;
@@ -968,12 +1080,13 @@ def get_card_qss(importance: str = "normal", colors: dict = None) -> str:
         QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
             background-color: {widget_bg};
             border: 1px solid {border_color};
-            border-radius: 6px;
+            border-radius: 10px;
             padding: 6px 32px 6px 12px;
             color: {text_color};
             font-size: 13px;
             min-height: 24px;
         }}
+
         QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QComboBox:hover {{
             border: 1px solid {accent};
         }}
@@ -1608,12 +1721,13 @@ from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import QPoint
 
 class CustomTitleBar(QWidget):
-    def __init__(self, parent, title="", allow_maximize=True, allow_minimize=True):
+    def __init__(self, parent, title="", allow_maximize=True, allow_minimize=True, show_theme_toggle=False):
         super().__init__(parent)
         self.parent = parent
         self.allow_maximize = allow_maximize
         self.allow_minimize = allow_minimize
-        self.setFixedHeight(45)
+        self.show_theme_toggle = show_theme_toggle
+        self.setFixedHeight(42)
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 0, 16, 0)
@@ -1628,8 +1742,17 @@ class CustomTitleBar(QWidget):
         
         layout.addStretch()
         
-        # 2. macOS Style Traffic Light Buttons (Right side)
-        # Yellow (Minimize)
+        # Optional Theme Toggle
+        if self.show_theme_toggle:
+            self.theme_toggle = SlidingThemeToggle(self)
+            self.theme_toggle.toggled.connect(self.on_theme_toggled)
+            layout.addWidget(self.theme_toggle)
+            layout.addSpacing(8)
+        else:
+            self.theme_toggle = None
+
+        # 2. Traffic Light Buttons (Right side)
+        # Minimize (Yellow)
         self.min_btn = QPushButton()
         self.min_btn.setObjectName("macMinBtn")
         self.min_btn.setFixedSize(12, 12)
@@ -1642,15 +1765,16 @@ class CustomTitleBar(QWidget):
                 border: none;
             }
             QPushButton#macMinBtn:hover {
-                background-color: #ffb114;
+                background-color: #ffaa00;
             }
         """)
         if self.allow_minimize:
             self.min_btn.clicked.connect(self.parent.showMinimized)
         else:
             self.min_btn.setEnabled(False)
+            self.min_btn.hide()
         
-        # Green (Maximize)
+        # Maximize (Green)
         self.max_btn = QPushButton()
         self.max_btn.setObjectName("macMaxBtn")
         self.max_btn.setFixedSize(12, 12)
@@ -1663,15 +1787,16 @@ class CustomTitleBar(QWidget):
                 border: none;
             }
             QPushButton#macMaxBtn:hover {
-                background-color: #1ec030;
+                background-color: #1eb336;
             }
         """)
         if self.allow_maximize:
             self.max_btn.clicked.connect(self.toggle_maximize)
         else:
             self.max_btn.setEnabled(False)
+            self.max_btn.hide()
             
-        # Red (Close)
+        # Close (Red)
         self.close_btn = QPushButton()
         self.close_btn.setObjectName("macCloseBtn")
         self.close_btn.setFixedSize(12, 12)
@@ -1684,28 +1809,18 @@ class CustomTitleBar(QWidget):
                 border: none;
             }
             QPushButton#macCloseBtn:hover {
-                background-color: #ff4c40;
+                background-color: #e84136;
             }
         """)
         self.close_btn.clicked.connect(self.parent.close)
-        
-        # Add sliding theme toggle
-        self.theme_toggle = SlidingThemeToggle(self)
-        self.theme_toggle.toggled.connect(self.on_theme_toggled)
-        layout.addWidget(self.theme_toggle)
-        layout.addSpacing(10)
              
         layout.addWidget(self.min_btn)
         layout.addWidget(self.max_btn)
         layout.addWidget(self.close_btn)
-
-        self.min_btn.setVisible(True)
-        self.max_btn.setVisible(True)
-        self.close_btn.setVisible(True)
         
-        # Dragging support (disabled for normal system window)
         self.drag_position = QPoint()
         self.apply_theme_dynamically()
+
         
     def apply_theme_dynamically(self):
         from ui.theme import get_colors, FONT_FAMILY

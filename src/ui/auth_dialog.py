@@ -15,11 +15,15 @@ except Exception:
     pass
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
+    QSizePolicy, QSizeGrip, QStackedWidget, QProgressBar
 )
+
 from PySide6.QtCore import Qt, QTimer, Slot, QThread, Signal, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QRadialGradient, QFont
 from security.credential_store import verify_password
+from utils.config_loader import get_config
+
 
 class DetectorLoader(QThread):
     loaded = Signal(object)
@@ -122,17 +126,25 @@ def draw_tech_corner_reticle(img, bbox, color, text=""):
         cv2.rectangle(img, (x1, lbl_y1), (x1 + text_w + 10, lbl_y2), (20, 20, 30), cv2.FILLED)
         cv2.putText(img, text, (x1 + 5, lbl_y2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
-def convert_cv_to_pixmap(frame: "np.ndarray", width: int = 360, height: int = 270) -> QPixmap:
+def convert_cv_to_pixmap(frame: "np.ndarray", width: int = 0, height: int = 0) -> QPixmap:
     """
-    Utility to convert an OpenCV BGR frame to a Qt QPixmap.
+    Utility to convert an OpenCV BGR frame to a Qt QPixmap with smooth, aspect-ratio-preserving scaling.
     """
     import cv2
-    resized = cv2.resize(frame, (width, height))
-    rgb_image = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+    rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     h, w, ch = rgb_image.shape
     bytes_per_line = ch * w
     q_img = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-    return QPixmap.fromImage(q_img.copy())
+    pixmap = QPixmap.fromImage(q_img.copy())
+    if width > 0 and height > 0:
+        return pixmap.scaled(
+            width,
+            height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+    return pixmap
+
 
 class AuthDialog(QDialog):
     def __init__(self, app_name: str, mode: str = "password", timeout_seconds: int = 0, parent=None):
@@ -141,16 +153,9 @@ class AuthDialog(QDialog):
         self.mode = mode
         self.timeout_seconds = timeout_seconds
         
-        # Determine theme mode from config (Light theme is always enforced for face mode to illuminate face)
-        from utils.config_loader import get_config
-        try:
-            _cfg_theme = get_config().get("behavior.theme", "light")
-            if _cfg_theme == "dark" and self.mode != "face":
-                self.theme_mode = "dark"
-            else:
-                self.theme_mode = "light"
-        except Exception:
-            self.theme_mode = "light"
+        # Rule: Always enforce crisp, bright Light Theme for Master Password and Face Recognition dialogs
+        # (Provides optimal camera illumination for face matching and a clean, consistent auth UX)
+        self.theme_mode = "light"
         self.authenticated = False
         self.fallback_to_password = False
         self.camera_error = False
@@ -180,7 +185,7 @@ class AuthDialog(QDialog):
             QTimer.singleShot(self.grace_period_ms, lambda: self.pwd_fallback_btn.setVisible(True))
 
     def init_ui(self):
-        self.setWindowTitle("FaceGate Authentication")
+        self.setWindowTitle("FaceGate Security")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint | 
@@ -195,26 +200,26 @@ class AuthDialog(QDialog):
         if target_screen:
             geom = target_screen.availableGeometry()
             if self.mode == "face":
-                width = max(420, min(int(geom.width() * 0.35), 600))
-                height = max(480, min(int(geom.height() * 0.55), 700))
+                width = max(460, min(int(geom.width() * 0.35), 600))
+                height = max(520, min(int(geom.height() * 0.55), 720))
                 self.resize(width, height)
-                self.setMinimumSize(400, 420)
+                self.setMinimumSize(420, 480)
             else:
-                width = max(380, min(int(geom.width() * 0.3), 500))
-                height = max(260, min(int(geom.height() * 0.35), 350))
+                width = max(440, min(int(geom.width() * 0.32), 520))
+                height = max(330, min(int(geom.height() * 0.38), 390))
                 self.resize(width, height)
-                self.setMinimumSize(360, 265)
+                self.setMinimumSize(420, 320)
             self.move(
                 geom.x() + (geom.width() - self.width()) // 2,
                 geom.y() + (geom.height() - self.height()) // 2
             )
         else:
             if self.mode == "face":
-                self.resize(440, 500)
-                self.setMinimumSize(400, 420)
+                self.resize(460, 520)
+                self.setMinimumSize(420, 480)
             else:
-                self.resize(400, 290)
-                self.setMinimumSize(360, 265)
+                self.resize(440, 330)
+                self.setMinimumSize(420, 320)
         
         from ui.theme import get_theme_qss, get_colors, CustomTitleBar
         c = get_colors(self.theme_mode)
@@ -226,6 +231,7 @@ class AuthDialog(QDialog):
                 font-size: 13px;
                 font-weight: bold;
                 text-decoration: underline;
+                padding: 4px 8px;
             }}
             QPushButton#pwdFallbackBtn:hover {{
                 color: {c["ACCENT_PURPLE_HOVER"]};
@@ -236,22 +242,19 @@ class AuthDialog(QDialog):
         window_layout = QVBoxLayout(self)
         window_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Container
+        # Main Container
         self.main_container = QWidget()
         self.main_container.setObjectName("mainContainer")
         self.main_container.setStyleSheet(f"""
             QWidget#mainContainer {{
                 background-color: {c["BG_NEUTRAL"]};
-                border: 1px solid {c["BORDER_NEUTRAL"]};
-                border-radius: 14px;
+                border: 1.2px solid {c["BORDER_NEUTRAL"]};
+                border-radius: 16px;
             }}
         """)
         from ui.theme import WindowDragResizeFilter
         self.drag_filter = WindowDragResizeFilter(self)
-        
-        # Shadow disabled (server-side decorations handle shadows now)
         self.shadow = None
-        
         window_layout.addWidget(self.main_container)
         
         # Inner layout
@@ -260,80 +263,135 @@ class AuthDialog(QDialog):
         container_layout.setSpacing(0)
         
         # Custom Title Bar
-        self.title_bar = CustomTitleBar(self, title="FaceGate Authentication", allow_maximize=False, allow_minimize=False)
+        self.title_bar = CustomTitleBar(self, title="🔒 FaceGate Security", allow_maximize=True, allow_minimize=False, show_theme_toggle=False)
         container_layout.addWidget(self.title_bar)
 
         # Stacked layout for pages
-        from PySide6.QtWidgets import QStackedWidget
+        from PySide6.QtWidgets import QStackedWidget, QSizePolicy, QSizeGrip
         self.stack = QStackedWidget()
         container_layout.addWidget(self.stack)
 
-        # PAGE 0: Face Mode
+        # ─── PAGE 0: Face Mode ───
         face_page = QWidget()
         face_layout = QVBoxLayout(face_page)
-        face_layout.setContentsMargins(28, 20, 28, 24)
-        face_layout.setSpacing(12)
+        face_layout.setContentsMargins(24, 12, 24, 20)
+        face_layout.setSpacing(10)
         
         # Shield lock header with app name
-        self.header_label_face = QLabel(f"🛡️ <b>{self.app_name}</b> requires authentication")
-        self.header_label_face.setObjectName("headerLabel")
+        self.header_label_face = QLabel(f"<b>{self.app_name}</b>")
+        self.header_label_face.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {c['TEXT_PRIMARY']}; border: none;")
         self.header_label_face.setAlignment(Qt.AlignmentFlag.AlignCenter)
         face_layout.addWidget(self.header_label_face)
 
-        self.status_label = QLabel("Loading face recognition models...")
-        self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
+        self.status_label = QLabel("Initializing facial recognition scanner...")
+        self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']}; border: none;")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         face_layout.addWidget(self.status_label)
 
-        # Camera View QLabel with dynamic biometric border
+        # Camera View QLabel with dynamic biometric border and flexible expanding policy
         self.camera_label = QLabel()
-        self.camera_label.setFixedSize(360, 270)
+        self.camera_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.camera_label.setMinimumSize(320, 240)
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.camera_label.setStyleSheet(f"border: 2px solid {c['BORDER_NEUTRAL']}; border-radius: 12px; background-color: {c['CARD_NEUTRAL']};")
-        face_layout.addWidget(self.camera_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        face_layout.addWidget(self.camera_label)
 
         # Password Fallback Button
-        self.pwd_fallback_btn = QPushButton("Use Password Instead")
+        self.pwd_fallback_btn = QPushButton("Use Master Password Instead")
         self.pwd_fallback_btn.setObjectName("pwdFallbackBtn")
+        self.pwd_fallback_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pwd_fallback_btn.clicked.connect(self.switch_to_password_mode)
         self.pwd_fallback_btn.setVisible(False)
         face_layout.addWidget(self.pwd_fallback_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # Cancel Button
+        # Cancel Button and Size Grip
         face_btn_layout = QHBoxLayout()
         self.face_cancel_btn = QPushButton("Cancel")
         self.face_cancel_btn.setObjectName("cancelBtn")
+        self.face_cancel_btn.setFixedHeight(36)
+        self.face_cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.face_cancel_btn.setStyleSheet(f"""
+            QPushButton#cancelBtn {{
+                background-color: {c.get('CANCEL_BTN_BG', '#f1f5f9')};
+                color: {c['TEXT_PRIMARY']};
+                border: 1px solid {c.get('BORDER_NEUTRAL', '#e2e8f0')};
+                border-radius: 10px;
+                padding: 0 20px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton#cancelBtn:hover {{
+                background-color: {c.get('CANCEL_BTN_HOVER', '#e2e8f0')};
+            }}
+        """)
         self.face_cancel_btn.clicked.connect(self.reject)
         face_btn_layout.addWidget(self.face_cancel_btn)
+        face_btn_layout.addStretch()
+        face_size_grip = QSizeGrip(self)
+        face_btn_layout.addWidget(face_size_grip, alignment=Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
         face_layout.addLayout(face_btn_layout)
 
         self.stack.addWidget(face_page)
 
-        # PAGE 1: Password Mode
+        # ─── PAGE 1: Password Mode ───
         pwd_page = QWidget()
         pwd_layout = QVBoxLayout(pwd_page)
-        pwd_layout.setContentsMargins(24, 24, 24, 24)
-        pwd_layout.setSpacing(16)
+        pwd_layout.setContentsMargins(28, 16, 28, 24)
+        pwd_layout.setSpacing(12)
 
-        self.header_label_pwd = QLabel(f"🔐 <b>{self.app_name}</b> requires password")
-        self.header_label_pwd.setObjectName("headerLabel")
+        # Hero Icon
+        self.icon_badge = QLabel("🔐")
+        self.icon_badge.setFixedSize(48, 48)
+        self.icon_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_badge.setStyleSheet(f"""
+            QLabel {{
+                background-color: {c.get('CANCEL_BTN_BG', '#f1f5f9')};
+                border: 1.5px solid {c.get('ACCENT_PURPLE', '#0284c7')};
+                border-radius: 24px;
+                font-size: 22px;
+            }}
+        """)
+        pwd_layout.addWidget(self.icon_badge, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Header Title
+        self.header_label_pwd = QLabel(f"<b>{self.app_name}</b>")
+        self.header_label_pwd.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {c['TEXT_PRIMARY']}; border: none;")
         self.header_label_pwd.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pwd_layout.addWidget(self.header_label_pwd)
 
-        self.sub_label = QLabel("Enter password to unlock application:")
+        # Subtitle Prompt
+        self.sub_label = QLabel("Enter Master Password to unlock")
+        self.sub_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']}; border: none;")
+        self.sub_label.setWordWrap(True)
         self.sub_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sub_label.setMinimumHeight(22)
         pwd_layout.addWidget(self.sub_label)
 
         # Password Input
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_input.setPlaceholderText("Password")
+        self.password_input.setPlaceholderText("Enter master password...")
+        self.password_input.setFixedHeight(42)
+        self.password_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {c.get('CARD_NEUTRAL', '#ffffff')};
+                border: 1.5px solid {c.get('BORDER_NEUTRAL', '#cbd5e1')};
+                border-radius: 10px;
+                padding: 0px 14px;
+                font-size: 14px;
+                color: {c['TEXT_PRIMARY']};
+            }}
+            QLineEdit:focus {{
+                border: 1.5px solid {c.get('ACCENT_PURPLE', '#0284c7')};
+                background-color: #ffffff;
+            }}
+        """)
         self.password_input.returnPressed.connect(self.handle_unlock)
         pwd_layout.addWidget(self.password_input)
 
         # Error label
         self.error_label = QLabel("")
-        self.error_label.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: bold;")
+        self.error_label.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: bold; border: none;")
         self.error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pwd_layout.addWidget(self.error_label)
 
@@ -358,23 +416,64 @@ class AuthDialog(QDialog):
         self.lockout_progress.hide()
         pwd_layout.addWidget(self.lockout_progress)
 
-        # Buttons
+        # Action Buttons (Cancel / Unlock)
         pwd_btn_layout = QHBoxLayout()
         pwd_btn_layout.setSpacing(12)
 
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setObjectName("cancelBtn")
+        self.cancel_btn.setFixedHeight(38)
+        self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cancel_btn.setStyleSheet(f"""
+            QPushButton#cancelBtn {{
+                background-color: {c.get('CANCEL_BTN_BG', '#f1f5f9')};
+                color: {c['TEXT_PRIMARY']};
+                border: 1px solid {c.get('BORDER_NEUTRAL', '#e2e8f0')};
+                border-radius: 10px;
+                padding: 0 18px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton#cancelBtn:hover {{
+                background-color: {c.get('CANCEL_BTN_HOVER', '#e2e8f0')};
+            }}
+        """)
         self.cancel_btn.clicked.connect(self.reject)
         
         self.unlock_btn = QPushButton("Unlock")
         self.unlock_btn.setDefault(True)
+        self.unlock_btn.setFixedHeight(38)
+        self.unlock_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.unlock_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {c.get('ACCENT_PURPLE', '#0284c7')};
+                color: #ffffff;
+                border: none;
+                border-radius: 10px;
+                padding: 0 22px;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: {c.get('ACCENT_PURPLE_HOVER', '#0369a1')};
+            }}
+            QPushButton:pressed {{
+                background-color: {c.get('ACCENT_PURPLE_PRESSED', '#075985')};
+            }}
+        """)
         self.unlock_btn.clicked.connect(self.handle_unlock)
 
-        pwd_btn_layout.addWidget(self.cancel_btn)
-        pwd_btn_layout.addWidget(self.unlock_btn)
+        pwd_btn_layout.addWidget(self.cancel_btn, 1)
+        pwd_btn_layout.addWidget(self.unlock_btn, 1)
+        
+        pwd_size_grip = QSizeGrip(self)
+        pwd_btn_layout.addWidget(pwd_size_grip, alignment=Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
         pwd_layout.addLayout(pwd_btn_layout)
 
         self.stack.addWidget(pwd_page)
+
+
+
 
         # Setup initial stack page and trigger camera if face mode
         if self.mode == "face":
@@ -420,11 +519,6 @@ class AuthDialog(QDialog):
         from ui.theme import get_theme_qss, get_colors
         c = get_colors(self.theme_mode)
         self.setStyleSheet(get_theme_qss(self.theme_mode) + f"""
-            QLabel#headerLabel {{
-                font-size: 16px;
-                font-weight: 500;
-                color: {c["TEXT_PRIMARY"]};
-            }}
             QPushButton#pwdFallbackBtn {{
                 background-color: transparent;
                 color: {c["ACCENT_PURPLE"]};
@@ -432,6 +526,7 @@ class AuthDialog(QDialog):
                 font-size: 13px;
                 font-weight: bold;
                 text-decoration: underline;
+                padding: 4px 8px;
             }}
             QPushButton#pwdFallbackBtn:hover {{
                 color: {c["ACCENT_PURPLE_HOVER"]};
@@ -440,18 +535,55 @@ class AuthDialog(QDialog):
         self.main_container.setStyleSheet(f"""
             QWidget#mainContainer {{
                 background-color: {c["BG_NEUTRAL"]};
-                border: 1px solid {c["BORDER_NEUTRAL"]};
-                border-radius: 12px;
+                border: 1.2px solid {c["BORDER_NEUTRAL"]};
+                border-radius: 16px;
             }}
         """)
         
+        if hasattr(self, "title_bar") and self.title_bar:
+            self.title_bar.apply_theme_dynamically()
+
         if hasattr(self, "camera_label") and self.camera_label:
-            self.camera_label.setStyleSheet(f"border: 2px solid {c['BORDER_NEUTRAL']}; border-radius: 8px; background-color: {c['CARD_NEUTRAL']};")
+            self.camera_label.setStyleSheet(f"border: 2px solid {c['BORDER_NEUTRAL']}; border-radius: 12px; background-color: {c['CARD_NEUTRAL']};")
+
+        if hasattr(self, "header_label_pwd") and self.header_label_pwd:
+            self.header_label_pwd.setStyleSheet(f"font-size: 17px; font-weight: 700; color: {c['TEXT_PRIMARY']}; border: none;")
+
+        if hasattr(self, "header_label_face") and self.header_label_face:
+            self.header_label_face.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {c['TEXT_PRIMARY']}; border: none;")
 
         if hasattr(self, "status_label") and self.status_label:
-            self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
+            self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']}; border: none;")
+
         if hasattr(self, "sub_label") and self.sub_label:
-            self.sub_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
+            self.sub_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']}; border: none;")
+
+        if hasattr(self, "password_input") and self.password_input:
+            self.password_input.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color: {c.get('CARD_NEUTRAL', '#ffffff')};
+                    border: 1.5px solid {c.get('BORDER_NEUTRAL', '#cbd5e1')};
+                    border-radius: 10px;
+                    padding: 0px 14px;
+                    font-size: 14px;
+                    color: {c['TEXT_PRIMARY']};
+                }}
+                QLineEdit:focus {{
+                    border: 1.5px solid {c.get('ACCENT_PURPLE', '#0284c7')};
+                    background-color: #ffffff;
+                }}
+            """)
+
+        if hasattr(self, "icon_badge") and self.icon_badge:
+            self.icon_badge.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {c.get('CANCEL_BTN_BG', '#f1f5f9')};
+                    border: 1.5px solid {c.get('ACCENT_PURPLE', '#0284c7')};
+                    border-radius: 24px;
+                    font-size: 22px;
+                }}
+            """)
+
             
         if hasattr(self, "lockout_progress") and self.lockout_progress:
             self.lockout_progress.setStyleSheet(f"""
@@ -462,13 +594,11 @@ class AuthDialog(QDialog):
                     height: 6px;
                 }}
                 QProgressBar::chunk {{
-                    background-color: #ef4444;
+                    background-color: {c["DANGER_RED"]};
                     border-radius: 2px;
                 }}
             """)
-            
-        if hasattr(self, "title_bar") and self.title_bar:
-            self.title_bar.apply_theme_dynamically()
+
 
     def start_camera_and_models(self):
         self.status_label.setText("Initializing face recognition detector...")
@@ -548,8 +678,11 @@ class AuthDialog(QDialog):
             self.status_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_SECONDARY']};")
 
         # 1. Update camera preview in GUI immediately (buttery-smooth 30 FPS)
-        pixmap = convert_cv_to_pixmap(frame, 360, 270)
+        tgt_w = max(320, self.camera_label.width())
+        tgt_h = max(240, self.camera_label.height())
+        pixmap = convert_cv_to_pixmap(frame, tgt_w, tgt_h)
         self.camera_label.setPixmap(pixmap)
+
 
         # 2. Submit frame to background face detection thread
         if hasattr(self, "detector_worker") and self.detector_worker:
@@ -605,8 +738,11 @@ class AuthDialog(QDialog):
             draw_tech_corner_reticle(display_frame, bbox, color, text)
 
         # Update preview with overlays
-        pixmap = convert_cv_to_pixmap(display_frame, 360, 270)
+        tgt_w = max(320, self.camera_label.width())
+        tgt_h = max(240, self.camera_label.height())
+        pixmap = convert_cv_to_pixmap(display_frame, tgt_w, tgt_h)
         self.camera_label.setPixmap(pixmap)
+
 
         # Handle matching threshold
         if matched_user and matched_face:
@@ -751,13 +887,14 @@ class AuthDialog(QDialog):
         self.fallback_to_password = True
         self.cleanup_camera()
         
-        # Adjust dialog size
-        self.setMinimumSize(360, 265)
-        self.resize(400, 290)
+        # Adjust dialog size with comfortable geometry so no text overlaps
+        self.setMinimumSize(420, 320)
+        self.resize(440, 340)
         self.stack.setCurrentIndex(1)
         self.raise_()
         self.activateWindow()
         self.password_input.setFocus()
+
 
     def handle_password_fallback(self):
         self.switch_to_password_mode()
@@ -770,13 +907,22 @@ class AuthDialog(QDialog):
     def handle_unlock(self):
         import time
         from security.lockout_manager import record_failed_attempt, reset_lockout
+        from security.duress_mode import verify_duress_password, trigger_duress_alarm
         password = self.password_input.text()
         
+        # Check if emergency duress password was entered
+        if verify_duress_password(password):
+            trigger_duress_alarm(self.app_name)
+            self.authenticated = False
+            self.reject()
+            return
+
         if verify_password(password):
             reset_lockout(self.app_name)
             self.authenticated = True
             import getpass
             self.matched_user = getpass.getuser()
+
             
             # Print derived key to stdout so parent daemon process caches key in memory & RAM tmpfs
             import sys
