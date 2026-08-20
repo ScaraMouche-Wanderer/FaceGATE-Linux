@@ -1,7 +1,8 @@
 [tool.poetry]
 name = "facegate"
-version = "1.1.0"
+version = "1.2.0"
 description = "FaceGate-Linux: A lightweight locking skeleton tray daemon and monitor"
+
 authors = ["ScaraMouche-Wanderer <prathmeshnarwaria@gmail.com>"]
 readme = "README.md"
 packages = [{include = "*", from = "src"}]

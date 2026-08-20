@@ -4,7 +4,24 @@ All notable changes to the FaceGate-Linux project will be documented in this fil
 
 ---
 
+## [v1.2.0] - 2026-08-20
+### Added
+- **Presence Sentry (Walk-Away Proximity Auto-Lock)**: Periodic lightweight presence sentinel that automatically re-locks active sessions if the user leaves their workstation.
+- **Emergency Duress Password & Silent Panic Alarm**: Covert protection under coercion that immediately triggers a panic lockdown, takes an intruder webcam snapshot, and logs a tamper-evident audit record.
+- **Glassmorphism Biometric HUD**: Ultra-minimal floating capsule overlay at top-center of the screen providing non-intrusive status confirmations on app unlock/lock.
+- **Quick CLI App Management**: Added `--quick-add <app>`, `--remove <app>`, `--lock <app>`, and `--set-duress-password` for fast terminal control.
+- **Multi-Factor Biometric Liveness & Anti-Spoofing Engine**: Integrated landmark-derived Eye Aspect Ratio (EAR) blink analysis, 3D head pose estimation (yaw, pitch, roll angles), and multi-signal fusion against presentation attacks.
+- **Granular Per-App Security Policies**: Added support for individual `session_timeout_seconds` and custom `auth_mode` ("face", "password", "face+password" 2FA) overrides per protected application.
+- **Hardware Camera Diagnostics & Lighting Quality Engine**: Added Linux V4L2 device capability inspection (`query_v4l2_capabilities`), device diagnostics (`get_camera_details`), and real-time ambient lighting assessment (`calculate_frame_lighting`).
+- **Cryptographic Audit Trail Export & Maintenance**: Added one-click CSV and JSON audit log exporting (`--export-logs`), signed genesis audit log clearing, and instant cryptographic hash chain integrity verification (`--verify-integrity`).
+- **New Theme Presets**: Added "Nordic Frost (Deep Navy & Ice Blue)" and "Synthwave (Obsidian & Vivid Magenta)" palettes for both dark and light modes.
+- **CLI Benchmark & Profile Utilities**: Added `--benchmark`, `--list-profiles`, and `--delete-profile` for rapid terminal management.
+
+
+---
+
 ## [v0.7.0] - 2026-07-10
+
 ### Added
 - **Intruder Selfie Capture**: Automatically snaps and saves a webcam photo of unauthorized access attempts locally on authentication cancellation, failure, or timeout.
 - **Intruder Gallery Tab**: A premium visual dashboard in the Settings window to view and delete captured intruder selfies.

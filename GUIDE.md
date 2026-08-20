@@ -54,16 +54,31 @@ The main entry point for terminal interaction is the `facegate` binary (installe
 | :--- | :--- | :--- |
 | `--monitor` | Starts the background lock daemon, D-Bus service, process scanner, and system tray icon. | `facegate --monitor` |
 | `--settings` | Launches the graphical Settings Dashboard (requires Admin face verification or Master Password). | `facegate --settings` |
+| `--status` | Displays rich CLI status dashboard with daemon state, vault status, and recent activity. | `facegate --status` |
+| `--health` | Runs comprehensive system diagnostics, model file checks, and permission inspections. | `facegate --health` |
+| `--benchmark` | Runs hardware latency benchmarks (PBKDF2 key derivation, camera FPS, ONNX detection, cosine matching). | `facegate --benchmark` |
+| `--list-cameras` | Lists and diagnoses connected camera devices with V4L2 capability inspection. | `facegate --list-cameras` |
+| `--list-profiles` | Displays formatted table of all enrolled face biometric profiles and roles. | `facegate --list-profiles` |
+| `--delete-profile <user>` | Deletes an enrolled face profile securely (requires admin authorization). | `facegate --delete-profile bob` |
+| `--export-logs <file>` | Exports tamper-evident audit logs to CSV or JSON format. | `facegate --export-logs ~/audit.csv` |
+| `--verify-integrity` | Cryptographically audits state files and SQLite audit log SHA-256 hash chains. | `facegate --verify-integrity` |
+| `--export-profile <file>` | Exports enrolled face profiles to an encrypted transfer file (`.fgxfer`). | `facegate --export-profile ~/backup.fgxfer` |
+| `--import-profile <file>` | Imports face profiles from an encrypted transfer file (`.fgxfer`). | `facegate --import-profile ~/backup.fgxfer` |
 | `--enroll <username>` | Enrolls facial biometric profile for `<username>` via CLI capture wizard. | `facegate --enroll admin` |
 | `--set-master-password` | Sets or updates the Master Password interactively. | `facegate --set-master-password` |
 | `--enable` | Enables and resumes FaceGATE monitoring via D-Bus or starts systemd user service. | `facegate --enable` |
 | `--disable [MINUTES]` | Temporarily pauses FaceGATE monitoring for `N` minutes (default: 15 mins). Restores launchers while paused. | `facegate --disable 30` |
-| `--lock-all` | Sends a instant **Panic Lockdown** signal to the daemon, re-locking all protected apps immediately. | `facegate --lock-all` |
+| `--lock-all` | Sends an instant **Panic Lockdown** signal to the daemon, re-locking all protected apps immediately. | `facegate --lock-all` |
 | `--emergency-kill` | Sends an emergency termination signal to the running daemon via D-Bus. | `facegate --emergency-kill` |
 | `--restore-launchers` | Emergency recovery: restores all modified `.desktop` launchers to original backup state. | `facegate --restore-launchers` |
-| `--restore-all` | Emergency recovery: restores desktop launchers and clears runtime lock state. | `facegate --restore-all` |
+| `--quick-add <app>` | Rapidly protects an application by name or `.desktop` file. | `facegate --quick-add gedit` |
+| `--remove <app>` | Removes an app from protection and restores its original desktop launcher. | `facegate --remove gedit` |
+| `--lock <app>` | Instantly re-locks an active application session via D-Bus. | `facegate --lock kitty` |
+| `--set-duress-password` | Interactively sets up emergency duress password (silent panic lockdown trigger). | `facegate --set-duress-password` |
 | `--recognize <app_id>` | Internal/Subprocess: Launches isolated recognition dialog for a specific target app. | `facegate --recognize google-chrome` |
 | `--auth-launch <app_id> -- <cmd>` | Launcher wrapper mode: checks D-Bus authentication before executing target command. | `facegate --auth-launch kitty -- kitty` |
+
+
 
 ---
 
@@ -83,36 +98,115 @@ The installer will:
 3. Register the systemd user service unit (`~/.config/systemd/user/facegate.service`).
 4. Reload the `systemd --user` manager daemon.
 
-### 2. Managing the Systemd User Service
+### 2. Managing the Systemd User Service & Permanent Autostart
 
 You can control FaceGATE like any Linux system service:
 
-- **Start Daemon**:
+- **Start Daemon Immediately**:
   ```bash
   systemctl --user start facegate.service
   ```
-- **Enable Daemon on System Startup / Login**:
+- **Make FaceGATE Permanent (Auto-Start on Login & Boot)**:
   ```bash
-  systemctl --user enable facegate.service
+  # Enable and start the user service permanently
+  systemctl --user enable --now facegate.service
+
+  # (Optional) Enable lingering so the daemon starts at system boot even before graphical login
+  loginctl enable-linger $USER
+  ```
+- **Desktop Autostart Alternative (`~/.config/autostart`)**:
+  If your desktop environment does not use systemd user session management, create `~/.config/autostart/facegate.desktop`:
+  ```ini
+  [Desktop Entry]
+  Type=Application
+  Name=FaceGate Daemon
+  Exec=/home/YOUR_USERNAME/.local/bin/facegate --monitor
+  Hidden=false
+  NoDisplay=false
+  X-GNOME-Autostart-enabled=true
+  Comment=FaceGate Local Biometric Application Gatekeeper
   ```
 - **Check Service Status**:
   ```bash
   systemctl --user status facegate.service
   ```
-- **Stop Daemon**:
+- **Stop / Disable Daemon**:
   ```bash
   systemctl --user stop facegate.service
+  systemctl --user disable facegate.service
   ```
 - **View Live Logs**:
   ```bash
   journalctl --user -u facegate.service -f
   ```
 
-### 3. Uninstallation & Launcher Restoration
+### 3. Custom Keyboard Shortcuts Setup in Linux
+
+FaceGATE includes ultra-fast CLI triggers that can be mapped to custom global keybindings in your Linux desktop environment or window manager:
+
+#### Recommended Shortcut Command Reference
+
+| Action | Command to Bind | Recommended Keybinding | Description |
+| :--- | :--- | :--- | :--- |
+| **Instant Panic Lockdown** | `facegate --lock-all` | `Super + Shift + L` | Immediately re-locks all protected applications. |
+| **Open Settings** | `facegate --settings` | `Super + Alt + F` | Opens FaceGate Settings Dashboard. |
+| **Lock Active Application** | `facegate --lock-all` or `facegate --lock <app>` | `Super + Alt + L` | Re-locks specific or all active app sessions. |
+| **Pause Protection (15 min)** | `facegate --disable 15` | `Super + Shift + D` | Temporarily suspends lock monitoring for 15 mins. |
+| **Resume Protection** | `facegate --enable` | `Super + Shift + E` | Immediately resumes active background monitoring. |
+| **Emergency Daemon Kill** | `facegate --emergency-kill` | `Super + Shift + Backspace` | Force terminates running daemon and releases locks. |
+
+---
+
+#### Desktop-Specific Configuration Guides
+
+##### 1. GNOME Desktop
+1. Open **Settings** → **Keyboard** → **View and Customize Shortcuts**.
+2. Scroll to the bottom and select **Custom Shortcuts**.
+3. Click **+** (Add Shortcut):
+   - **Name**: `FaceGate Panic Lockdown`
+   - **Command**: `/home/YOUR_USERNAME/.local/bin/facegate --lock-all` *(or simply `facegate --lock-all`)*
+   - **Shortcut**: Press <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd>
+4. Click **Add**.
+
+##### 2. KDE Plasma
+1. Open **System Settings** → **Shortcuts** → **Custom Shortcuts**.
+2. Click **Edit** → **New** → **Global Shortcut** → **Command/URL**.
+3. Under the **Trigger** tab, assign <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd>.
+4. Under the **Action** tab, enter `facegate --lock-all`.
+5. Click **Apply**.
+
+##### 3. Hyprland (`~/.config/hypr/hyprland.conf`)
+Add the following keybindings to your configuration file:
+```ini
+# FaceGate Biometric Security Bindings
+bind = $mainMod SHIFT, L, exec, facegate --lock-all
+bind = $mainMod ALT, F, exec, facegate --settings
+bind = $mainMod SHIFT, D, exec, facegate --disable 15
+bind = $mainMod SHIFT, E, exec, facegate --enable
+```
+
+##### 4. Sway / i3 (`~/.config/sway/config` or `~/.config/i3/config`)
+Add the following lines to your window manager configuration:
+```ini
+# FaceGate Biometric Security Bindings
+bindsym $mod+Shift+l exec --no-startup-id facegate --lock-all
+bindsym $mod+Mod1+f exec --no-startup-id facegate --settings
+bindsym $mod+Shift+d exec --no-startup-id facegate --disable 15
+bindsym $mod+Shift+e exec --no-startup-id facegate --enable
+```
+
+##### 5. XFCE / Cinnamon / MATE
+- **XFCE**: **Settings** → **Keyboard** → **Application Shortcuts** → **Add** → Command: `facegate --lock-all`.
+- **Cinnamon**: **System Settings** → **Keyboard** → **Shortcuts** → **Custom Shortcuts** → **Add custom shortcut**.
+
+---
+
+### 4. Uninstallation & Launcher Restoration
 To safely remove FaceGATE and restore all original desktop application launchers:
 ```bash
 ./install.sh --uninstall
 ```
+
 
 ---
 
