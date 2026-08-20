@@ -271,3 +271,130 @@ def repair_audit_log_integrity() -> tuple[bool, int, str]:
         logging.error(f"Error repairing audit log integrity: {e}")
         return False, 0, f"Error repairing audit log integrity: {e}"
 
+
+def export_audit_logs(output_path: str, format: str = "csv") -> tuple[bool, int, str]:
+    """
+    Exports the audit log database to a CSV or JSON file with hash verification metadata.
+
+    Returns:
+        (success: bool, exported_count: int, message: str)
+    """
+    import csv
+    import json
+    try:
+        init_audit_db()
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, timestamp, app_identifier, method, result, confidence_score, username, prev_hash "
+                "FROM audit_log ORDER BY id ASC"
+            )
+            rows = cursor.fetchall()
+
+        if not rows:
+            return True, 0, "Audit log is empty; nothing to export."
+
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+
+        if format.lower() == "json":
+            records = [
+                {
+                    "id": r[0],
+                    "timestamp": r[1],
+                    "app_identifier": r[2],
+                    "method": r[3],
+                    "result": r[4],
+                    "confidence_score": r[5],
+                    "username": r[6],
+                    "prev_hash": r[7]
+                }
+                for r in rows
+            ]
+            export_payload = {
+                "exported_at": str(os.uname()),
+                "total_records": len(records),
+                "records": records
+            }
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(export_payload, f, indent=2)
+        else:  # CSV format default
+            with open(output_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["ID", "Timestamp", "AppIdentifier", "Method", "Result", "ConfidenceScore", "Username", "SHA256HashChain"])
+                for r in rows:
+                    writer.writerow(r)
+
+        os.chmod(output_path, 0o600)
+        return True, len(rows), f"Successfully exported {len(rows)} audit log records to '{output_path}'."
+    except Exception as e:
+        logging.error(f"Failed to export audit logs to '{output_path}': {e}")
+        return False, 0, f"Failed to export audit logs: {e}"
+
+
+def clear_audit_logs(admin_username: str = "admin") -> tuple[bool, str]:
+    """
+    Securely clears the audit log and inserts a signed GENESIS audit record.
+    Preserves cryptographic integrity rather than leaving the table in a corrupted state.
+    """
+    try:
+        init_audit_db()
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM audit_log")
+            conn.commit()
+
+        # Log genesis clearing entry
+        log_auth_attempt("AUDIT_LOG", "admin_clear", "success", 1.0, admin_username)
+        return True, "Audit log cleared and re-initialized with genesis audit record."
+    except Exception as e:
+        logging.error(f"Error clearing audit log: {e}")
+        return False, f"Error clearing audit log: {e}"
+
+
+def filter_audit_logs(
+    app_identifier: str = None,
+    method: str = None,
+    result: str = None,
+    limit: int = 100
+) -> list[dict]:
+    """
+    Searches audit log records matching specified filter criteria.
+    """
+    try:
+        init_audit_db()
+        query = "SELECT timestamp, app_identifier, method, result, confidence_score, username FROM audit_log WHERE 1=1"
+        params = []
+
+        if app_identifier:
+            query += " AND app_identifier LIKE ?"
+            params.append(f"%{app_identifier}%")
+        if method:
+            query += " AND method = ?"
+            params.append(method)
+        if result:
+            query += " AND result = ?"
+            params.append(result)
+
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+            return [
+                {
+                    "timestamp": r[0],
+                    "app_identifier": r[1],
+                    "method": r[2],
+                    "result": r[3],
+                    "confidence_score": r[4],
+                    "username": r[5]
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        logging.error(f"Error filtering audit logs: {e}")
+        return []
+
+

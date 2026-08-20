@@ -99,12 +99,20 @@ def run_health_check() -> Tuple[int, int, List[str]]:
                 check(False, "State Integrity",
                       "",
                       f"TAMPER WARNING: Missing critical files after initialization: {missing_files}")
-        else:
-            check(True, "State Integrity",
-                  "System not yet initialized (sentinel check skipped)",
-                  "")
     except Exception as e:
-        check(False, "State Integrity", "", f"Could not run state integrity check: {e}")
+        check(False, "State Integrity", "", f"Could not check state integrity: {e}")
+
+    # 4c. Audit Database Hash Chain Integrity Check
+    try:
+
+        from database.audit_log import verify_audit_log_integrity
+        chain_ok, chain_count, chain_msg = verify_audit_log_integrity()
+        check(chain_ok, "Audit Log Integrity",
+              f"Cryptographic hash chain valid ({chain_count} records)",
+              f"Hash chain compromised: {chain_msg}")
+    except Exception as e:
+        check(False, "Audit Log Integrity", "", f"Could not verify audit log hash chain: {e}")
+
 
     # 5. Check D-Bus Connection & Service
     dbus_connected = False
