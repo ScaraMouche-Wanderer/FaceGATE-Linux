@@ -5,10 +5,86 @@ import cv2
 import numpy as np
 from camera.camera_worker import is_ir_frame, diagnose_camera_error
 
-def enumerate_cameras() -> list[dict]:
+def query_v4l2_capabilities(dev_path: str) -> dict:
+    """
+    Reads hardware capabilities and metadata from Linux sysfs for a video device.
+    """
+    info = {
+        "name": "Unknown Camera",
+        "driver": "Unknown",
+        "card": "Unknown",
+        "bus_info": "Unknown"
+    }
+    basename = os.path.basename(dev_path)
+    sysfs_dir = f"/sys/class/video4linux/{basename}"
+    if os.path.exists(sysfs_dir):
+        name_path = os.path.join(sysfs_dir, "name")
+        if os.path.exists(name_path):
+            try:
+                with open(name_path, "r", errors="ignore") as f:
+                    info["name"] = f.read().strip()
+            except Exception:
+                pass
+        
+        index_path = os.path.join(sysfs_dir, "index")
+        if os.path.exists(index_path):
+            try:
+                with open(index_path, "r", errors="ignore") as f:
+                    info["sysfs_index"] = f.read().strip()
+            except Exception:
+                pass
+    return info
+
+def get_camera_details(device_index: int) -> dict:
+    """
+    Returns full diagnostics and capabilities for a specific camera index.
+    """
+    from utils.platform_paths import is_linux
+    dev_path = f"/dev/video{device_index}"
+    sysfs_meta = query_v4l2_capabilities(dev_path) if is_linux() else {}
+    
+    details = {
+        "index": device_index,
+        "path": dev_path if is_linux() else f"Camera {device_index}",
+        "name": sysfs_meta.get("name", f"Camera Device {device_index}"),
+        "working": False,
+        "is_ir": False,
+        "width": 0,
+        "height": 0,
+        "fps": 0.0,
+        "error": None
+    }
+    
+    if is_linux() and not os.path.exists(dev_path):
+        details["error"] = f"Device file '{dev_path}' not found."
+        return details
+        
+    cap = cv2.VideoCapture(device_index, cv2.CAP_V4L2) if is_linux() and hasattr(cv2, "CAP_V4L2") else cv2.VideoCapture(device_index)
+    if not cap.isOpened():
+        cap = cv2.VideoCapture(device_index)
+
+        
+    if cap.isOpened():
+        ret, frame = cap.read()
+        if ret and frame is not None:
+            details["working"] = True
+            details["width"] = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            details["height"] = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            details["fps"] = float(cap.get(cv2.CAP_PROP_FPS))
+            details["is_ir"] = is_ir_frame(frame)
+        else:
+            details["error"] = "Could not grab frame from video device."
+        cap.release()
+    else:
+        details["error"] = diagnose_camera_error(device_index)
+        
+    return details
+
+def enumerate_cameras(fast_scan: bool = False) -> list[dict]:
     """
     Enumerates video capture devices available on the system.
     Returns a list of device detail dicts.
+    If fast_scan is True, queries sysfs metadata without opening cv2 capture handles.
     """
     devices = []
     video_nodes = sorted(glob.glob("/dev/video*"))
@@ -27,14 +103,8 @@ def enumerate_cameras() -> list[dict]:
 
     for idx in indices_to_check:
         node_path = node_map.get(idx, f"/dev/video{idx}")
-        sysfs_name_path = f"/sys/class/video4linux/video{idx}/name"
-        name = f"Camera Device {idx}"
-        if os.path.exists(sysfs_name_path):
-            try:
-                with open(sysfs_name_path, "r") as f:
-                    name = f.read().strip()
-            except Exception:
-                pass
+        sysfs_meta = query_v4l2_capabilities(node_path)
+        name = sysfs_meta.get("name", f"Camera Device {idx}")
 
         device_info = {
             "index": idx,
@@ -46,6 +116,11 @@ def enumerate_cameras() -> list[dict]:
             "height": 0,
             "error": None
         }
+
+        if fast_scan:
+            device_info["working"] = os.path.exists(node_path) and os.access(node_path, os.R_OK)
+            devices.append(device_info)
+            continue
 
         cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
         if not cap.isOpened():
@@ -115,3 +190,4 @@ def format_camera_list() -> str:
 
     lines.append("=" * 65)
     return "\n".join(lines)
+

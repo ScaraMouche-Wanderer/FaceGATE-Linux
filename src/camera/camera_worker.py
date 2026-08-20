@@ -6,6 +6,28 @@ import time
 from PySide6.QtCore import QObject, Signal
 from utils.config_loader import get_config
 
+def calculate_frame_lighting(frame: np.ndarray) -> tuple[float, str]:
+    """
+    Evaluates ambient lighting sufficiency for face recognition.
+    Returns (brightness_score_0_to_100, assessment_string).
+    """
+    if frame is None or frame.size == 0:
+        return 0.0, "No frame"
+    if len(frame.shape) == 3:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = frame
+        
+    mean_val = float(np.mean(gray))
+    score = (mean_val / 255.0) * 100.0
+    
+    if score < 15.0:
+        return score, "Underexposed / Too Dark"
+    elif score > 85.0:
+        return score, "Overexposed / Too Bright"
+    else:
+        return score, "Optimal Lighting"
+
 def is_ir_frame(frame: np.ndarray, threshold: float = None) -> bool:
     """
     Heuristical check to determine if a frame is near-grayscale (like an IR camera).
@@ -24,6 +46,7 @@ def is_ir_frame(frame: np.ndarray, threshold: float = None) -> bool:
     diff_gb = np.abs(g.astype(int) - b.astype(int))
     mean_diff = (np.mean(diff_rg) + np.mean(diff_gb)) / 2.0
     return mean_diff < threshold
+
 
 def detect_camera_device(ignore_override: bool = False) -> int:
     """
@@ -107,19 +130,27 @@ class CameraWorker:
 
     def _run(self):
         # Open video capture with V4L2, fallback if needed
-        self.cap = cv2.VideoCapture(self.device_index, cv2.CAP_V4L2)
+        from utils.platform_paths import is_linux, is_macos, is_windows
+
+        backend = cv2.CAP_V4L2 if (is_linux() and hasattr(cv2, "CAP_V4L2")) else (
+            cv2.CAP_AVFOUNDATION if (is_macos() and hasattr(cv2, "CAP_AVFOUNDATION")) else (
+                cv2.CAP_DSHOW if (is_windows() and hasattr(cv2, "CAP_DSHOW")) else cv2.CAP_ANY
+            )
+        )
+        self.cap = cv2.VideoCapture(self.device_index, backend)
         if not self.cap.isOpened():
             self.cap = cv2.VideoCapture(self.device_index)
-            
+
+        # Fallback to alternative device index if requested index is inaccessible
         if not self.cap.isOpened():
-            logging.warning(f"Configured camera device index {self.device_index} failed to open. Attempting auto-detection fallback...")
-            fallback_idx = detect_camera_device(ignore_override=True)
+            fallback_idx = resolve_camera_fallback(self.device_index)
             if fallback_idx != self.device_index:
                 logging.info(f"Switching camera device from index {self.device_index} to fallback index {fallback_idx}.")
                 self.device_index = fallback_idx
-                self.cap = cv2.VideoCapture(self.device_index, cv2.CAP_V4L2)
+                self.cap = cv2.VideoCapture(self.device_index, backend)
                 if not self.cap.isOpened():
                     self.cap = cv2.VideoCapture(self.device_index)
+
 
         if not self.cap.isOpened():
             err_msg = diagnose_camera_error(self.device_index)

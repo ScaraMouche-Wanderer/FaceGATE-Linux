@@ -82,3 +82,23 @@ def match_multi_faces(faces: list, enrolled: dict = None) -> list:
     # Sort results: enrolled user matches first (highest confidence score), then by face bounding box area
     results.sort(key=lambda r: (r[1] is not None, r[2], r[0].get('area', 0)), reverse=True)
     return results
+
+
+def get_all_match_scores(live_embedding: np.ndarray, enrolled: dict = None) -> list:
+    """
+    Returns a sorted list of (username, similarity_score) pairs across all enrolled users.
+    Useful for diagnostic visualization and calibration dashboards.
+    """
+    if enrolled is None:
+        enrolled = load_embeddings()
+    if not enrolled:
+        return []
+        
+    scores = []
+    for name, stored_emb in enrolled.items():
+        sim = cosine_similarity(live_embedding, stored_emb)
+        scores.append((name, float(sim)))
+        
+    scores.sort(key=lambda x: x[1], reverse=True)
+    return scores
+
