@@ -1202,25 +1202,184 @@ def resolve_app_icon(icon_source: str) -> QIcon:
     return icon
 
 def composite_tray_icon(app_icon: QIcon, is_locked: bool) -> QIcon:
-    pixmap = app_icon.pixmap(24, 24).copy()
-    if pixmap.isNull():
-        pixmap = QPixmap(24, 24)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        
+    pixmap = QPixmap(32, 32)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     
-    badge_rect = QRect(13, 13, 11, 11)
-    painter.setBrush(QColor("#ffffff"))
+    base_pix = app_icon.pixmap(28, 28)
+    if not base_pix.isNull():
+        painter.drawPixmap(0, 0, 28, 28, base_pix)
+        
+    # Protective backing ring for badge
+    painter.setBrush(QColor("#16171d"))
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawEllipse(badge_rect)
+    painter.drawEllipse(QRectF(18, 18, 12, 12))
     
+    # Inner status dot
     badge_color = DANGER_RED if is_locked else SUCCESS_GREEN
     painter.setBrush(QColor(badge_color))
-    painter.drawEllipse(14, 14, 9, 9)
+    painter.drawEllipse(QRectF(19.5, 19.5, 9, 9))
     
     painter.end()
     return QIcon(pixmap)
+
+
+def create_monochrome_pixmap(name: str, color_hex: str = "#e2e8f0", size: int = 32) -> QPixmap:
+    """
+    Renders clean, minimalist, high-resolution monochrome vector line glyphs (white/grey).
+    Includes precise safe margins so strokes and antialiasing never clip against borders.
+    """
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHints(
+        QPainter.RenderHint.Antialiasing |
+        QPainter.RenderHint.SmoothPixmapTransform
+    )
+
+    col = QColor(color_hex)
+    pen = QPen(col)
+    pen.setWidthF(max(1.6, 1.85 * (size / 24.0)))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    s = size / 24.0
+    import math
+
+    if name in ("shield", "guard", "security"):
+        path = QPainterPath()
+        path.moveTo(12.0 * s, 3.0 * s)
+        path.lineTo(20.0 * s, 6.0 * s)
+        path.lineTo(20.0 * s, 13.0 * s)
+        path.quadTo(20.0 * s, 18.0 * s, 12.0 * s, 21.0 * s)
+        path.quadTo(4.0 * s, 18.0 * s, 4.0 * s, 13.0 * s)
+        path.lineTo(4.0 * s, 6.0 * s)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.drawLine(QPointF(12.0 * s, 6.0 * s), QPointF(12.0 * s, 17.0 * s))
+
+    elif name in ("grid", "apps", "control"):
+        pad = 3.5 * s
+        box = 6.5 * s
+        r = 1.8 * s
+        gap = 14.0 * s
+        painter.drawRoundedRect(QRectF(pad, pad, box, box), r, r)
+        painter.drawRoundedRect(QRectF(gap, pad, box, box), r, r)
+        painter.drawRoundedRect(QRectF(pad, gap, box, box), r, r)
+        painter.drawRoundedRect(QRectF(gap, gap, box, box), r, r)
+
+    elif name in ("lock", "relock", "locked"):
+        painter.drawRoundedRect(QRectF(4.0 * s, 9.5 * s, 16.0 * s, 11.5 * s), 2.5 * s, 2.5 * s)
+        painter.drawArc(QRectF(7.0 * s, 3.0 * s, 10.0 * s, 10.0 * s), 0, 180 * 16)
+        painter.drawLine(QPointF(12.0 * s, 13.5 * s), QPointF(12.0 * s, 17.0 * s))
+
+    elif name in ("unlock", "unlocked"):
+        painter.drawRoundedRect(QRectF(4.0 * s, 9.5 * s, 16.0 * s, 11.5 * s), 2.5 * s, 2.5 * s)
+        painter.drawArc(QRectF(8.5 * s, 2.5 * s, 10.0 * s, 10.0 * s), 0, 180 * 16)
+        painter.drawLine(QPointF(12.0 * s, 13.5 * s), QPointF(12.0 * s, 17.0 * s))
+
+    elif name in ("scan", "focus", "face", "camera"):
+        c_len = 4.5 * s
+        x_min, x_max = 3.5 * s, 20.5 * s
+        y_min, y_max = 3.5 * s, 20.5 * s
+        painter.drawLine(QPointF(x_min, y_min + c_len), QPointF(x_min, y_min))
+        painter.drawLine(QPointF(x_min, y_min), QPointF(x_min + c_len, y_min))
+        painter.drawLine(QPointF(x_max - c_len, y_min), QPointF(x_max, y_min))
+        painter.drawLine(QPointF(x_max, y_min), QPointF(x_max, y_min + c_len))
+        painter.drawLine(QPointF(x_min, y_max - c_len), QPointF(x_min, y_max))
+        painter.drawLine(QPointF(x_min, y_max), QPointF(x_min + c_len, y_max))
+        painter.drawLine(QPointF(x_max - c_len, y_max), QPointF(x_max, y_max))
+        painter.drawLine(QPointF(x_max, y_max), QPointF(x_max, y_max - c_len))
+        painter.drawLine(QPointF(7.0 * s, 12.0 * s), QPointF(17.0 * s, 12.0 * s))
+
+    elif name in ("gear", "settings", "pref"):
+        gear_path = QPainterPath()
+        r_outer = 8.8 * s
+        r_inner = 6.8 * s
+        num_teeth = 6
+        step_angle = 360.0 / (num_teeth * 2)
+
+        for i in range(num_teeth * 2):
+            angle = i * step_angle
+            rad = math.radians(angle)
+            r = r_outer if (i % 2 == 0) else r_inner
+            px = 12.0 * s + math.cos(rad) * r
+            py = 12.0 * s + math.sin(rad) * r
+            if i == 0:
+                gear_path.moveTo(px, py)
+            else:
+                gear_path.lineTo(px, py)
+        gear_path.closeSubpath()
+        painter.drawPath(gear_path)
+        painter.drawEllipse(QPointF(12.0 * s, 12.0 * s), 2.8 * s, 2.8 * s)
+
+    elif name in ("user", "enroll", "profile"):
+        painter.drawEllipse(QPointF(12.0 * s, 6.5 * s), 3.5 * s, 3.5 * s)
+        path = QPainterPath()
+        path.moveTo(4.0 * s, 21.0 * s)
+        path.quadTo(12.0 * s, 13.0 * s, 20.0 * s, 21.0 * s)
+        painter.drawPath(path)
+
+    elif name in ("clock", "timer", "pause_time"):
+        painter.drawEllipse(QPointF(12.0 * s, 12.0 * s), 8.8 * s, 8.8 * s)
+        painter.drawLine(QPointF(12.0 * s, 12.0 * s), QPointF(12.0 * s, 6.5 * s))
+        painter.drawLine(QPointF(12.0 * s, 12.0 * s), QPointF(16.0 * s, 12.0 * s))
+
+    elif name in ("pause", "paused"):
+        b_w = 3.5 * s
+        b_h = 15.0 * s
+        r = 1.5 * s
+        painter.drawRoundedRect(QRectF(5.5 * s, 4.5 * s, b_w, b_h), r, r)
+        painter.drawRoundedRect(QRectF(15.0 * s, 4.5 * s, b_w, b_h), r, r)
+
+    elif name in ("play", "resume", "enable"):
+        path = QPainterPath()
+        path.moveTo(6.0 * s, 4.0 * s)
+        path.lineTo(19.5 * s, 12.0 * s)
+        path.lineTo(6.0 * s, 20.0 * s)
+        path.closeSubpath()
+        painter.drawPath(path)
+
+    elif name in ("power", "quit", "exit"):
+        painter.drawArc(QRectF(3.5 * s, 3.5 * s, 17.0 * s, 17.0 * s), 50 * 16, 260 * 16)
+        painter.drawLine(QPointF(12.0 * s, 2.5 * s), QPointF(12.0 * s, 11.0 * s))
+
+    elif name in ("check", "success"):
+        painter.drawEllipse(QPointF(12.0 * s, 12.0 * s), 8.8 * s, 8.8 * s)
+        painter.drawLine(QPointF(7.5 * s, 12.0 * s), QPointF(10.5 * s, 15.0 * s))
+        painter.drawLine(QPointF(10.5 * s, 15.0 * s), QPointF(16.5 * s, 9.0 * s))
+
+    elif name in ("chevron", "arrow_right", "next"):
+        painter.drawLine(QPointF(8.5 * s, 5.0 * s), QPointF(15.5 * s, 12.0 * s))
+        painter.drawLine(QPointF(15.5 * s, 12.0 * s), QPointF(8.5 * s, 19.0 * s))
+
+    elif name in ("refresh", "reset"):
+        painter.drawArc(QRectF(3.5 * s, 3.5 * s, 17.0 * s, 17.0 * s), 40 * 16, 280 * 16)
+        painter.drawLine(QPointF(15.0 * s, 3.0 * s), QPointF(19.5 * s, 6.5 * s))
+        painter.drawLine(QPointF(19.5 * s, 6.5 * s), QPointF(15.0 * s, 8.0 * s))
+
+    else:
+        painter.drawEllipse(QPointF(12.0 * s, 12.0 * s), 6.5 * s, 6.5 * s)
+
+    painter.end()
+    return pixmap
+
+
+
+def create_monochrome_icon(name: str, color_hex: str = "#e2e8f0", size: int = 32) -> QIcon:
+    """
+    Creates an ultra-HD multi-resolution QIcon containing vector rasterizations
+    at 16, 22, 24, 32, 48, 64, and 128px for razor-sharp rendering on standard & HiDPI displays.
+    """
+    icon = QIcon()
+    for s in (16, 22, 24, 32, 48, 64, 128):
+        icon.addPixmap(create_monochrome_pixmap(name, color_hex, size=s))
+    return icon
 
 def create_status_icon(color_hex: str) -> QIcon:
     pixmap = QPixmap(16, 16)
@@ -1232,6 +1391,7 @@ def create_status_icon(color_hex: str) -> QIcon:
     painter.drawEllipse(2, 2, 12, 12)
     painter.end()
     return QIcon(pixmap)
+
 
 class AnimatedSpinBox(QWidget):
     """
