@@ -531,12 +531,13 @@ class TestEnrollmentFlow(unittest.TestCase):
         if cls.app is None:
             cls.app = QApplication(sys.argv)
 
+    @patch('security.lockout_manager.is_locked_out', return_value=(False, 0))
     @patch('core.monitor_main.AppMonitor')
     @patch('core.monitor_main.register_dbus_service', return_value=True)
     @patch('core.monitor_main.FaceGateApplication._run_recognition_subprocess', return_value=(True, "face", 0.9, "admin"))
     @patch('database.embedding_store.load_embeddings',
            return_value={"test_user": np.zeros(512)})
-    def test_enrollment_requires_both_password_and_face(self, mock_load, mock_run_sub, mock_dbus, mock_app_monitor):
+    def test_enrollment_requires_both_password_and_face(self, mock_load, mock_run_sub, mock_dbus, mock_app_monitor, mock_lockout):
         """Enrollment must require face verification when users exist."""
         from core.monitor_main import FaceGateApplication
         from utils.config_loader import Config
@@ -549,6 +550,7 @@ class TestEnrollmentFlow(unittest.TestCase):
         }
 
         app = FaceGateApplication(config=mock_config)
+
         with patch('ui.enrollment_wizard.EnrollmentWizard.show') as mock_show:
             app.open_enrollment()
             mock_run_sub.assert_called_once_with("Enrollment Access")
