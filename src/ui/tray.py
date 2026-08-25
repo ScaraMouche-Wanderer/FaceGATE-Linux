@@ -3,61 +3,10 @@ from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QPen, QPoly
 from PySide6.QtCore import Qt, QPointF, QRectF, QSize
 
 
-def draw_face_emblem(painter: QPainter, s: float, cx: float, cy: float, col: str = "#ffffff", scale: float = 1.0):
-    """
-    Renders the signature FaceGate biometric face scan emblem:
-    4 corner brackets, two eyes, and a biometric mouth curve.
-    Scales smoothly and remains ultra-sharp at any resolution.
-    """
-    emblem_pen = QPen(QColor(col))
-    emblem_pen.setWidthF(max(1.0, s * 0.065 * scale))
-    emblem_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    emblem_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    painter.setPen(emblem_pen)
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    
-    # 4 Corner brackets
-    c_len = s * 0.11 * scale
-    x_span = s * 0.26 * scale
-    y_span = s * 0.26 * scale
-    x1, x2 = cx - x_span, cx + x_span
-    y1, y2 = cy - y_span, cy + y_span
-    
-    # Top-left
-    painter.drawLine(QPointF(x1, y1 + c_len), QPointF(x1, y1))
-    painter.drawLine(QPointF(x1, y1), QPointF(x1 + c_len, y1))
-    # Top-right
-    painter.drawLine(QPointF(x2 - c_len, y1), QPointF(x2, y1))
-    painter.drawLine(QPointF(x2, y1), QPointF(x2, y1 + c_len))
-    # Bottom-left
-    painter.drawLine(QPointF(x1, y2 - c_len), QPointF(x1, y2))
-    painter.drawLine(QPointF(x1, y2), QPointF(x1 + c_len, y2))
-    # Bottom-right
-    painter.drawLine(QPointF(x2 - c_len, y2), QPointF(x2, y2))
-    painter.drawLine(QPointF(x2, y2), QPointF(x2, y2 - c_len))
-    
-    # Two eyes (Dots)
-    painter.setBrush(QColor(col))
-    painter.setPen(Qt.PenStyle.NoPen)
-    eye_r = max(0.8, s * 0.05 * scale)
-    eye_y = cy - s * 0.06 * scale
-    painter.drawEllipse(QPointF(cx - s * 0.13 * scale, eye_y), eye_r, eye_r)
-    painter.drawEllipse(QPointF(cx + s * 0.13 * scale, eye_y), eye_r, eye_r)
-    
-    # Smile / Biometric mouth curve
-    painter.setPen(emblem_pen)
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    from PySide6.QtGui import QPainterPath
-    mouth_path = QPainterPath()
-    mouth_path.moveTo(cx - s * 0.11 * scale, cy + s * 0.08 * scale)
-    mouth_path.quadTo(cx, cy + s * 0.17 * scale, cx + s * 0.11 * scale, cy + s * 0.08 * scale)
-    painter.drawPath(mouth_path)
-
-
 def create_circle_icon(color_hex: str) -> QIcon:
     """
-    Renders a custom circle status icon dynamically at multiple resolutions
-    (16, 22, 24, 32, 48, 64, 128) with the recognizable FaceGate biometric face scan emblem.
+    Renders a clean, minimalist status circle icon at multiple resolutions
+    (16, 22, 24, 32, 48, 64, 128px): crisp white outer ring with inner solid status circle.
     """
     icon = QIcon()
     for size in (16, 22, 24, 32, 48, 64, 128):
@@ -68,16 +17,15 @@ def create_circle_icon(color_hex: str) -> QIcon:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         s = float(size)
-        cx, cy = s / 2.0, s / 2.0
-        border_w = max(1.0, s * 0.05)
-        pen = QPen(QColor("#ffffff"))
-        pen.setWidthF(border_w)
-        painter.setPen(pen)
-        painter.setBrush(QColor(color_hex))
+        # White border ring
+        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QRectF(s * 0.05, s * 0.05, s * 0.90, s * 0.90))
         
-        margin = border_w / 2.0 + 0.4
-        painter.drawEllipse(QRectF(margin, margin, s - 2 * margin, s - 2 * margin))
-        draw_face_emblem(painter, s, cx, cy, col="#ffffff", scale=1.0)
+        # Inner solid colored status circle
+        painter.setBrush(QColor(color_hex))
+        painter.drawEllipse(QRectF(s * 0.15, s * 0.15, s * 0.70, s * 0.70))
+        
         painter.end()
         icon.addPixmap(pixmap)
     return icon
@@ -85,8 +33,7 @@ def create_circle_icon(color_hex: str) -> QIcon:
 
 def create_square_icon(color_hex: str) -> QIcon:
     """
-    Renders a rounded-square status icon at multiple resolutions, featuring
-    the distinct FaceGate biometric face scan emblem.
+    Renders a clean, minimalist rounded-square status icon at multiple resolutions.
     """
     icon = QIcon()
     for size in (16, 22, 24, 32, 48, 64, 128):
@@ -97,17 +44,13 @@ def create_square_icon(color_hex: str) -> QIcon:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         s = float(size)
-        cx, cy = s / 2.0, s / 2.0
-        border_w = max(1.0, s * 0.05)
-        pen = QPen(QColor("#ffffff"))
-        pen.setWidthF(border_w)
-        painter.setPen(pen)
-        painter.setBrush(QColor(color_hex))
+        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(QRectF(s * 0.05, s * 0.05, s * 0.90, s * 0.90), s * 0.24, s * 0.24)
 
-        margin = border_w / 2.0 + 0.4
-        radius = s * 0.22
-        painter.drawRoundedRect(QRectF(margin, margin, s - 2 * margin, s - 2 * margin), radius, radius)
-        draw_face_emblem(painter, s, cx, cy, col="#ffffff", scale=1.0)
+        painter.setBrush(QColor(color_hex))
+        painter.drawRoundedRect(QRectF(s * 0.15, s * 0.15, s * 0.70, s * 0.70), s * 0.16, s * 0.16)
+
         painter.end()
         icon.addPixmap(pixmap)
     return icon
@@ -115,9 +58,18 @@ def create_square_icon(color_hex: str) -> QIcon:
 
 def create_shield_icon(color_hex: str) -> QIcon:
     """
-    Renders a prominent shield glyph at multiple resolutions, embedded with
-    the FaceGate biometric protection face emblem.
+    Renders a clean, minimalist shield glyph at multiple resolutions.
     """
+    def shield_path(cx: float, top: float, half_w: float, height: float) -> QPolygonF:
+        return QPolygonF([
+            QPointF(cx, top),
+            QPointF(cx + half_w, top + half_w * 0.45),
+            QPointF(cx + half_w, top + height * 0.60),
+            QPointF(cx, top + height),
+            QPointF(cx - half_w, top + height * 0.60),
+            QPointF(cx - half_w, top + half_w * 0.45),
+        ])
+
     icon = QIcon()
     for size in (16, 22, 24, 32, 48, 64, 128):
         pixmap = QPixmap(size, size)
@@ -127,27 +79,13 @@ def create_shield_icon(color_hex: str) -> QIcon:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         s = float(size)
-        cx, cy = s / 2.0, s * 0.46
-        border_w = max(1.0, s * 0.05)
-        pen = QPen(QColor("#ffffff"))
-        pen.setWidthF(border_w)
-        painter.setPen(pen)
+        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPolygon(shield_path(s / 2.0, s * 0.06, s * 0.42, s * 0.88))
+
         painter.setBrush(QColor(color_hex))
+        painter.drawPolygon(shield_path(s / 2.0, s * 0.16, s * 0.30, s * 0.68))
 
-        top = border_w / 2.0 + 0.5
-        height = s - border_w - 1.0
-        half_w = (s - border_w - 1.0) / 2.0
-
-        poly = QPolygonF([
-            QPointF(s / 2.0, top),
-            QPointF(s / 2.0 + half_w, top + half_w * 0.45),
-            QPointF(s / 2.0 + half_w, top + height * 0.58),
-            QPointF(s / 2.0, top + height),
-            QPointF(s / 2.0 - half_w, top + height * 0.58),
-            QPointF(s / 2.0 - half_w, top + half_w * 0.45),
-        ])
-        painter.drawPolygon(poly)
-        draw_face_emblem(painter, s, cx, cy, col="#ffffff", scale=0.82)
         painter.end()
         icon.addPixmap(pixmap)
     return icon
@@ -155,8 +93,7 @@ def create_shield_icon(color_hex: str) -> QIcon:
 
 def create_lock_icon(color_hex: str) -> QIcon:
     """
-    Renders a bold padlock glyph at multiple resolutions, featuring
-    the FaceGate biometric scan emblem inside the lock body.
+    Renders a clean, minimalist padlock glyph at multiple resolutions.
     """
     icon = QIcon()
     for size in (16, 22, 24, 32, 48, 64, 128):
@@ -167,43 +104,23 @@ def create_lock_icon(color_hex: str) -> QIcon:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         s = float(size)
-        cx = s / 2.0
-        border_w = max(1.0, s * 0.05)
-        
+        # White backing plate
+        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(QRectF(s * 0.05, s * 0.05, s * 0.90, s * 0.90), s * 0.22, s * 0.22)
+
         # Shackle
-        shackle_w = s * 0.46
-        shackle_left = cx - shackle_w / 2.0
-        shackle_top = border_w + 0.5
-        shackle_h = s * 0.44
-        shackle_stroke = max(2.2, s * 0.12)
-        
-        shackle_pen = QPen(QColor("#ffffff"))
-        shackle_pen.setWidthF(shackle_stroke + border_w * 1.5)
-        shackle_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(shackle_pen)
-        painter.drawArc(QRectF(shackle_left, shackle_top, shackle_w, shackle_h), 0, 180 * 16)
-        
-        shackle_inner_pen = QPen(QColor(color_hex))
-        shackle_inner_pen.setWidthF(shackle_stroke)
-        shackle_inner_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(shackle_inner_pen)
-        painter.drawArc(QRectF(shackle_left, shackle_top, shackle_w, shackle_h), 0, 180 * 16)
+        pen = QPen(QColor(color_hex))
+        pen.setWidthF(max(1.5, s * 0.10))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawArc(QRectF(s * 0.32, s * 0.20, s * 0.36, s * 0.40), 0, 180 * 16)
 
         # Lock Body
-        body_x = s * 0.08
-        body_y = s * 0.38
-        body_w = s * 0.84
-        body_h = s * 0.56
-        body_radius = s * 0.14
-        
-        body_pen = QPen(QColor("#ffffff"))
-        body_pen.setWidthF(border_w)
-        painter.setPen(body_pen)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(color_hex))
-        painter.drawRoundedRect(QRectF(body_x, body_y, body_w, body_h), body_radius, body_radius)
-
-        # Face emblem inside lock body
-        draw_face_emblem(painter, s, cx, body_y + body_h / 2.0, col="#ffffff", scale=0.75)
+        painter.drawRoundedRect(QRectF(s * 0.24, s * 0.44, s * 0.52, s * 0.38), s * 0.08, s * 0.08)
 
         painter.end()
         icon.addPixmap(pixmap)
@@ -212,8 +129,7 @@ def create_lock_icon(color_hex: str) -> QIcon:
 
 def create_gate_icon(color_hex: str) -> QIcon:
     """
-    Renders modern FaceGATE vertical security pillars at multiple resolutions,
-    with an active biometric laser scan beam across the portal.
+    Renders a clean vertical-bar 'gate' glyph at multiple resolutions.
     """
     icon = QIcon()
     for size in (16, 22, 24, 32, 48, 64, 128):
@@ -224,38 +140,22 @@ def create_gate_icon(color_hex: str) -> QIcon:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         s = float(size)
-        border_w = max(1.0, s * 0.05)
-        bar_w = s * 0.24
-        bar_h = s * 0.88
-        bar_y = (s - bar_h) / 2.0
-        radius = bar_w / 2.0
-
-        bar_x_positions = [s * 0.06, s * 0.38, s * 0.70]
-
-        pen = QPen(QColor("#ffffff"))
-        pen.setWidthF(border_w)
-        painter.setPen(pen)
-        painter.setBrush(QColor(color_hex))
-
-        for x in bar_x_positions:
-            painter.drawRoundedRect(QRectF(x, bar_y, bar_w, bar_h), radius, radius)
-
-        # Glowing horizontal scan beam across the gate
-        beam_pen = QPen(QColor("#ffffff"))
-        beam_pen.setWidthF(max(1.2, s * 0.08))
-        beam_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(beam_pen)
-        painter.drawLine(QPointF(s * 0.08, s * 0.50), QPointF(s * 0.92, s * 0.50))
-        
-        # Center scan diamond / node
         painter.setBrush(QColor("#ffffff"))
         painter.setPen(Qt.PenStyle.NoPen)
-        node_r = max(1.0, s * 0.08)
-        painter.drawEllipse(QPointF(s * 0.50, s * 0.50), node_r, node_r)
+        painter.drawRoundedRect(QRectF(s * 0.05, s * 0.05, s * 0.90, s * 0.90), s * 0.22, s * 0.22)
+
+        painter.setBrush(QColor(color_hex))
+        bar_w = s * 0.14
+        bar_h = s * 0.60
+        bar_y = s * 0.20
+        r = bar_w / 2.0
+        for x in (s * 0.20, s * 0.43, s * 0.66):
+            painter.drawRoundedRect(QRectF(x, bar_y, bar_w, bar_h), r, r)
 
         painter.end()
         icon.addPixmap(pixmap)
     return icon
+
 
 
 def launch_app_command(app_dict: dict | str) -> bool:
