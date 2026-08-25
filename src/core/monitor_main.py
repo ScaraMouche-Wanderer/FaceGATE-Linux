@@ -1215,7 +1215,14 @@ def main():
         run_auth_launch(args.auth_launch, exec_args)
         
     elif args.monitor:
-        # Daemon monitor mode
+        # Daemon monitor mode - enforce single instance lock
+        from utils.instance_lock import SingleInstanceLock
+        instance_lock = SingleInstanceLock("facegate_daemon")
+        if not instance_lock.acquire():
+            logging.warning("FaceGate daemon is already running. Exiting duplicate instance to prevent dual tray icons.")
+            print("FaceGate daemon is already running.")
+            sys.exit(0)
+
         config = get_config()
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
@@ -1232,6 +1239,10 @@ def main():
 
         def cleanup_on_exit():
             logging.info("Abnormal/Termination cleanup triggered: restoring launchers and flushing state...")
+            try:
+                instance_lock.release()
+            except Exception:
+                pass
             try:
                 from locking.launcher_manager import get_launcher_manager
                 get_launcher_manager().restore_all_launchers()
