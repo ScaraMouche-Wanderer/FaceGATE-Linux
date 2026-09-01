@@ -37,6 +37,8 @@ USER_DESKTOP_DIR = LM_USER_DESKTOP_DIR
 BACKUP_DIR = LM_BACKUP_DIR
 MANIFEST_FILE = LM_MANIFEST_FILE
 
+from utils.desktop_entry_scanner import get_installed_desktop_entries
+
 
 def get_manager() -> LauncherManager:
     """Helper to return LauncherManager bound to current module parameters."""
