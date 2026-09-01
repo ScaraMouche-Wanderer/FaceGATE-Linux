@@ -1,7 +1,8 @@
 import os
 import subprocess
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QBrush, QPainterPath, QFont
-from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSize, QVariantAnimation, QEasingCurve, QAbstractAnimation, Property, QPropertyAnimation, QModelIndex, Signal
+from typing import Optional, Union, Any
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QBrush, QPainterPath, QFont, QMouseEvent
+from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSize, QVariantAnimation, QEasingCurve, QAbstractAnimation, Property, QPropertyAnimation, QModelIndex, QPersistentModelIndex, Signal
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QSpinBox, QComboBox, QCheckBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QListView, QFrame, QPushButton
 
 # Global constants initialized to default light mode
@@ -25,7 +26,7 @@ def is_system_dark_mode() -> bool:
         from PySide6.QtWidgets import QApplication
         from PySide6.QtGui import QPalette
         app = QApplication.instance()
-        if app:
+        if isinstance(app, QApplication):
             window_color = app.palette().color(QPalette.ColorRole.Window)
             if window_color.value() < 128:
                 return True
@@ -460,7 +461,7 @@ PALETTES = {
 
 PALETTE_LABELS = {k: v["label"] for k, v in PALETTES.items()}
 
-def get_colors(theme_override: str = None, palette_override: str = None) -> dict:
+def get_colors(theme_override: Optional[str] = None, palette_override: Optional[str] = None) -> dict[str, Any]:
     theme = theme_override
     palette = palette_override
     if not theme or not palette:
@@ -488,9 +489,10 @@ def get_colors(theme_override: str = None, palette_override: str = None) -> dict
         palette = "iron_ember"
 
     mode_key = "dark" if is_dark else "light"
-    return PALETTES[palette][mode_key]
+    result_dict: dict[str, Any] = PALETTES[palette][mode_key]
+    return result_dict
 
-def refresh_theme_colors(theme_override: str = None, palette_override: str = None):
+def refresh_theme_colors(theme_override: Optional[str] = None, palette_override: Optional[str] = None):
     global BG_NEUTRAL, CARD_NEUTRAL, BORDER_NEUTRAL, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT_PURPLE, ACCENT_PURPLE_HOVER, ACCENT_PURPLE_PRESSED
     c = get_colors(theme_override, palette_override)
     BG_NEUTRAL = c["BG_NEUTRAL"]
@@ -553,7 +555,7 @@ def get_sidebar_qss(c: dict) -> str:
         }}
     """
 
-def get_theme_qss(theme_override: str = None, palette_override: str = None) -> str:
+def get_theme_qss(theme_override: Optional[str] = None, palette_override: Optional[str] = None) -> str:
     refresh_theme_colors(theme_override, palette_override)
     c = get_colors(theme_override, palette_override)
     
@@ -1034,7 +1036,7 @@ def get_theme_qss(theme_override: str = None, palette_override: str = None) -> s
         }}
     """
 
-def get_card_qss(importance: str = "normal", colors: dict = None) -> str:
+def get_card_qss(importance: str = "normal", colors: Optional[dict[str, Any]] = None) -> str:
     if colors is None:
         colors = get_colors()
     card_bg = colors["CARD_NEUTRAL"]
@@ -1436,7 +1438,6 @@ class AnimatedSpinBox(QWidget):
         self._apply_style()
 
     def _apply_style(self, theme_mode=None, palette_val=None):
-        from ui.theme import get_colors, FONT_FAMILY
         c = get_colors(theme_mode, palette_val)
         bg = c.get("CARD_NEUTRAL", "#ffffff")
         btn_bg = c.get("CANCEL_BTN_BG", "#e6f7ed")
@@ -1537,11 +1538,10 @@ class AnimatedItemDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: Union[QModelIndex, QPersistentModelIndex]):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        from ui.theme import get_colors
         c = get_colors()
         is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
         is_hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
@@ -1603,7 +1603,7 @@ class AnimatedItemDelegate(QStyledItemDelegate):
 
         painter.restore()
 
-    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex):
+    def sizeHint(self, option: QStyleOptionViewItem, index: Union[QModelIndex, QPersistentModelIndex]) -> QSize:
         size = super().sizeHint(option, index)
         text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
         from PySide6.QtGui import QFontMetrics
@@ -1628,12 +1628,11 @@ class AnimatedComboBox(QComboBox):
         self._apply_view_style()
 
     def _apply_view_style(self):
-        from ui.theme import get_colors
         c = get_colors()
         view = self.view()
-        if view:
+        if view is not None:
             container = view.parentWidget()
-            if container:
+            if container is not None:
                 container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
                 container.setStyleSheet("background: transparent; border: none; padding: 2px;")
             
@@ -1642,7 +1641,7 @@ class AnimatedComboBox(QComboBox):
             view.setAutoFillBackground(True)
             
             vp = view.viewport()
-            if vp:
+            if vp is not None:
                 vp.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
                 vp.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
                 vp.setAutoFillBackground(True)
@@ -1679,10 +1678,11 @@ class AnimatedComboBox(QComboBox):
     def showPopup(self):
         self._apply_view_style()
         view = self.view()
-        if view and view.parentWidget():
+        if view is not None and view.parentWidget() is not None:
             container = view.parentWidget()
-            container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-            container.setStyleSheet("background: transparent; border: none;")
+            if container is not None:
+                container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+                container.setStyleSheet("background: transparent; border: none;")
         if self.anim:
             self.anim.stop()
         self.anim = QPropertyAnimation(self, b"arrow_rotation")
@@ -1694,13 +1694,14 @@ class AnimatedComboBox(QComboBox):
 
         # Ensure popup view is wide enough so item text is never truncated
         view = self.view()
-        fm = self.fontMetrics()
-        max_w = self.width()
-        for i in range(self.count()):
-            w = fm.horizontalAdvance(self.itemText(i)) + 64
-            if w > max_w:
-                max_w = w
-        view.setMinimumWidth(max_w)
+        if view is not None:
+            fm = self.fontMetrics()
+            max_w = self.width()
+            for i in range(self.count()):
+                w = fm.horizontalAdvance(self.itemText(i)) + 64
+                if w > max_w:
+                    max_w = w
+            view.setMinimumWidth(max_w)
         super().showPopup()
 
     def hidePopup(self):
@@ -1716,7 +1717,8 @@ class AnimatedComboBox(QComboBox):
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
-            if self.view().isVisible():
+            view = self.view()
+            if view is not None and view.isVisible():
                 self.hidePopup()
             else:
                 self.showPopup()
@@ -1729,7 +1731,6 @@ class AnimatedComboBox(QComboBox):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        from ui.theme import get_colors
         c = get_colors()
         arrow_color = QColor(c["ACCENT_PURPLE"]) if self._arrow_rotation > 45 else QColor(c["TEXT_PRIMARY"])
 
@@ -1884,7 +1885,7 @@ from PySide6.QtCore import QPoint
 class CustomTitleBar(QWidget):
     def __init__(self, parent, title="", allow_maximize=True, allow_minimize=True, show_theme_toggle=False):
         super().__init__(parent)
-        self.parent = parent
+        self.window_target = parent
         self.allow_maximize = allow_maximize
         self.allow_minimize = allow_minimize
         self.show_theme_toggle = show_theme_toggle
@@ -1929,8 +1930,8 @@ class CustomTitleBar(QWidget):
                 background-color: #ffaa00;
             }
         """)
-        if self.allow_minimize:
-            self.min_btn.clicked.connect(self.parent.showMinimized)
+        if self.allow_minimize and hasattr(self.window_target, "showMinimized"):
+            self.min_btn.clicked.connect(self.window_target.showMinimized)
         else:
             self.min_btn.setEnabled(False)
             self.min_btn.hide()
@@ -1973,7 +1974,8 @@ class CustomTitleBar(QWidget):
                 background-color: #e84136;
             }
         """)
-        self.close_btn.clicked.connect(self.parent.close)
+        if hasattr(self.window_target, "close"):
+            self.close_btn.clicked.connect(self.window_target.close)
              
         layout.addWidget(self.min_btn)
         layout.addWidget(self.max_btn)
@@ -1984,8 +1986,7 @@ class CustomTitleBar(QWidget):
 
         
     def apply_theme_dynamically(self):
-        from ui.theme import get_colors, FONT_FAMILY
-        theme_mode = getattr(self.parent, "theme_mode", None)
+        theme_mode = getattr(self.window_target, "theme_mode", None)
         c = get_colors(theme_mode)
         self.title_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {c['TEXT_PRIMARY']}; font-family: {FONT_FAMILY}; padding: 0px; background: transparent;")
 
@@ -1995,26 +1996,24 @@ class CustomTitleBar(QWidget):
         config.set("behavior.theme", new_theme)
         config.set("ui.theme", new_theme)
         
-        if hasattr(self.parent, "theme_mode"):
-            self.parent.theme_mode = new_theme
+        if hasattr(self.window_target, "theme_mode"):
+            self.window_target.theme_mode = new_theme
 
-        if hasattr(self.parent, "theme_combo") and self.parent.theme_combo is not None:
-            self.parent.theme_combo.blockSignals(True)
-            idx = self.parent.theme_combo.findData(new_theme)
+        if hasattr(self.window_target, "theme_combo") and self.window_target.theme_combo is not None:
+            self.window_target.theme_combo.blockSignals(True)
+            idx = self.window_target.theme_combo.findData(new_theme)
             if idx >= 0:
-                self.parent.theme_combo.setCurrentIndex(idx)
-            self.parent.theme_combo.blockSignals(False)
+                self.window_target.theme_combo.setCurrentIndex(idx)
+            self.window_target.theme_combo.blockSignals(False)
 
-        if hasattr(self.parent, "apply_theme_dynamically"):
-            self.parent.apply_theme_dynamically()
-        else:
-            from ui.theme import get_theme_qss
-            self.parent.setStyleSheet(get_theme_qss())
+        if hasattr(self.window_target, "apply_theme_dynamically"):
+            self.window_target.apply_theme_dynamically()
+        elif hasattr(self.window_target, "setStyleSheet"):
+            self.window_target.setStyleSheet(get_theme_qss())
             self.apply_theme_dynamically()
-            if hasattr(self.parent, "main_container"):
-                from ui.theme import get_colors
+            if hasattr(self.window_target, "main_container"):
                 c = get_colors()
-                self.parent.main_container.setStyleSheet(f"""
+                self.window_target.main_container.setStyleSheet(f"""
                     QWidget#mainContainer {{
                         background-color: {c["BG_NEUTRAL"]};
                         border: 1px solid {c["BORDER_NEUTRAL"]};
@@ -2023,20 +2022,23 @@ class CustomTitleBar(QWidget):
                 """)
         
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.drag_position = event.globalPosition().toPoint() - self.parent.frameGeometry().topLeft()
+        if event.button() == Qt.MouseButton.LeftButton and hasattr(self.window_target, "frameGeometry"):
+            self.drag_position = event.globalPosition().toPoint() - self.window_target.frameGeometry().topLeft()
             event.accept()
             
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.MouseButton.LeftButton and hasattr(self, "drag_position") and not self.drag_position.isNull():
-            self.parent.move(event.globalPosition().toPoint() - self.drag_position)
+            if hasattr(self.window_target, "move"):
+                self.window_target.move(event.globalPosition().toPoint() - self.drag_position)
             event.accept()
             
     def toggle_maximize(self):
-        if self.parent.isMaximized():
-            self.parent.showNormal()
+        if hasattr(self.window_target, "isMaximized") and self.window_target.isMaximized():
+            if hasattr(self.window_target, "showNormal"):
+                self.window_target.showNormal()
         else:
-            self.parent.showMaximized()
+            if hasattr(self.window_target, "showMaximized"):
+                self.window_target.showMaximized()
 
 from PySide6.QtCore import Signal
 
@@ -2137,7 +2139,6 @@ class SlidingThemeToggle(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        from ui.theme import get_colors
         c_light = get_colors("light")
         c_dark = get_colors("dark")
         
@@ -2167,7 +2168,6 @@ class SlidingThemeToggle(QWidget):
         painter.drawEllipse(QPointF(current_x, self.height() / 2), knob_radius, knob_radius)
 
 def style_themed_label(label, color_key: str, extra_css: str = ""):
-    from ui.theme import get_colors
     c = get_colors()
     label.setStyleSheet(f"{extra_css} color: {c[color_key]};")
 
@@ -2198,32 +2198,33 @@ class WindowDragResizeFilter(QObject):
         self.window.installEventFilter(self)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.MouseMove:
-            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
-            if self.resizing:
-                self._handle_resize(event.globalPosition().toPoint())
-                return True
-            else:
-                edges = self._get_edges(pos)
-                self._update_cursor(edges)
-                return False
-
-        elif event.type() == QEvent.Type.MouseButtonPress:
-            if event.button() == Qt.MouseButton.LeftButton:
-                pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
-                edges = self._get_edges(pos)
-                if edges:
-                    self.resizing = True
-                    self.resize_edges = edges
-                    self.drag_start_pos = event.globalPosition().toPoint()
-                    self.window_start_geo = self.window.geometry()
+        if isinstance(event, QMouseEvent):
+            if event.type() == QEvent.Type.MouseMove:
+                pos = event.position().toPoint()
+                if self.resizing:
+                    self._handle_resize(event.globalPosition().toPoint())
                     return True
+                else:
+                    edges = self._get_edges(pos)
+                    self._update_cursor(edges)
+                    return False
 
-        elif event.type() == QEvent.Type.MouseButtonRelease:
-            if event.button() == Qt.MouseButton.LeftButton and self.resizing:
-                self.resizing = False
-                self.window.unsetCursor()
-                return True
+            elif event.type() == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    pos = event.position().toPoint()
+                    edges = self._get_edges(pos)
+                    if edges:
+                        self.resizing = True
+                        self.resize_edges = edges
+                        self.drag_start_pos = event.globalPosition().toPoint()
+                        self.window_start_geo = self.window.geometry()
+                        return True
+
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                if event.button() == Qt.MouseButton.LeftButton and self.resizing:
+                    self.resizing = False
+                    self.window.unsetCursor()
+                    return True
 
         return super().eventFilter(obj, event)
 
