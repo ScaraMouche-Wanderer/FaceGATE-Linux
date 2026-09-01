@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QPen, QPolygonF, QCursor
-from PySide6.QtCore import Qt, QPointF, QRectF, QSize
+from PySide6.QtCore import Qt, QPointF, QRectF
 
 
 def create_circle_icon(color_hex: str) -> QIcon:
