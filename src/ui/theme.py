@@ -1346,8 +1346,9 @@ def create_monochrome_pixmap(name: str, color_hex: str = "#e2e8f0", size: int = 
         painter.drawPath(path)
 
     elif name in ("power", "quit", "exit"):
-        painter.drawArc(QRectF(3.5 * s, 3.5 * s, 17.0 * s, 17.0 * s), 50 * 16, 260 * 16)
-        painter.drawLine(QPointF(12.0 * s, 2.5 * s), QPointF(12.0 * s, 11.0 * s))
+        painter.drawArc(QRectF(4.0 * s, 5.0 * s, 16.0 * s, 16.0 * s), 55 * 16, -290 * 16)
+        painter.drawLine(QPointF(12.0 * s, 3.0 * s), QPointF(12.0 * s, 11.5 * s))
+
 
     elif name in ("check", "success"):
         painter.drawEllipse(QPointF(12.0 * s, 12.0 * s), 8.8 * s, 8.8 * s)
