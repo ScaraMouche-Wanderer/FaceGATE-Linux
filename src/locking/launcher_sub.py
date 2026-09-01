@@ -1,5 +1,4 @@
 import os
-import sys
 import ctypes
 import logging
 from typing import List, Dict, Optional
@@ -37,7 +36,18 @@ USER_DESKTOP_DIR = LM_USER_DESKTOP_DIR
 BACKUP_DIR = LM_BACKUP_DIR
 MANIFEST_FILE = LM_MANIFEST_FILE
 
-from utils.desktop_entry_scanner import get_installed_desktop_entries
+from utils.desktop_entry_scanner import get_installed_desktop_entries  # noqa: F401
+
+__all__ = [
+    "LauncherManager", "is_facegate_launcher", "get_facegate_cmd",
+    "get_facegate_executable", "get_system_desktop_path", "calculate_checksum",
+    "refresh_desktop_database", "extract_primary_executable",
+    "verify_executable_exists", "notify_permission_error", "FACEGATE_MARKER",
+    "SYSTEM_DESKTOP_DIRS", "USER_DESKTOP_DIR", "BACKUP_DIR", "MANIFEST_FILE",
+    "get_installed_desktop_entries", "get_manager", "load_manifest",
+    "save_manifest", "apply_substitution", "restore_substitution",
+    "check_and_fix_substitutions", "emergency_restore_launchers",
+]
 
 
 def get_manager() -> LauncherManager:
