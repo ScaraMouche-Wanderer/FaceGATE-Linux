@@ -27,7 +27,6 @@ def _get_machine_bound_key() -> bytes:
     """
     Derives a machine-and-user-bound master key for local vault key encryption.
     """
-    import hashlib
     machine_id = ""
     for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"]:
         if os.path.exists(path):
