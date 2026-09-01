@@ -1,9 +1,8 @@
 import os
-import subprocess
 from typing import Optional, Union, Any
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QBrush, QPainterPath, QFont, QMouseEvent
-from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSize, QVariantAnimation, QEasingCurve, QAbstractAnimation, Property, QPropertyAnimation, QModelIndex, QPersistentModelIndex, Signal
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QSpinBox, QComboBox, QCheckBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QListView, QFrame, QPushButton
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QBrush, QPainterPath, QMouseEvent
+from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSize, QEasingCurve, Property, QPropertyAnimation, QModelIndex, QPersistentModelIndex, Signal
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QComboBox, QCheckBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QListView, QFrame, QPushButton
 
 # Global constants initialized to default light mode
 BG_NEUTRAL = "#f5f4f2"
@@ -1879,7 +1878,7 @@ class AnimatedCheckBox(QCheckBox):
         rect = font_metrics.boundingRect(0, 0, avail_w, 10000, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap, self.text())
         return max(24, rect.height() + 6)
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QLabel
 from PySide6.QtCore import QPoint
 
 class CustomTitleBar(QWidget):
@@ -2175,7 +2174,7 @@ def style_heading(label, size: int = 20):
     style_themed_label(label, "TEXT_PRIMARY", f"font-size: {size}px; font-weight: bold;")
 
 
-from PySide6.QtCore import QObject, QEvent, QRect, QPoint
+from PySide6.QtCore import QObject, QEvent
 
 class WindowDragResizeFilter(QObject):
     """
