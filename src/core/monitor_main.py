@@ -8,7 +8,7 @@ import subprocess
 
 
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QDialog
-from PySide6.QtCore import QObject, Slot, QTimer, QMetaObject, Qt
+from PySide6.QtCore import QObject, Slot, QTimer, Qt
 
 from utils.logging_setup import setup_logging
 from utils.config_loader import get_config
@@ -343,8 +343,7 @@ def run_auth_launch(desktop_name: str, exec_args: list):
     if clean_exec_args:
         exec_args = clean_exec_args
 
-    from PySide6.QtCore import QCoreApplication
-    from PySide6.QtDBus import QDBusInterface, QDBusConnection, QDBusReply, QDBus
+    from PySide6.QtDBus import QDBusInterface, QDBusConnection, QDBusReply
 
     bus = QDBusConnection.sessionBus()
 
@@ -713,7 +712,7 @@ def main():
         sys.exit(0)
 
     if args.list_profiles:
-        from database.embedding_store import load_embeddings, get_admin_user, get_cached_key
+        from database.embedding_store import load_embeddings, get_admin_user
         enrolled = load_embeddings()
         admin_user = get_admin_user()
         print("👤 === Enrolled Face Biometric Profiles ===")
@@ -791,7 +790,7 @@ def main():
         print("  [1/4] Benchmarking PBKDF2-HMAC-SHA256 (600,000 iterations)...")
         from security.crypto_engine import derive_key
         t0 = time.perf_counter()
-        _k = derive_key(b"benchmark_password_1234", b"benchmark_salt_1234", iterations=600000)
+        _ = derive_key(b"benchmark_password_1234", b"benchmark_salt_1234", iterations=600000)
         t_kdf = time.perf_counter() - t0
         print(f"        -> Key Derivation Latency: \033[92m{t_kdf * 1000:.2f} ms\033[0m")
 
@@ -827,7 +826,7 @@ def main():
             # Synthetic 640x480 frame with simulated face
             dummy_frame = np.full((480, 640, 3), 128, dtype=np.uint8)
             t_det0 = time.perf_counter()
-            faces = detector.detect_faces(dummy_frame)
+            _ = detector.detect_faces(dummy_frame)
             t_det = time.perf_counter() - t_det0
             print(f"        -> Detector Provider: \033[96m{detector.get_provider_name()}\033[0m")
             print(f"        -> Detection Inference Latency: \033[92m{t_det * 1000:.2f} ms\033[0m")
@@ -1241,7 +1240,7 @@ def main():
         # No hardcoded default password is used.
         logging.info("Daemon starting in locked state. Master password required to unlock.")
 
-        fg_app = FaceGateApplication(config)
+        app._facegate_app = FaceGateApplication(config)
 
         # Setup crash recovery and signal handlers
         import atexit
