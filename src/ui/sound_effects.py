@@ -19,7 +19,6 @@ Usage:
 """
 
 import os
-import sys
 import wave
 import math
 import struct
