@@ -2,7 +2,7 @@ import sqlite3
 import os
 import logging
 import hashlib
-from typing import Optional, Any
+from typing import Optional
 
 DB_PATH = os.path.expanduser("~/.config/facegate/audit.db")
 
