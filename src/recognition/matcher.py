@@ -1,5 +1,6 @@
 import numpy as np
 import logging
+from typing import Optional, Any
 from database.embedding_store import load_embeddings
 from utils.config_loader import get_config
 
@@ -11,7 +12,7 @@ def cosine_similarity(emb1: np.ndarray, emb2: np.ndarray) -> float:
         return 0.0
     return float(dot_product / (norm1 * norm2))
 
-def match_face(live_embedding: np.ndarray, enrolled: dict = None) -> tuple:
+def match_face(live_embedding: np.ndarray, enrolled: Optional[dict] = None) -> tuple:
     """
     Matches a live face embedding against enrolled embeddings.
     
@@ -19,8 +20,10 @@ def match_face(live_embedding: np.ndarray, enrolled: dict = None) -> tuple:
         (matched_name, confidence) if a successful match is found, or (None, confidence)
     """
     config = get_config()
-    threshold = float(config.get("recognition.similarity_threshold", 0.52))
-    ambiguity_margin = float(config.get("recognition.ambiguity_margin", 0.03))
+    cfg_thresh = config.get("recognition.similarity_threshold", 0.52)
+    threshold = float(cfg_thresh if isinstance(cfg_thresh, (int, float, str)) else 0.52)
+    cfg_margin = config.get("recognition.ambiguity_margin", 0.03)
+    ambiguity_margin = float(cfg_margin if isinstance(cfg_margin, (int, float, str)) else 0.03)
     
     if enrolled is None:
         enrolled = load_embeddings()
@@ -61,7 +64,7 @@ def match_face(live_embedding: np.ndarray, enrolled: dict = None) -> tuple:
     logging.info(f"No match found: similarity {top_score:.4f} is below threshold {threshold}")
     return None, top_score
 
-def match_multi_faces(faces: list, enrolled: dict = None) -> list:
+def match_multi_faces(faces: list, enrolled: Optional[dict] = None) -> list:
     """
     Evaluates multiple detected faces against enrolled embeddings.
     Calls match_face for individual candidate evaluations to preserve threshold & ambiguity checking,
@@ -84,7 +87,7 @@ def match_multi_faces(faces: list, enrolled: dict = None) -> list:
     return results
 
 
-def get_all_match_scores(live_embedding: np.ndarray, enrolled: dict = None) -> list:
+def get_all_match_scores(live_embedding: np.ndarray, enrolled: Optional[dict] = None) -> list:
     """
     Returns a sorted list of (username, similarity_score) pairs across all enrolled users.
     Useful for diagnostic visualization and calibration dashboards.
@@ -97,7 +100,7 @@ def get_all_match_scores(live_embedding: np.ndarray, enrolled: dict = None) -> l
     scores = []
     for name, stored_emb in enrolled.items():
         sim = cosine_similarity(live_embedding, stored_emb)
-        scores.append((name, float(sim)))
+        scores.append((name, sim))
         
     scores.sort(key=lambda x: x[1], reverse=True)
     return scores
