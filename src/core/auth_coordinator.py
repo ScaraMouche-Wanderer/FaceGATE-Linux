@@ -7,11 +7,9 @@ backstop recognition subprocess spawning, and admin face verification checks.
 
 import os
 import signal
-import time
 import subprocess
 import logging
-from PySide6.QtCore import QObject, Slot, QTimer, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QObject, Slot, QTimer
 
 def get_process_display_env(pid: int) -> dict:
     """Extracts graphical session display variables from target process /proc/<pid>/environ."""
