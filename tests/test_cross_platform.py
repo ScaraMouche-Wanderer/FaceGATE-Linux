@@ -3,7 +3,7 @@ import sys
 import time
 import subprocess
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 import psutil
 from utils.platform_paths import (
