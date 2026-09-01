@@ -11,8 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
-from PySide6.QtCore import QTimer, Slot, QCoreApplication, QObject, ClassInfo
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtCore import Slot, QCoreApplication, QObject, ClassInfo
 from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply, QDBusAbstractAdaptor
 
 
@@ -51,7 +50,7 @@ def run_test():
     print("=== Starting D-Bus IPC Integration Test ===")
 
     # 1. Initialize Qt Application
-    app = QCoreApplication(sys.argv)
+    QCoreApplication(sys.argv)
 
     # 2. Register Test D-Bus Service
     bus = QDBusConnection.sessionBus()
