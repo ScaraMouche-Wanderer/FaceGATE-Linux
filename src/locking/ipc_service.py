@@ -2,16 +2,18 @@ import os
 import subprocess
 import time
 import logging
+from typing import Optional, Any
 from PySide6.QtCore import QObject, Slot, Signal, Qt, ClassInfo
 from PySide6.QtDBus import QDBusConnection, QDBusAbstractAdaptor, QDBusContext
 from PySide6.QtWidgets import QApplication
 from locking.launcher_sub import get_facegate_cmd, get_facegate_executable
 
-def run_recognition_helper(identifier: str, cached_key: bytes | None = None, env: dict | None = None) -> tuple[int, str]:
+def run_recognition_helper(identifier: str, cached_key: Optional[bytes] = None, env: Optional[dict] = None) -> tuple[int, str]:
     cmd = list(get_facegate_cmd())
     cmd.extend(["--recognize", identifier])
     pass_fds = []
-    w = None
+    r: Optional[int] = None
+    w: Optional[int] = None
 
     if cached_key is not None:
         r, w = os.pipe()
@@ -41,7 +43,7 @@ def run_recognition_helper(identifier: str, cached_key: bytes | None = None, env
             close_fds=True,
             env=proc_env
         )
-        if cached_key is not None:
+        if cached_key is not None and r is not None and w is not None:
             os.close(r)
             try:
                 os.write(w, cached_key)
@@ -56,10 +58,11 @@ def run_recognition_helper(identifier: str, cached_key: bytes | None = None, env
         logging.error(f"Failed to spawn recognition subprocess: {e}")
         if cached_key is not None:
             for fd in (r, w):
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
         return 1, ""
 
 
@@ -244,6 +247,11 @@ class FaceGateService(QObject):
         if self.main_app:
             self.main_app.relock_all()
 
+    def relock_app_internal(self, app_id: str):
+        logging.info(f"RelockApp command received via IPC for '{app_id}'.")
+        if self.main_app and hasattr(self.main_app, 'session_manager'):
+            self.main_app.session_manager.relock_app(app_id, monitor=getattr(self.main_app, 'monitor', None))
+
     def enable_internal(self) -> bool:
         logging.info("D-Bus request received: Enable FaceGate")
         if self.main_app:
@@ -336,7 +344,7 @@ class FaceGateService(QObject):
             return self.main_app.reload_config()
         return False
 
-@ClassInfo({"D-Bus Interface": "org.facegate.FaceGate"})
+@ClassInfo(**{"D-Bus Interface": "org.facegate.FaceGate"})
 class FaceGateAdaptor(QDBusAbstractAdaptor):
     def __init__(self, parent: FaceGateService):
         super().__init__(parent)
@@ -377,6 +385,12 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
             return False
         return self.service.request_admin_auth_internal(reason, env=env)
 
+    @Slot(str, result=bool)
+    def VerifyAdmin(self, reason: str) -> bool:
+        if not self._verify_caller_uid():
+            return False
+        return self.service.request_admin_auth_internal(reason)
+
     # NOTE: GetCachedKey and UpdateCachedKey have been deliberately REMOVED from
     # the D-Bus interface. Exposing the raw AES-256 key on the session bus allowed
     # any unprivileged process to exfiltrate or inject the encryption key.
@@ -411,6 +425,12 @@ class FaceGateAdaptor(QDBusAbstractAdaptor):
         if not self._verify_caller_uid():
             return
         self.service.relock_all_internal()
+
+    @Slot(str)
+    def RelockApp(self, app_identifier: str):
+        if not self._verify_caller_uid():
+            return
+        self.service.relock_app_internal(app_identifier)
 
     @Slot(result=bool)
     def Enable(self) -> bool:
@@ -469,13 +489,13 @@ class CrossPlatformIPCServer(QObject):
             return
 
         def _handle_read():
-            data = client.readAll().data().decode("utf-8", errors="ignore")
+            data = bytes(client.readAll().data()).decode("utf-8", errors="ignore")
             if not data:
                 return
             try:
                 msg = json.loads(data)
                 action = msg.get("action", "")
-                resp = {"status": "ok", "result": None}
+                resp: dict[str, Any] = {"status": "ok", "result": None}
 
                 if action == "Ping":
                     resp["result"] = True
@@ -513,7 +533,7 @@ class CrossPlatformIPCServer(QObject):
         client.readyRead.connect(_handle_read)
 
 
-def send_cross_platform_ipc_command(action: str, timeout_ms: int = 4000, **kwargs) -> tuple[bool, any]:
+def send_cross_platform_ipc_command(action: str, timeout_ms: int = 4000, **kwargs) -> tuple[bool, Any]:
     """
     Sends an IPC command to the running daemon across Linux, macOS, and Windows.
     Returns (success: bool, result_payload: any).
@@ -534,7 +554,7 @@ def send_cross_platform_ipc_command(action: str, timeout_ms: int = 4000, **kwarg
     socket.flush()
 
     if socket.waitForReadyRead(timeout_ms):
-        raw = socket.readAll().data().decode("utf-8", errors="ignore")
+        raw = bytes(socket.readAll().data()).decode("utf-8", errors="ignore")
         try:
             res = json.loads(raw)
             if res.get("status") == "ok":
