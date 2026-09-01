@@ -53,7 +53,7 @@ class ModernToggleSwitch(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
-        self._checked = bool(checked)
+        self._checked = checked
         self._knob_position = 1.0 if self._checked else 0.0
         self._anim: Optional[QPropertyAnimation] = None
 
@@ -70,7 +70,6 @@ class ModernToggleSwitch(QWidget):
         return self._checked
 
     def setChecked(self, checked: bool, animate: bool = True):
-        checked = bool(checked)
         if self._checked == checked and not self._anim:
             return
         self._checked = checked
@@ -860,9 +859,10 @@ class FaceGateTrayPopup(QFrame):
         # Rebuild protected apps list
         while self.apps_container.count() > 0:
             item = self.apps_container.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
+            if item is not None:
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
 
         tray_apps = [app for app in protected_apps if (app.get("show_in_tray", True) if isinstance(app, dict) else True)][:5]
         self.lbl_app_count.setText(f"{len(tray_apps)} displayed")
@@ -895,37 +895,58 @@ class FaceGateTrayPopup(QFrame):
             else:
                 self.refresh_state()
 
-    def show_at_tray(self, tray_rect: QRect, cursor_pos: Optional[QPoint] = None):
+    def show_at_tray(self, tray_geo: QRect, cursor_pos: Optional[QPoint] = None):
         """
-        Positions and displays the popup smoothly near the tray icon or cursor,
-        intelligently clamping within the active screen boundaries.
+        Positions and displays the popup anchored above/below the system tray icon,
+        or near the cursor position. Clamps within the current screen boundaries.
         """
         self.refresh_state()
-        self.refresh_timer.start()
+        self.refresh_timer.start(1000)
 
-        # Find target screen
-        ref_pos = cursor_pos or (tray_rect.center() if not tray_rect.isEmpty() else QCursor.pos())
-        screen = QGuiApplication.screenAt(ref_pos) or QGuiApplication.primaryScreen()
-        screen_geo = screen.availableGeometry() if screen else QRect(0, 0, 1920, 1080)
+        # Get screen geometry
+        app = QApplication.instance()
+        screen = None
+        if tray_geo.isValid():
+            screen = QApplication.screenAt(tray_geo.center())
+        if not screen and cursor_pos:
+            screen = QApplication.screenAt(cursor_pos)
+        if not screen and isinstance(app, QApplication):
+            screen = app.primaryScreen()
+
+        if screen:
+            screen_geo = screen.availableGeometry()
+        else:
+            screen_geo = QRect(0, 0, 1920, 1080)
 
         popup_w = self.width()
-        popup_h = self.sizeHint().height()
+        popup_h = self.height()
+        margin = 8
 
-        margin = 12
-        x = ref_pos.x() - (popup_w // 2)
+        # Calculate position based on tray geometry or cursor
+        if tray_geo.isValid():
+            ref_pos = tray_geo.center()
+        elif cursor_pos:
+            ref_pos = cursor_pos
+        else:
+            ref_pos = screen_geo.topRight()
 
-        # Clamping horizontal
+        # Horizontal alignment: center on tray icon
+        x = ref_pos.x() - popup_w // 2
+
+        # Clamp horizontal
         if x + popup_w > screen_geo.right() - margin:
             x = screen_geo.right() - popup_w - margin
         if x < screen_geo.left() + margin:
             x = screen_geo.left() + margin
 
-        # Check if tray is at top or bottom
-        if not tray_rect.isEmpty():
-            if tray_rect.top() < screen_geo.center().y():
-                y = tray_rect.bottom() + margin
+        # Vertical alignment: determine if tray is at top or bottom
+        if tray_geo.isValid():
+            if tray_geo.top() < screen_geo.center().y():
+                # Top panel: place below tray icon
+                y = tray_geo.bottom() + margin
             else:
-                y = tray_rect.top() - popup_h - margin
+                # Bottom panel: place above tray icon
+                y = tray_geo.top() - popup_h - margin
         else:
             if ref_pos.y() < screen_geo.center().y():
                 y = ref_pos.y() + margin
@@ -938,7 +959,7 @@ class FaceGateTrayPopup(QFrame):
         if y < screen_geo.top() + margin:
             y = screen_geo.top() + margin
 
-        self.move(int(x), int(y))
+        self.move(x, y)
         self.show()
         self.raise_()
         self.activateWindow()
