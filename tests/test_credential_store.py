@@ -2,17 +2,15 @@ import os
 import json
 import base64
 import pytest
-import tempfile
-from unittest.mock import patch, MagicMock
-import numpy as np
+from unittest.mock import patch
 
 from security.credential_store import (
     verify_password, update_master_password
 )
 from database.embedding_store import (
-    read_envelope_file, set_cached_key, clear_cached_key, get_cached_key
+    set_cached_key, clear_cached_key, get_cached_key
 )
-from security.crypto_engine import derive_key, encrypt, build_aad
+from security.crypto_engine import derive_key, encrypt
 
 @pytest.fixture(autouse=True)
 def clean_keys():
