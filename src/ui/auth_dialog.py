@@ -173,7 +173,8 @@ class AuthDialog(QDialog):
         self.detector = None
         self.camera_worker = None
         
-        self.grace_period_ms = int(get_config().get("authentication.password_fallback_grace_seconds", 15)) * 1000
+        raw_grace = get_config().get("authentication.password_fallback_grace_seconds", 15)
+        self.grace_period_ms = int(raw_grace if isinstance(raw_grace, (int, float, str)) else 15) * 1000
         
         self.init_ui()
         
@@ -759,7 +760,8 @@ class AuthDialog(QDialog):
             
             from utils.config_loader import get_config
             config = get_config()
-            threshold = float(config.get("recognition.similarity_threshold", 0.52))
+            cfg_thresh = config.get("recognition.similarity_threshold", 0.52)
+            threshold = float(cfg_thresh if isinstance(cfg_thresh, (int, float, str)) else 0.52)
             
             # High-confidence match (score >= threshold + 0.12) authenticates immediately
             if self.success_count >= 2 or matched_score >= (threshold + 0.12):
@@ -771,7 +773,7 @@ class AuthDialog(QDialog):
                 _SAFE_MIN_MOTION_FLOOR = 0.5
                 raw_min_motion = config.get("recognition.liveness_min_motion", _SAFE_MIN_MOTION_FLOOR)
                 try:
-                    min_motion = float(raw_min_motion)
+                    min_motion = float(raw_min_motion if isinstance(raw_min_motion, (int, float, str)) else _SAFE_MIN_MOTION_FLOOR)
                 except (TypeError, ValueError):
                     min_motion = _SAFE_MIN_MOTION_FLOOR
                 if min_motion == 0.0:
@@ -856,8 +858,10 @@ class AuthDialog(QDialog):
                         
                 from utils.config_loader import get_config
                 config = get_config()
-                threshold = float(config.get("recognition.similarity_threshold", 0.52))
-                margin = float(config.get("recognition.ambiguity_margin", 0.03))
+                cfg_thresh = config.get("recognition.similarity_threshold", 0.52)
+                threshold = float(cfg_thresh if isinstance(cfg_thresh, (int, float, str)) else 0.52)
+                cfg_margin = config.get("recognition.ambiguity_margin", 0.03)
+                margin = float(cfg_margin if isinstance(cfg_margin, (int, float, str)) else 0.03)
                 
                 if max_score >= (threshold - margin):
                     self.status_label.setText("Almost — try better lighting or move closer")
