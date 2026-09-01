@@ -1,7 +1,7 @@
 import os
 import yaml
 import logging
-from typing import Optional, Union, Any
+from typing import Optional, Union
 
 DEFAULT_FILENAME = "default" + ".yaml"
 
