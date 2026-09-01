@@ -2,7 +2,7 @@ import os
 import signal
 import logging
 import psutil
-from utils.platform_paths import is_windows, is_macos, is_linux
+from utils.platform_paths import is_windows
 
 def suspend_process(pid: int) -> bool:
     """
