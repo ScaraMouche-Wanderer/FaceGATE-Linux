@@ -1,6 +1,4 @@
-import os
 import sys
-import pytest
 from unittest.mock import patch, MagicMock
 import numpy as np
 from PySide6.QtWidgets import QApplication, QDialog
