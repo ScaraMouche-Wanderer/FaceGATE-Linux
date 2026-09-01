@@ -235,7 +235,6 @@ class StateWatchdog:
 
         # Try inotify first
         try:
-            import select
             # inotify_simple or direct syscall approach
             self._inotify_available = self._setup_inotify()
         except Exception as e:
