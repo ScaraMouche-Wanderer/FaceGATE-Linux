@@ -1,14 +1,10 @@
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from utils.hotkey_manager import (
     get_current_custom_bindings,
     register_gnome_hotkey,
     unregister_gnome_hotkey,
-    register_lock_hotkey,
-    unregister_lock_hotkey,
-    CUSTOM_PATH,
-    LOCK_PATH
+    CUSTOM_PATH
 )
 
 @patch("utils.hotkey_manager.subprocess.run")
