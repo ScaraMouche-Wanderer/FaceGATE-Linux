@@ -12,7 +12,7 @@ Updated to match post-security-audit codebase:
 import os
 import sys
 import unittest
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 import cv2
 import numpy as np
 
@@ -758,8 +758,6 @@ class TestThemeDynamicUpdating(unittest.TestCase):
         """AuthDialog and EnrollmentWizard must support apply_theme_dynamically."""
         from ui.auth_dialog import AuthDialog
         from ui.enrollment_wizard import EnrollmentWizard
-        from utils.config_loader import get_config
-        config = get_config()
         
         # Test AuthDialog
         dialog = AuthDialog("Test App", mode="face")
