@@ -13,25 +13,22 @@ except Exception:
 
 import subprocess
 import logging
-import time
-import json
-from typing import Dict, List, Optional
+from typing import Dict
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget,
     QWidget, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QComboBox, QCheckBox, QMessageBox, QLineEdit, QTreeWidget, QTreeWidgetItem, QListView,
-    QGridLayout, QScrollArea, QFrame, QProgressBar, QTextEdit
+    QMessageBox, QLineEdit, QTreeWidget, QTreeWidgetItem,
+    QGridLayout, QTextEdit
 )
 from PySide6.QtCore import Qt, QSize, QEvent, QPropertyAnimation, QEasingCurve, QUrl, QDateTime, QTimer
-from PySide6.QtGui import QIcon, QDesktopServices
+from PySide6.QtGui import QDesktopServices
 from utils.config_loader import get_config
 from utils.systemd_manager import is_enabled, enable, disable
 from ui.app_picker_dialog import AppPickerDialog
 from locking.launcher_sub import apply_substitution, restore_substitution
 from ui.theme import (
-    AnimatedComboBox, AnimatedCheckBox, AnimatedSpinBox, AnimatedButton,
-    PulsingStatusDot, style_heading, style_themed_label, get_colors,
-    get_theme_qss, get_card_qss, CustomTitleBar, WindowDragResizeFilter
+    AnimatedComboBox, AnimatedCheckBox, AnimatedButton,
+    style_heading
 )
 
 class AnimatedSidebar(QListWidget):
@@ -112,7 +109,7 @@ class ChangePasswordDialog(QDialog):
         self.setMinimumSize(440, 460)
 
         from utils.config_loader import get_config
-        from ui.theme import is_system_dark_mode, get_colors, get_theme_qss, CustomTitleBar, style_heading
+        from ui.theme import get_colors, get_theme_qss, CustomTitleBar, style_heading
         
         _cfg_theme = get_config().get("behavior.theme", "light")
         self.theme_mode = "dark" if _cfg_theme == "dark" else "light"
@@ -329,7 +326,7 @@ class FaceVerificationTestDialog(QDialog):
         self.admin_user = None
         
         from utils.config_loader import get_config
-        from ui.theme import is_system_dark_mode, get_colors, get_theme_qss, CustomTitleBar
+        from ui.theme import get_colors, get_theme_qss, CustomTitleBar
         _cfg_theme = get_config().get("behavior.theme", "light")
         self.theme_mode = "dark" if _cfg_theme == "dark" else "light"
             
