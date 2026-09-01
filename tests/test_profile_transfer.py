@@ -7,7 +7,7 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from security.profile_transfer import (
-    export_profile, import_profile, read_profile_header, MIN_PASSPHRASE_LEN
+    export_profile, import_profile, read_profile_header
 )
 import database.embedding_store as embedding_store
 
