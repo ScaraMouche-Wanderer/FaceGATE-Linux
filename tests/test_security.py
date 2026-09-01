@@ -8,7 +8,6 @@ import os
 import sys
 import json
 import base64
-import tempfile
 import pytest
 from unittest.mock import patch, MagicMock
 import numpy as np
