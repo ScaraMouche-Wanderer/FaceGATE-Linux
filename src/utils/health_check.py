@@ -170,7 +170,8 @@ def run_health_check() -> Tuple[int, int, List[str]]:
             report.append("  \033[92m[CONFIG]\033[0m Vault Key Lifetime: System Keyring wrapping active (persist_vault_key: true).")
 
         # Check liveness anti-spoofing
-        liveness_motion = float(config.get("recognition.liveness_min_motion", 0.5))
+        raw_liveness = config.get("recognition.liveness_min_motion", 0.5)
+        liveness_motion = float(raw_liveness if isinstance(raw_liveness, (int, float, str)) else 0.5)
         if liveness_motion < 0:
             report.append("  \033[93m[SECURITY]\033[0m Liveness Anti-Spoofing: Disabled (liveness_min_motion < 0).")
             report.append("           \033[90m-> Improvement:\033[0m Set 'recognition.liveness_min_motion: 0.5' to prevent static photo presentation attacks.")
@@ -191,11 +192,13 @@ def run_health_check() -> Tuple[int, int, List[str]]:
             report.append("  \033[96m[FEATURE]\033[0m Network Geofencing: Disabled.")
             report.append("           \033[90m-> Improvement:\033[0m Enable Geofencing in Settings > Behavior to auto-lock FaceGate when leaving trusted Wi-Fi networks.")
         else:
-            ssids = ", ".join(config.get("security.geofence_trusted_ssids", []))
+            raw_ssids = config.get("security.geofence_trusted_ssids", [])
+            ssids = ", ".join(str(s) for s in raw_ssids) if isinstance(raw_ssids, list) else ""
             report.append(f"  \033[92m[FEATURE]\033[0m Network Geofencing: Active (Trusted Wi-Fi: {ssids or 'none'}).")
 
         # Check decoy mode applications
-        apps = config.get("protected_apps", [])
+        raw_apps = config.get("protected_apps", [])
+        apps = raw_apps if isinstance(raw_apps, list) else []
         decoy_apps = [a for a in apps if isinstance(a, dict) and a.get("decoy_mode")]
         if not decoy_apps:
             report.append("  \033[96m[FEATURE]\033[0m Decoy Honeypot Traps: 0 active decoy launchers.")
