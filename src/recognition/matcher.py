@@ -1,6 +1,6 @@
 import numpy as np
 import logging
-from typing import Optional, Any
+from typing import Optional
 from database.embedding_store import load_embeddings
 from utils.config_loader import get_config
 
