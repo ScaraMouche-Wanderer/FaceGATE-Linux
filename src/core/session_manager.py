@@ -127,7 +127,7 @@ class SessionManager(QObject):
 
     def resume_suspended_processes(self, app_identifier: str) -> int:
         """Sends SIGCONT to any running processes for app_identifier that are in SIGSTOP state."""
-        import psutil, os, signal
+        import psutil, os
         canonical_id = self.get_app_id_from_desktop(app_identifier)
         resumed = 0
         
