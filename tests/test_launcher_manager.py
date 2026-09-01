@@ -1,9 +1,6 @@
 import os
 import sys
-import json
-import pytest
-import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication
 app = QApplication.instance()
