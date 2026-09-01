@@ -13,30 +13,24 @@ for the system tray, featuring:
 - Full keyboard navigation and dark/light theme awareness
 """
 
-import os
-import shutil
-import subprocess
-import logging
 from typing import Optional
 
 from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QGraphicsDropShadowEffect, QApplication, QSizePolicy,
-    QComboBox
+    QGraphicsDropShadowEffect, QApplication
 )
 from PySide6.QtCore import (
-    Qt, QRect, QRectF, QPoint, QPointF, QSize, Signal, Slot, QTimer,
-    QPropertyAnimation, QEasingCurve, Property, QEvent
+    Qt, QRect, QRectF, QPoint, QPointF, Signal, QTimer,
+    QPropertyAnimation, QEasingCurve, Property
 )
 from PySide6.QtGui import (
-    QPainter, QColor, QPen, QBrush, QIcon, QPixmap, QFont,
-    QKeyEvent, QMouseEvent, QCursor, QGuiApplication, QPainterPath
+    QPainter, QColor, QPen,
+    QKeyEvent, QMouseEvent
 )
 
 from ui.theme import (
     get_colors, resolve_app_icon, composite_tray_icon,
-    create_monochrome_icon, create_monochrome_pixmap,
-    ACCENT_PURPLE, TEXT_PRIMARY, TEXT_SECONDARY, SUCCESS_GREEN, DANGER_RED, WARNING_AMBER
+    create_monochrome_icon, create_monochrome_pixmap
 )
 
 
@@ -494,7 +488,6 @@ class ActionNavRow(QFrame):
         layout.setSpacing(10)
 
         c = get_colors()
-        is_dark = c.get("IS_DARK", True)
         text_primary = c.get("TEXT_PRIMARY", "#f3f4f6")
         text_secondary = c.get("TEXT_SECONDARY", "#9ca3af")
         danger_col = c.get("DANGER_RED", "#ef4444")
