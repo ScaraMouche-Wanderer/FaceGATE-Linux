@@ -11,7 +11,6 @@ Usage:
 
 import os
 import sys
-import logging
 from typing import List, Tuple
 
 
@@ -118,7 +117,7 @@ def run_health_check() -> Tuple[int, int, List[str]]:
     dbus_connected = False
     daemon_running = False
     try:
-        from PySide6.QtDBus import QDBusConnection, QDBusInterface
+        from PySide6.QtDBus import QDBusConnection
         bus = QDBusConnection.sessionBus()
         if bus.isConnected():
             dbus_connected = True
