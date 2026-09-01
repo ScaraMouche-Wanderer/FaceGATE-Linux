@@ -2,6 +2,7 @@ import sqlite3
 import os
 import logging
 import hashlib
+from typing import Optional, Any
 
 DB_PATH = os.path.expanduser("~/.config/facegate/audit.db")
 
@@ -22,7 +23,9 @@ def init_audit_db():
                     app_identifier TEXT NOT NULL,
                     method TEXT NOT NULL,
                     result TEXT NOT NULL,
-                    confidence_score REAL
+                    confidence_score REAL,
+                    username TEXT,
+                    prev_hash TEXT
                 )
             """)
             cursor = conn.cursor()
@@ -36,7 +39,7 @@ def init_audit_db():
     except Exception as e:
         logging.error(f"Failed to initialize audit database: {e}")
 
-def log_auth_attempt(app_identifier: str, method: str, result: str, confidence_score: float = None, username: str = None):
+def log_auth_attempt(app_identifier: str, method: str, result: str, confidence_score: Optional[float] = None, username: Optional[str] = None):
     """
     Logs an authentication attempt with hash chaining and prunes rows beyond 2000 limit.
     """
@@ -352,9 +355,9 @@ def clear_audit_logs(admin_username: str = "admin") -> tuple[bool, str]:
 
 
 def filter_audit_logs(
-    app_identifier: str = None,
-    method: str = None,
-    result: str = None,
+    app_identifier: Optional[str] = None,
+    method: Optional[str] = None,
+    result: Optional[str] = None,
     limit: int = 100
 ) -> list[dict]:
     """
