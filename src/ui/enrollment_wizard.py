@@ -1,4 +1,3 @@
-import time
 import logging
 import cv2
 import numpy as np
@@ -8,7 +7,7 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtCore import Qt, Slot, QPropertyAnimation, QEasingCurve, QTimer
-from PySide6.QtGui import QPainter, QColor, QFont, QPen
+from PySide6.QtGui import QPainter, QColor, QFont
 from camera.camera_worker import CameraWorker
 from recognition.blur_checker import is_blurry
 from database.embedding_store import save_embedding, load_embeddings, get_cached_key
@@ -37,7 +36,6 @@ class StepProgressBar(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         w = self.width()
-        h = self.height()
         n = len(self.steps)
         if n == 0:
             return
@@ -89,7 +87,6 @@ class EnrollmentWizard(QDialog):
         self.target_username = target_username
         # Determine theme mode from config
         from utils.config_loader import get_config
-        from ui.theme import is_system_dark_mode
         try:
             _cfg_theme = get_config().get("behavior.theme", "light")
             if _cfg_theme == "dark":
@@ -168,7 +165,6 @@ class EnrollmentWizard(QDialog):
         container_layout.setSpacing(0)
         
         # Custom Title Bar
-        from PySide6.QtWidgets import QSizePolicy, QSizeGrip
         self.title_bar = CustomTitleBar(self, title="FaceGate Enrollment Wizard", allow_maximize=True, allow_minimize=False)
         container_layout.addWidget(self.title_bar)
         
