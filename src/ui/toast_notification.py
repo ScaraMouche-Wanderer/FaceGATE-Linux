@@ -11,9 +11,10 @@ Usage:
 """
 
 import logging
+from typing import Optional
 from PySide6.QtWidgets import QWidget, QLabel, QHBoxLayout, QPushButton, QApplication, QGraphicsOpacityEffect
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QRect, Property, Signal
-from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QPainterPath, QFont
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QRect, QRectF, Property, Signal
+from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QPainterPath, QFont, QGuiApplication
 
 
 # Severity color definitions
@@ -61,7 +62,7 @@ class Toast(QWidget):
     SPACING = 8
 
     def __init__(self, parent, message: str, severity: str = "info",
-                 duration_ms: int = 4000, title: str = None):
+                 duration_ms: int = 4000, title: Optional[str] = None):
         # Use the top-level window as parent for correct positioning
         top_level = parent.window() if parent else None
         super().__init__(top_level)
@@ -85,21 +86,15 @@ class Toast(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
-        # Opacity effect
         self.opacity_effect = QGraphicsOpacityEffect(self)
         self.opacity_effect.setOpacity(0.0)
         self.setGraphicsEffect(self.opacity_effect)
 
-        # Auto-dismiss timer
         self.dismiss_timer = QTimer(self)
         self.dismiss_timer.setSingleShot(True)
-        self.dismiss_timer.timeout.connect(self.start_dismiss)
-        self._paused = False
+        self.dismiss_timer.timeout.connect(self.dismiss)
 
-        # Progress tracking for auto-dismiss bar
-        self._progress = 1.0
-        self.progress_timer = QTimer(self)
-        self.progress_timer.timeout.connect(self._update_progress)
+        self._anim = None
 
     @Property(float)
     def toast_opacity(self):
@@ -111,37 +106,22 @@ class Toast(QWidget):
         self.opacity_effect.setOpacity(val)
 
     def show_toast(self):
-        """Animates the toast into view."""
-        global _active_toasts
-        _active_toasts.append(self)
-        self._reposition_all()
+        # Position at bottom-right of parent window
+        parent = self.parentWidget()
+        if parent:
+            parent_geom = parent.geometry()
+            target_x = parent_geom.width() - self.TOAST_WIDTH - self.MARGIN
+            target_y = parent_geom.height() - self.TOAST_HEIGHT - self.MARGIN
+        else:
+            target_x = 100
+            target_y = 100
 
+        # Start slightly below final position
+        start_y = target_y + 20
+        self.move(target_x, start_y)
         self.show()
         self.raise_()
 
-        # Slide in from right + fade in
-        start_pos = QPoint(self.x() + 80, self.y())
-        end_pos = QPoint(self.x(), self.y())
-
-        self.slide_anim = QPropertyAnimation(self, b"pos")
-        self.slide_anim.setDuration(350)
-        self.slide_anim.setStartValue(start_pos)
-        self.slide_anim.setEndValue(end_pos)
-        self.slide_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        self.fade_in_anim = QPropertyAnimation(self, b"toast_opacity")
-        self.fade_in_anim.setDuration(300)
-        self.fade_in_anim.setStartValue(0.0)
-        self.fade_in_anim.setEndValue(1.0)
-        self.fade_in_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        self.slide_anim.start()
-        self.fade_in_anim.start()
-
-        # Start auto-dismiss timer
-        self.dismiss_timer.start(self.duration_ms)
-        self._progress = 1.0
-        self.progress_timer.start(50)  # Update every 50ms
 
     def start_dismiss(self):
         """Animates the toast out of view and cleans up."""
@@ -206,7 +186,7 @@ class Toast(QWidget):
 
         # Border
         painter.setPen(QPen(border_color, 1))
-        painter.drawRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 12, 12)
+        painter.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 12, 12)
 
         # Icon
         icon = colors["icon"]
@@ -294,21 +274,21 @@ class ToastManager:
 
     @staticmethod
     def show_toast(parent: QWidget, message: str, severity: str = "info",
-                   duration_ms: int = 4000, title: str = None) -> Toast:
+                   duration_ms: int = 4000, title: Optional[str] = None) -> Toast:
         toast = Toast(parent, message, severity, duration_ms, title)
         toast.show_toast()
         return toast
 
     @staticmethod
-    def show_info(parent: QWidget, message: str, duration_ms: int = 4000, title: str = None) -> Toast:
+    def show_info(parent: QWidget, message: str, duration_ms: int = 4000, title: Optional[str] = None) -> Toast:
         return ToastManager.show_toast(parent, message, "info", duration_ms, title)
 
     @staticmethod
-    def show_success(parent: QWidget, message: str, duration_ms: int = 3000, title: str = None) -> Toast:
+    def show_success(parent: QWidget, message: str, duration_ms: int = 3000, title: Optional[str] = None) -> Toast:
         return ToastManager.show_toast(parent, message, "success", duration_ms, title)
 
     @staticmethod
-    def show_warning(parent: QWidget, message: str, duration_ms: int = 5000, title: str = None) -> Toast:
+    def show_warning(parent: QWidget, message: str, duration_ms: int = 5000, title: Optional[str] = None) -> Toast:
         return ToastManager.show_toast(parent, message, "warning", duration_ms, title)
 
 class BiometricHUD(QWidget):
@@ -357,7 +337,7 @@ class BiometricHUD(QWidget):
     def show_hud(self):
         # Center horizontally at top of primary screen
         app = QApplication.instance()
-        if app:
+        if isinstance(app, (QApplication, QGuiApplication)):
             screen = app.primaryScreen()
             if screen:
                 geom = screen.geometry()
