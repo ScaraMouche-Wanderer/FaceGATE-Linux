@@ -6,7 +6,6 @@ Ensures only one monitor daemon instance runs at any given time across all deskt
 import os
 import sys
 import logging
-from typing import Optional
 from utils.platform_paths import get_runtime_dir
 
 
