@@ -232,11 +232,8 @@ class TestLockoutGuard(unittest.TestCase):
                 self.assertTrue(locked)
                 self.assertGreater(remaining, 0)
 
-try:
-    import PySide6
-    HAS_PYSIDE6 = True
-except ImportError:
-    HAS_PYSIDE6 = False
+import importlib.util
+HAS_PYSIDE6 = importlib.util.find_spec("PySide6") is not None
 
 
 @unittest.skipUnless(HAS_PYSIDE6, "PySide6 not available")
@@ -294,8 +291,6 @@ class TestConfigLoaderTamperDetection(unittest.TestCase):
 
         with patch("security.state_watchdog.is_initialized", return_value=True):
             # Simulate reload where config.yaml is gone (falls back to defaults)
-            original_load = config.load
-
             def mock_load():
                 # Reset settings to simulate default config (empty protected_apps)
                 config.settings = {"protected_apps": []}
