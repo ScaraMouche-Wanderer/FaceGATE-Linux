@@ -467,6 +467,14 @@ class LauncherManager:
             return False
 
     def unprotect_application(self, desktop_name: str) -> bool:
+        """
+        Removes the FaceGate wrap from a launcher, restoring it to run the original application directly.
+        """
+        return self._unprotect_application_internal(desktop_name)
+
+    unprotect_launcher = unprotect_application
+
+    def _unprotect_application_internal(self, desktop_name: str) -> bool:
         """Restores a single application launcher immediately to its original pre-protection state."""
         user_path = os.path.join(self.user_desktop_dir, desktop_name)
         backup_path = os.path.join(self.backup_dir, desktop_name)
