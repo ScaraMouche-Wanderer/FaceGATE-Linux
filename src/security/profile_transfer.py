@@ -145,7 +145,7 @@ def import_profile(import_path: str, passphrase: str = None, force_import: bool 
 
     if not passphrase:
         if sys.stdin.isatty():
-            print(f"\n=== FaceGate Profile Import ===")
+            print("\n=== FaceGate Profile Import ===")
             print(f"Source Machine : {header.get('source_host', 'unknown')}")
             print(f"Export Users   : {', '.join(header.get('users', []))}")
             passphrase = getpass.getpass("Enter transfer passphrase: ")
