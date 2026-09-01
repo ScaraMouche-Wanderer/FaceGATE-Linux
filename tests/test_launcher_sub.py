@@ -1,8 +1,6 @@
 import os
 import sys
-import pytest
-import shutil
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 # Ensure PySide6 QApplication is initialized for the test
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
@@ -69,7 +67,7 @@ def test_apply_substitution_permission_error(mock_show_message, tmp_path):
          patch("logging.error") as mock_log_error:
          
          # Create a dummy tray icon so notify_permission_error finds it
-         tray = QSystemTrayIcon(app)
+         QSystemTrayIcon(app)
          
          apply_substitution([{"desktop_name": "test.desktop"}])
          
