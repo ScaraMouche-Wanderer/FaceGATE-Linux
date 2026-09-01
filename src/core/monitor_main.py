@@ -427,12 +427,15 @@ def run_auth_launch(desktop_name: str, exec_args: list):
 
     config = get_config()
     app_name = desktop_name
-    for p_app in config.get("protected_apps", []):
-        if p_app.get("desktop_name") == desktop_name or p_app.get("id") == desktop_name:
-            app_name = p_app.get("name", desktop_name)
-            break
+    protected_apps_list = config.get("protected_apps", [])
+    if isinstance(protected_apps_list, list):
+        for p_app in protected_apps_list:
+            if isinstance(p_app, dict) and (p_app.get("desktop_name") == desktop_name or p_app.get("id") == desktop_name):
+                app_name = p_app.get("name", desktop_name)
+                break
 
-    timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
+    raw_timeout = config.get("app_monitor.auth_timeout_seconds", 60)
+    timeout_sec = int(raw_timeout if isinstance(raw_timeout, (int, float, str)) else 60)
     from database.embedding_store import EMBEDDING_FILE, OLD_EMBEDDING_FILE
     mode = "face" if (os.path.exists(EMBEDDING_FILE) or os.path.exists(OLD_EMBEDDING_FILE)) else "password"
 
@@ -913,11 +916,13 @@ def main():
         
         # Protected Apps
         apps = config.get("protected_apps", [])
-        print(f"  Protected Apps : {len(apps)}")
-        for app in apps:
-            app_id = app.get("id", "unknown")
-            app_name = app.get("name", app_id)
-            print(f"    - {app_name} ({app_id})")
+        apps_list = apps if isinstance(apps, list) else []
+        print(f"  Protected Apps : {len(apps_list)}")
+        for app in apps_list:
+            if isinstance(app, dict):
+                app_id = app.get("id", "unknown")
+                app_name = app.get("name", app_id)
+                print(f"    - {app_name} ({app_id})")
             
         # Enrolled Profiles
         try:
@@ -1110,7 +1115,8 @@ def main():
                 # Fallback to local AuthDialog
                 logging.info("Daemon verification skipped or unsuccessful. Running local verification.")
                 mode = "face" if os.path.exists(EMBEDDING_FILE) else "password"
-                timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
+                raw_timeout = config.get("app_monitor.auth_timeout_seconds", 60)
+                timeout_sec = int(raw_timeout if isinstance(raw_timeout, (int, float, str)) else 60)
                 dialog = AuthDialog("Settings Access", mode=mode, timeout_seconds=timeout_sec)
                 result = dialog.exec()
                 success = (result == QDialog.DialogCode.Accepted)
@@ -1144,13 +1150,16 @@ def main():
         # Determine app name and auth_mode configuration
         app_name = desktop_name
         target_app = None
-        for p_app in config.get("protected_apps", []):
-            if p_app.get("desktop_name") == desktop_name or p_app.get("id") == desktop_name:
-                app_name = p_app.get("name", desktop_name)
-                target_app = p_app
-                break
+        protected_apps_list = config.get("protected_apps", [])
+        if isinstance(protected_apps_list, list):
+            for p_app in protected_apps_list:
+                if isinstance(p_app, dict) and (p_app.get("desktop_name") == desktop_name or p_app.get("id") == desktop_name):
+                    app_name = p_app.get("name", desktop_name)
+                    target_app = p_app
+                    break
                 
-        timeout_sec = config.get("app_monitor.auth_timeout_seconds", 60)
+        raw_timeout = config.get("app_monitor.auth_timeout_seconds", 60)
+        timeout_sec = int(raw_timeout if isinstance(raw_timeout, (int, float, str)) else 60)
         
         from database.embedding_store import EMBEDDING_FILE, OLD_EMBEDDING_FILE
         configured_mode = target_app.get("auth_mode") if target_app else None
