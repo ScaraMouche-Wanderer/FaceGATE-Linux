@@ -115,7 +115,7 @@ class SessionManager(QObject):
         self.resume_suspended_processes(app_id)
 
         tray = self.get_tray()
-        if not was_authorized and self.config.get("behavior.notify_on_auth", True) and tray:
+        if not was_authorized and self.config.get("behavior.notify_on_auth", True) and tray and hasattr(tray, "showMessage"):
             from PySide6.QtWidgets import QSystemTrayIcon
             app_name = self.get_app_name(app_id)
             tray.showMessage(
@@ -181,7 +181,7 @@ class SessionManager(QObject):
             monitor.clear_seen_pids()
 
         tray = self.get_tray()
-        if was_authorized and self.config.get("behavior.notify_on_auth", True) and tray:
+        if was_authorized and self.config.get("behavior.notify_on_auth", True) and tray and hasattr(tray, "showMessage"):
             from PySide6.QtWidgets import QSystemTrayIcon
             app_name = self.get_app_name(app_id)
             tray.showMessage(
@@ -215,7 +215,7 @@ class SessionManager(QObject):
                 monitor.start()
 
         tray = self.get_tray()
-        if tray:
+        if tray and hasattr(tray, "update_tray_state"):
             tray.update_tray_state()
         logging.info("FaceGate monitor is now ACTIVE.")
 
@@ -244,7 +244,7 @@ class SessionManager(QObject):
             monitor.clear_seen_pids()
 
         tray = self.get_tray()
-        if tray:
+        if tray and hasattr(tray, "update_tray_state"):
             tray.update_tray_state()
         logging.info(f"FaceGate monitor PAUSED for {minutes} minutes.")
         return True
