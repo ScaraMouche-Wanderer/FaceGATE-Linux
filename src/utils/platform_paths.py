@@ -1,7 +1,5 @@
 import os
 import sys
-import platform
-from pathlib import Path
 
 def is_linux() -> bool:
     return sys.platform.startswith("linux")
