@@ -1,12 +1,10 @@
 import os
 import subprocess
-import time
 import logging
 from typing import Optional, Any
 from PySide6.QtCore import QObject, Slot, Signal, Qt, ClassInfo
-from PySide6.QtDBus import QDBusConnection, QDBusAbstractAdaptor, QDBusContext
-from PySide6.QtWidgets import QApplication
-from locking.launcher_sub import get_facegate_cmd, get_facegate_executable
+from PySide6.QtDBus import QDBusAbstractAdaptor
+from locking.launcher_sub import get_facegate_cmd
 
 def run_recognition_helper(identifier: str, cached_key: Optional[bytes] = None, env: Optional[dict] = None) -> tuple[int, str]:
     cmd = list(get_facegate_cmd())
