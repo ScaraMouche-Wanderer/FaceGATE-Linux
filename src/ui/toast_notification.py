@@ -10,9 +10,8 @@ Usage:
     ToastManager.show_toast(parent_widget, "Message", severity="success")
 """
 
-import logging
 from typing import Optional
-from PySide6.QtWidgets import QWidget, QLabel, QHBoxLayout, QPushButton, QApplication, QGraphicsOpacityEffect
+from PySide6.QtWidgets import QWidget, QApplication, QGraphicsOpacityEffect
 from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QRect, QRectF, Property, Signal
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QPainterPath, QFont, QGuiApplication
 
@@ -136,7 +135,6 @@ class Toast(QWidget):
         self.fade_out_anim.start()
 
     def _cleanup(self):
-        global _active_toasts
         if self in _active_toasts:
             _active_toasts.remove(self)
         self._reposition_all()
