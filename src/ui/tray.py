@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QSystemTrayIcon, QMenu
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QPen, QPolygonF
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QPen, QPolygonF, QCursor
 from PySide6.QtCore import Qt, QPointF, QRectF, QSize
 
 
@@ -220,7 +220,8 @@ def get_configured_tray_icon_renderer():
     can't be loaded for any reason (e.g. during early startup)."""
     try:
         from utils.config_loader import get_config
-        style_name = get_config().get("behavior.tray_icon_style", "circle")
+        raw_style = get_config().get("behavior.tray_icon_style", "circle")
+        style_name = str(raw_style) if isinstance(raw_style, str) else "circle"
     except Exception:
         style_name = "circle"
     return get_tray_icon_renderer(style_name)
