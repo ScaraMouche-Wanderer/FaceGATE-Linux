@@ -1,7 +1,6 @@
 import os
 import sys
 import cv2
-import numpy as np
 
 # Set path to include src
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
