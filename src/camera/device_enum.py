@@ -3,13 +3,14 @@ import glob
 import logging
 import cv2
 import numpy as np
+from typing import Any, Optional
 from camera.camera_worker import is_ir_frame, diagnose_camera_error
 
-def query_v4l2_capabilities(dev_path: str) -> dict:
+def query_v4l2_capabilities(dev_path: str) -> dict[str, Any]:
     """
     Reads hardware capabilities and metadata from Linux sysfs for a video device.
     """
-    info = {
+    info: dict[str, Any] = {
         "name": "Unknown Camera",
         "driver": "Unknown",
         "card": "Unknown",
@@ -35,7 +36,7 @@ def query_v4l2_capabilities(dev_path: str) -> dict:
                 pass
     return info
 
-def get_camera_details(device_index: int) -> dict:
+def get_camera_details(device_index: int) -> dict[str, Any]:
     """
     Returns full diagnostics and capabilities for a specific camera index.
     """
@@ -43,7 +44,7 @@ def get_camera_details(device_index: int) -> dict:
     dev_path = f"/dev/video{device_index}"
     sysfs_meta = query_v4l2_capabilities(dev_path) if is_linux() else {}
     
-    details = {
+    details: dict[str, Any] = {
         "index": device_index,
         "path": dev_path if is_linux() else f"Camera {device_index}",
         "name": sysfs_meta.get("name", f"Camera Device {device_index}"),
@@ -70,7 +71,7 @@ def get_camera_details(device_index: int) -> dict:
             details["working"] = True
             details["width"] = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             details["height"] = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            details["fps"] = float(cap.get(cv2.CAP_PROP_FPS))
+            details["fps"] = cap.get(cv2.CAP_PROP_FPS)
             details["is_ir"] = is_ir_frame(frame)
         else:
             details["error"] = "Could not grab frame from video device."
@@ -80,13 +81,13 @@ def get_camera_details(device_index: int) -> dict:
         
     return details
 
-def enumerate_cameras(fast_scan: bool = False) -> list[dict]:
+def enumerate_cameras(fast_scan: bool = False) -> list[dict[str, Any]]:
     """
     Enumerates video capture devices available on the system.
     Returns a list of device detail dicts.
     If fast_scan is True, queries sysfs metadata without opening cv2 capture handles.
     """
-    devices = []
+    devices: list[dict[str, Any]] = []
     video_nodes = sorted(glob.glob("/dev/video*"))
     
     indices_to_check = []
@@ -106,7 +107,7 @@ def enumerate_cameras(fast_scan: bool = False) -> list[dict]:
         sysfs_meta = query_v4l2_capabilities(node_path)
         name = sysfs_meta.get("name", f"Camera Device {idx}")
 
-        device_info = {
+        device_info: dict[str, Any] = {
             "index": idx,
             "path": node_path,
             "name": name,
@@ -157,6 +158,20 @@ def find_best_rgb_camera() -> int:
         return working_any[0]["index"]
         
     return 0
+
+def resolve_camera_fallback(failed_index: int = 0) -> int:
+    """
+    Resolves a fallback camera device index if the requested index fails.
+    """
+    devices = enumerate_cameras()
+    for dev in devices:
+        if dev.get("working") and dev.get("index") != failed_index:
+            return dev["index"]
+    for dev in devices:
+        if dev.get("working"):
+            return dev["index"]
+    return failed_index
+
 
 def format_camera_list() -> str:
     """
