@@ -14,7 +14,7 @@ import base64
 import logging
 import hashlib
 import time
-from security.crypto_engine import derive_key, encrypt, decrypt
+from security.crypto_engine import derive_key
 from database.audit_log import log_auth_attempt
 
 DURESS_FILE = os.path.expanduser("~/.config/facegate/.duress.enc")
