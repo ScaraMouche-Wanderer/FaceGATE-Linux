@@ -1,6 +1,7 @@
 import os
 import yaml
 import logging
+from typing import Optional, Union, Any
 
 DEFAULT_FILENAME = "default" + ".yaml"
 
@@ -108,6 +109,15 @@ class Config:
             if "ui" in self.settings and isinstance(self.settings["ui"], dict):
                 self.settings["ui"]["theme"] = value
 
+    def __getitem__(self, key: str):
+        return self.get(key)
+
+    def __setitem__(self, key: str, value):
+        self.set(key, value)
+
+    def __contains__(self, key: str) -> bool:
+        return self.get(key) is not None
+
     def _diff_against_defaults(self, current: dict, defaults: dict) -> dict:
         diff = {}
         for k, v in current.items():
@@ -121,7 +131,7 @@ class Config:
                 diff[k] = v
         return diff
 
-    def save(self):
+    def save(self) -> bool:
         user_config_path = os.path.expanduser("~/.config/facegate/config.yaml")
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -152,7 +162,7 @@ class Config:
 
 _config_instance = None
 
-def get_config():
+def get_config() -> Config:
     global _config_instance
     if _config_instance is None:
         _config_instance = Config()
@@ -160,10 +170,14 @@ def get_config():
 
 
 
-def save_config(new_settings: dict = None) -> bool:
+def save_config(new_settings: Optional[Union[dict, Config]] = None) -> bool:
     """Convenience helper to update and save the global config to disk."""
     cfg = get_config()
-    if new_settings is not None and isinstance(new_settings, dict):
-        cfg.settings = new_settings
+    if new_settings is not None:
+        if isinstance(new_settings, Config):
+            return new_settings.save()
+        elif isinstance(new_settings, dict):
+            cfg.settings = new_settings
     return cfg.save()
+
 
