@@ -10,29 +10,22 @@ Comprehensive unit and integration tests for new and enhanced FaceGATE-Linux fea
 """
 
 import os
-import sys
 import json
 import csv
-import tempfile
 import numpy as np
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 from recognition.liveness import (
     calculate_eye_aspect_ratio,
     estimate_head_pose,
-    evaluate_multi_factor_liveness,
-    check_texture_liveness
+    evaluate_multi_factor_liveness
 )
-from recognition.matcher import cosine_similarity, get_all_match_scores
-from camera.device_enum import query_v4l2_capabilities, get_camera_details, enumerate_cameras
+from recognition.matcher import get_all_match_scores
 from camera.camera_worker import calculate_frame_lighting
 from database.audit_log import (
     log_auth_attempt,
     verify_audit_log_integrity,
-    export_audit_logs,
-    filter_audit_logs,
-    clear_audit_logs
+    export_audit_logs
 )
 from core.session_manager import SessionManager
 from ui.theme import get_colors, PALETTES
