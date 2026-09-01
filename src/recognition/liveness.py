@@ -101,7 +101,7 @@ def calculate_eye_aspect_ratio(kps: np.ndarray) -> float:
     right_vertical = float(np.linalg.norm(right_mouth - right_eye))
     avg_vertical = (left_vertical + right_vertical) / 2.0
 
-    return float(avg_vertical / eye_dist)
+    return avg_vertical / eye_dist
 
 
 def estimate_head_pose(kps: np.ndarray) -> Tuple[float, float, float]:
