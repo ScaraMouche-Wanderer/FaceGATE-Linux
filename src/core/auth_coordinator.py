@@ -100,7 +100,7 @@ class AuthCoordinator(QObject):
         log_auth_attempt(reason, actual_method, "success" if success else "fail", score, matched_user)
         return success
 
-    def _run_recognition_subprocess(self, reason: str) -> tuple[bool, str, float, str]:
+    def _run_recognition_subprocess(self, reason: str) -> tuple[bool, str, float | None, str | None]:
         """Spawns the isolated recognition subprocess for admin face verification."""
         from database.embedding_store import get_cached_key, set_cached_key
         from locking.ipc_service import run_recognition_helper
@@ -110,8 +110,8 @@ class AuthCoordinator(QObject):
         success = (exit_code == 0)
 
         actual_method = "face"
-        score = None
-        matched_user = None
+        score: float | None = None
+        matched_user: str | None = None
         if stdout_data:
             for line in stdout_data.splitlines():
                 line = line.strip()
@@ -281,8 +281,9 @@ class AuthCoordinator(QObject):
                 from locking.process_controller import resume_process
                 resume_process(pid)
                 logging.info(f"Resumed process (PID: {pid}) after successful authentication.")
-                app_id = self.session_manager.get_app_id_from_desktop(desktop_name)
-                self.session_manager.authorize_app(app_id)
+                if self.session_manager is not None:
+                    app_id = self.session_manager.get_app_id_from_desktop(desktop_name)
+                    self.session_manager.authorize_app(app_id)
             else:
                 policy = self.config.get("app_monitor.on_auth_failure", "kill")
                 if policy == "kill":
