@@ -3,7 +3,9 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-def derive_key(password: bytes, salt: bytes, iterations: int) -> bytes:
+from typing import Optional, Union
+
+def derive_key(password: Union[bytes, bytearray], salt: bytes, iterations: int) -> bytes:
     """
     Derives a 256-bit (32-byte) key from the given password and salt using PBKDF2-HMAC-SHA256.
     """
@@ -13,9 +15,9 @@ def derive_key(password: bytes, salt: bytes, iterations: int) -> bytes:
         salt=salt,
         iterations=iterations
     )
-    return kdf.derive(password)
+    return kdf.derive(bytes(password))
 
-def build_aad(kdf_name: str, iterations: int, salt: bytes | str) -> bytes:
+def build_aad(kdf_name: str, iterations: int, salt: Union[bytes, str]) -> bytes:
     """
     Constructs canonical Associated Authenticated Data (AAD) to bind
     KDF parameters to AES-256-GCM ciphertexts.
@@ -23,7 +25,7 @@ def build_aad(kdf_name: str, iterations: int, salt: bytes | str) -> bytes:
     salt_str = salt.hex() if isinstance(salt, bytes) else str(salt)
     return f"kdf={kdf_name};iterations={iterations};salt={salt_str}".encode('utf-8')
 
-def encrypt(plaintext: bytes, key: bytes, aad: bytes = None) -> tuple[bytes, bytes]:
+def encrypt(plaintext: bytes, key: bytes, aad: Optional[bytes] = None) -> tuple[bytes, bytes]:
     """
     Encrypts the plaintext using AES-256-GCM with a fresh 96-bit random nonce.
     Optionally authenticates additional associated data (AAD) to bind
@@ -35,7 +37,7 @@ def encrypt(plaintext: bytes, key: bytes, aad: bytes = None) -> tuple[bytes, byt
     ciphertext = aesgcm.encrypt(nonce, plaintext, aad)
     return nonce, ciphertext
 
-def decrypt(nonce: bytes, ciphertext: bytes, key: bytes, aad: bytes = None) -> bytes:
+def decrypt(nonce: bytes, ciphertext: bytes, key: bytes, aad: Optional[bytes] = None) -> bytes:
     """
     Decrypts the ciphertext using AES-256-GCM.
     If AAD was used during encryption, the same AAD must be provided here.
