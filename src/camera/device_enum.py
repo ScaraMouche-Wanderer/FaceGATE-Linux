@@ -1,9 +1,7 @@
 import os
 import glob
-import logging
 import cv2
-import numpy as np
-from typing import Any, Optional
+from typing import Any
 from camera.camera_worker import is_ir_frame, diagnose_camera_error
 
 def query_v4l2_capabilities(dev_path: str) -> dict[str, Any]:
