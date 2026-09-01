@@ -28,7 +28,11 @@ from utils.config_loader import get_config
 from utils.systemd_manager import is_enabled, enable, disable
 from ui.app_picker_dialog import AppPickerDialog
 from locking.launcher_sub import apply_substitution, restore_substitution
-from ui.theme import AnimatedComboBox, AnimatedCheckBox, AnimatedSpinBox, AnimatedButton, PulsingStatusDot
+from ui.theme import (
+    AnimatedComboBox, AnimatedCheckBox, AnimatedSpinBox, AnimatedButton,
+    PulsingStatusDot, style_heading, style_themed_label, get_colors,
+    get_theme_qss, get_card_qss, CustomTitleBar, WindowDragResizeFilter
+)
 
 class AnimatedSidebar(QListWidget):
     def __init__(self, parent=None):
@@ -824,6 +828,9 @@ class SettingsWindow(QDialog):
 
             from ui.toast_notification import ToastManager
             ToastManager.show_success(self, "Admin Security Console unlocked successfully!", title="Admin Unlocked")
+
+    def _update_admin_tab_labels(self):
+        self._update_sidebar_enrolled_count()
 
     def show_restart_banner(self):
         if self._loading:
@@ -2531,32 +2538,34 @@ class SettingsWindow(QDialog):
         if idx >= 0:
             self.policy_combo.setCurrentIndex(idx)
             
-        timeout = self.config.get("app_monitor.auth_timeout_seconds", 60)
-        self.timeout_spin.setValue(timeout)
+        raw_timeout = self.config.get("app_monitor.auth_timeout_seconds", 60)
+        self.timeout_spin.setValue(int(raw_timeout if isinstance(raw_timeout, (int, float, str)) else 60))
         
         # 3. Autostart & Protection
-        self.autostart_check.setChecked(is_enabled())
-        self.protection_check.setChecked(self.config.get("behavior.uninstall_protection", True))
+        self.autostart_check.setChecked(bool(is_enabled()))
+        self.protection_check.setChecked(bool(self.config.get("behavior.uninstall_protection", True)))
         
         # 4. Emergency Kill Hotkey
         hotkey = self.config.get("behavior.emergency_key", "<Control><Alt>k")
-        self.hotkey_input.setText(hotkey)
+        self.hotkey_input.setText(str(hotkey))
 
         # 4b. Panic Lockdown Hotkey
         panic_hotkey = self.config.get("behavior.panic_key", "<Control><Alt>l")
-        self.panic_hotkey_input.setText(panic_hotkey)
+        self.panic_hotkey_input.setText(str(panic_hotkey))
 
         # 5. New behavior settings
-        self.notify_check.setChecked(self.config.get("behavior.notify_on_auth", True))
-        self.sound_effects_check.setChecked(self.config.get("behavior.sound_effects", True))
+        self.notify_check.setChecked(bool(self.config.get("behavior.notify_on_auth", True)))
+        self.sound_effects_check.setChecked(bool(self.config.get("behavior.sound_effects", True)))
         sound_vol = self.config.get("behavior.sound_volume", 0.15)
         sound_vol_idx = self.sound_volume_combo.findData(sound_vol)
         if sound_vol_idx >= 0:
             self.sound_volume_combo.setCurrentIndex(sound_vol_idx)
-        self.idle_check.setChecked(self.config.get("behavior.autolock_on_idle", False))
-        self.idle_spin.setValue(self.config.get("behavior.autolock_on_idle_minutes", 10))
+        self.idle_check.setChecked(bool(self.config.get("behavior.autolock_on_idle", False)))
+        raw_idle = self.config.get("behavior.autolock_on_idle_minutes", 10)
+        self.idle_spin.setValue(int(raw_idle if isinstance(raw_idle, (int, float, str)) else 10))
         self.idle_spin.setEnabled(self.idle_check.isChecked())
-        self.delay_spin.setValue(self.config.get("behavior.startup_delay_seconds", 0))
+        raw_delay = self.config.get("behavior.startup_delay_seconds", 0)
+        self.delay_spin.setValue(int(raw_delay if isinstance(raw_delay, (int, float, str)) else 0))
         
         self.theme_combo.blockSignals(True)
         theme_val = self.config.get("behavior.theme", "light")
@@ -3230,9 +3239,10 @@ class SettingsWindow(QDialog):
         # Step 4 & 5: Clear monitor entry & runtime cache
         from PySide6.QtWidgets import QApplication
         app_inst = QApplication.instance()
-        if hasattr(app_inst, "authorized_apps"):
-            app_inst.authorized_apps.pop(app_id, None)
-            app_inst.auth_timestamps.pop(app_id, None)
+        if hasattr(app_inst, "authorized_apps") and isinstance(getattr(app_inst, "authorized_apps"), dict):
+            getattr(app_inst, "authorized_apps").pop(app_id, None)
+        if hasattr(app_inst, "auth_timestamps") and isinstance(getattr(app_inst, "auth_timestamps"), dict):
+            getattr(app_inst, "auth_timestamps").pop(app_id, None)
         if hasattr(app_inst, "monitor") and app_inst.monitor:
             app_inst.monitor._cached_apps = None
             app_inst.monitor.clear_seen_pids()
