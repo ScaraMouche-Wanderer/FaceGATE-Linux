@@ -12,7 +12,7 @@ Usage:
 """
 
 import math
-from PySide6.QtWidgets import QWidget, QLabel
+from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QPointF, QRectF, Property, Signal
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QPainterPath, QFont, QRadialGradient
 
