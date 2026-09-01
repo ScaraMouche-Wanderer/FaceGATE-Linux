@@ -3,6 +3,7 @@ import numpy as np
 import logging
 import threading
 import time
+from typing import Optional
 from PySide6.QtCore import QObject, Signal
 from utils.config_loader import get_config
 
@@ -28,7 +29,7 @@ def calculate_frame_lighting(frame: np.ndarray) -> tuple[float, str]:
     else:
         return score, "Optimal Lighting"
 
-def is_ir_frame(frame: np.ndarray, threshold: float = None) -> bool:
+def is_ir_frame(frame: np.ndarray, threshold: Optional[float] = None) -> bool:
     """
     Heuristical check to determine if a frame is near-grayscale (like an IR camera).
     Compares standard deviation / mean differences between color channels.
@@ -38,7 +39,8 @@ def is_ir_frame(frame: np.ndarray, threshold: float = None) -> bool:
     if threshold is None:
         try:
             config = get_config()
-            threshold = float(config.get("camera.ir_color_variance_threshold", 5.0))
+            cfg_thresh = config.get("camera.ir_color_variance_threshold", 5.0)
+            threshold = float(cfg_thresh if isinstance(cfg_thresh, (int, float, str)) else 5.0)
         except Exception:
             threshold = 5.0
     b, g, r = cv2.split(frame)
@@ -102,7 +104,7 @@ class CameraSignals(QObject):
     error = Signal(str)
 
 class CameraWorker:
-    def __init__(self, device_index: int = None):
+    def __init__(self, device_index: Optional[int] = None):
         if device_index is None:
             self.device_index = detect_camera_device()
         else:
@@ -131,6 +133,7 @@ class CameraWorker:
     def _run(self):
         # Open video capture with V4L2, fallback if needed
         from utils.platform_paths import is_linux, is_macos, is_windows
+        from camera.device_enum import resolve_camera_fallback
 
         backend = cv2.CAP_V4L2 if (is_linux() and hasattr(cv2, "CAP_V4L2")) else (
             cv2.CAP_AVFOUNDATION if (is_macos() and hasattr(cv2, "CAP_AVFOUNDATION")) else (
@@ -160,9 +163,12 @@ class CameraWorker:
 
         # Configure frame dimensions from config
         config = get_config()
-        width = config.get("camera.width", 640)
-        height = config.get("camera.height", 480)
-        fps = config.get("camera.fps", 30)
+        width_val = config.get("camera.width", 640)
+        width = float(width_val if isinstance(width_val, (int, float, str)) else 640)
+        height_val = config.get("camera.height", 480)
+        height = float(height_val if isinstance(height_val, (int, float, str)) else 480)
+        fps_val = config.get("camera.fps", 30)
+        fps = float(fps_val if isinstance(fps_val, (int, float, str)) else 30)
         
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
@@ -173,7 +179,7 @@ class CameraWorker:
         actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
         logging.info(f"Camera opened. Resolution: {actual_width}x{actual_height}")
 
-        target_interval = 1.0 / fps if fps else 0.0
+        target_interval = (1.0 / fps) if fps > 0 else 0.0
         last_emit = time.monotonic()
         while self.running:
             ret, frame = self.cap.read()
@@ -183,6 +189,7 @@ class CameraWorker:
                 continue
 
             self.signals.frame_ready.emit(frame)
+
 
             # Only sleep the *remaining* time to hit the FPS target. Most
             # V4L2 backends already block inside read() until the next frame
