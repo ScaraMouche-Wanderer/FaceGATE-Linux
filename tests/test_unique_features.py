@@ -8,11 +8,9 @@ Unit and integration tests for unique, minimalist, and high-impact FaceGATE-Linu
 
 import os
 import sys
-import json
 import time
-import tempfile
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 from security.duress_mode import (
     set_duress_password,
@@ -73,7 +71,7 @@ def test_duress_alarm_trigger(tmp_path, monkeypatch):
 def test_presence_sentry_signals():
     """Test Presence Sentry timeout and presence lost signal dispatch."""
     from PySide6.QtWidgets import QApplication
-    _app = QApplication.instance() or QApplication(sys.argv)
+    _ = QApplication.instance() or QApplication(sys.argv)
 
     sentry = PresenceSentry(check_interval_sec=0.1, timeout_sec=0.2)
 
@@ -97,7 +95,7 @@ def test_presence_sentry_signals():
 def test_presence_sentry_activity_resets():
     """Test that recording user activity postpones walk-away lockdown."""
     from PySide6.QtWidgets import QApplication
-    _app = QApplication.instance() or QApplication(sys.argv)
+    _ = QApplication.instance() or QApplication(sys.argv)
 
     sentry = PresenceSentry(check_interval_sec=1.0, timeout_sec=30.0)
     t0 = time.time() - 10.0
@@ -110,7 +108,7 @@ def test_presence_sentry_activity_resets():
 def test_biometric_hud_creation():
     """Test instantiation and styling of BiometricHUD."""
     from PySide6.QtWidgets import QApplication
-    _app = QApplication.instance() or QApplication(sys.argv)
+    _ = QApplication.instance() or QApplication(sys.argv)
 
     hud_unlocked = BiometricHUD("Firefox Unlocked", icon="🛡️", is_success=True)
     assert hud_unlocked.message == "Firefox Unlocked"
