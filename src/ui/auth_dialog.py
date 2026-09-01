@@ -2,6 +2,7 @@ import logging
 import ctypes
 import time
 import math
+import threading
 import numpy as np
 
 # Preload libc and librt with RTLD_GLOBAL to resolve GLIBC symbol conflicts (__pointer_chk_guard) on Linux
@@ -15,12 +16,11 @@ except Exception:
     pass
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
-    QSizePolicy, QSizeGrip, QStackedWidget, QProgressBar
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 )
 
 from PySide6.QtCore import Qt, QTimer, Slot, QThread, Signal, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QRadialGradient, QFont
+from PySide6.QtGui import QImage, QPixmap
 from security.credential_store import verify_password
 from utils.config_loader import get_config
 
@@ -41,8 +41,6 @@ class DetectorLoader(QThread):
         except Exception as e:
             self.error.emit(str(e))
 
-import threading
-import time
 
 class FaceDetectorWorker(QThread):
     detected = Signal(list, object)  # Emits (faces, frame)
@@ -909,7 +907,6 @@ class AuthDialog(QDialog):
         self.reject()
 
     def handle_unlock(self):
-        import time
         from security.lockout_manager import record_failed_attempt, reset_lockout
         from security.duress_mode import verify_duress_password, trigger_duress_alarm
         password = self.password_input.text()
