@@ -9,10 +9,7 @@ sensitive applications are unlocked, automatically re-locks all protected applic
 import time
 import logging
 import threading
-import cv2
-import cv2.data
-from PySide6.QtCore import QObject, Signal, Slot, QTimer
-from utils.config_loader import get_config
+from PySide6.QtCore import QObject, Signal, QTimer
 
 
 class PresenceSentrySignals(QObject):
