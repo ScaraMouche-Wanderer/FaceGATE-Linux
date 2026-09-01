@@ -1,6 +1,3 @@
-import os
-import time
-import pytest
 from unittest.mock import patch, MagicMock
 from locking.app_monitor import AppMonitor
 
