@@ -555,7 +555,8 @@ class EnrollmentWizard(QDialog):
                 existing_embeddings = load_embeddings()
                 from recognition.matcher import cosine_similarity
                 from utils.config_loader import get_config
-                thresh = float(get_config().get("recognition.similarity_threshold", 0.52))
+                cfg_thresh = get_config().get("recognition.similarity_threshold", 0.52)
+                thresh = float(cfg_thresh if isinstance(cfg_thresh, (int, float, str)) else 0.52)
 
                 for uname, emb_vector in existing_embeddings.items():
                     if uname.lower() == self.username.lower():
