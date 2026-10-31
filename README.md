@@ -1,8 +1,7 @@
 # FaceGate-Linux 🛡️👤
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v1.2.0-blue?style=for-the-badge" alt="Version 1.2.0">
-  <img src="https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge&logo=pytest" alt="Build Passing">
+  <a href="https://github.com/ScaraMouche-Wanderer/FaceGATE-Linux/actions/workflows/ci.yml"><img src="https://github.com/ScaraMouche-Wanderer/FaceGATE-Linux/actions/workflows/ci.yml/badge.svg" alt="Current CI status"></a>
 
   <img src="https://img.shields.io/badge/python-3.11%2B-blue?style=for-the-badge&logo=python" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/crypto-AES--256--GCM-purple?style=for-the-badge" alt="AES-256-GCM">
@@ -13,6 +12,8 @@
 </p>
 
 **FaceGate-Linux** is an advanced, local biometric application security daemon and tray interface for Linux desktop environments. Designed to prevent unauthorized access to sensitive application windows (such as web browsers, terminal consoles, password managers, or system settings), FaceGate intercepts target launches and gates them behind fast, local biometric face recognition (powered by InsightFace) and liveness checking, with a secure Master Password fallback.
+
+**Start exploring:** [Project brief](PROJECT_BRIEF.md) · [Implementation map](PROJECT_BRIEF.md#implementation-map) · [Security model](SECURITY.md) · [Tests](tests/)
 
 <p align="center">
   <img src="assets/demo.gif" width="900" alt="FaceGate Demo">
