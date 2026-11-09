@@ -13,8 +13,7 @@ If you discover a security vulnerability in FaceGATE-Linux, **please do not file
 
 Instead, please report it privately:
 
-1. **Email**: Send a detailed report to the project maintainer ([prathmeshnarwaria@gmail.com]).
-2. **GitHub Security Advisories**: Use [GitHub's private vulnerability reporting](https://github.com/ScaraMouche-Wanderer/FaceGATE-Linux/security/advisories/new) to submit a confidential advisory.
+Use [GitHub's private vulnerability reporting](https://github.com/ScaraMouche-Wanderer/FaceGATE-Linux/security/advisories/new) to submit a confidential advisory.
 
 ### What to Include
 
