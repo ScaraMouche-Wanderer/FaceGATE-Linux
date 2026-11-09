@@ -11,9 +11,11 @@
   <a href="GUIDE.md"><img src="https://img.shields.io/badge/docs-GUIDE.md-purple?style=for-the-badge&logo=markdown" alt="Complete Guide"></a>
 </p>
 
-**FaceGate-Linux** is an advanced, local biometric application security daemon and tray interface for Linux desktop environments. Designed to prevent unauthorized access to sensitive application windows (such as web browsers, terminal consoles, password managers, or system settings), FaceGate intercepts target launches and gates them behind fast, local biometric face recognition (powered by InsightFace) and liveness checking, with a secure Master Password fallback.
+**FaceGATE Linux** is a user-level app locker for Linux desktops. It prompts for local face recognition or a master password when you launch an app you've selected for protection. It shadows desktop launchers and uses a background process monitor to catch direct launches.
 
-**Start exploring:** [Project brief](PROJECT_BRIEF.md) · [Implementation map](PROJECT_BRIEF.md#implementation-map) · [Security model](SECURITY.md) · [Tests](tests/)
+**[Watch the demo](assets/demo.gif)** · **[Try the settings UI](#preview-the-settings-ui)** · [Install the user service](#install-the-user-service) · [Security model](SECURITY.md)
+
+Recognition runs on the desktop, and the initial model download requires internet access. App locking applies within the desktop session. Direct process launches have a brief window before the monitor can suspend them, and a user with root access can bypass the lock.
 
 <p align="center">
   <img src="assets/demo.gif" width="900" alt="FaceGate Demo">
@@ -39,8 +41,8 @@
 
 - 🔒 **Biometric Application Locking**: Automatically detects target process launches and suspends them via `SIGSTOP` until authenticated.
 - 👤 **Primary Admin & Multi-User Access Control**: Gated settings access requiring Primary Admin face or Master Password verification. Admins can manage, test, re-enroll, or delete facial profiles.
-- ⚡ **Local & Private Face Recognition**: Powered by ONNX Runtime and the lightweight `buffalo_l` InsightFace model for 100% offline, private, real-time biometric verification.
-- 👁️ **Liveness Checking & Spoof Protection**: Bounding-box centroid micro-motion tracking protects against static photo bypass attempts.
+- ⚡ **Local Face Recognition**: ONNX Runtime runs the InsightFace model on your machine after the initial model download.
+- 👁️ **Motion-Based Liveness Checks**: Motion checks can reject static photos. See the [documented limitations](SECURITY.md#liveness-verification-anti-spoofing) for dynamic presentation attacks.
 - 📸 **Intruder Selfie Gallery**: Automatically captures webcam photos of unauthorized access attempts and displays them in a high-contrast visual gallery.
 - 🔑 **RAM-Backed Session Key Vault**: Encryption keys are cached in user-private RAM `tmpfs` (`/run/user/{uid}/facegate.key`), enabling seamless face recognition across desktop sessions while maintaining AES-256-GCM encryption-at-rest.
 - 🎨 **Modern High-Contrast Dark & Light Design System**: Stunning PySide6 GUI with vibrant color palettes (`#c084fc` headers, slate cards, transparent viewports, custom `QComboBox` delegates).
@@ -81,23 +83,36 @@ Process launches are monitored via `psutil` and desktop launcher substitution (`
 
 ## 🚀 Quick Start & Installation
 
-### Prerequisites
-- Linux Desktop Environment (GNOME, KDE Plasma, XFCE, Sway, Hyprland)
-- Python 3.11+ & Poetry
-- OpenCV & PySide6 dependencies
+### Preview the settings UI
 
-### Installation
+Use a fresh Linux desktop account or VM with Python 3.11–3.14 and Poetry.
+The settings window can open before the user service is installed. Leave the
+protected-app list empty and close the window when you're done exploring.
+
 ```bash
-# 1. Clone the repository
 git clone https://github.com/ScaraMouche-Wanderer/FaceGATE-Linux.git
 cd FaceGATE-Linux
-
-# 2. Run the automated installer
-./install.sh
+poetry install --only main
+poetry run facegate --settings
 ```
+
+### Install the user service
+
+Run these from the checkout on a desktop with a systemd user session. Start
+with a nonessential app while you try the lock and password fallback. The
+[setup guide](GUIDE.md#3-installation--systemd-daemon-management) covers service
+management, camera enrollment and launcher recovery.
+
+```bash
+./install.sh
+systemctl --user start facegate.service
+```
+
+To remove the service and restore launchers, run `./install.sh --uninstall`.
 
 ### Running Tests
 ```bash
+poetry install --with dev
 poetry run pytest tests/ -v
 ```
 
